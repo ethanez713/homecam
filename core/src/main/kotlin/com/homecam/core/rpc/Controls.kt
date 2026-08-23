@@ -55,5 +55,6 @@ object Controls {
         const val VIEWER_LIST = 0
         const val REVOKE_VIEWER = 1
         const val PAIRING_MODE = 2
+        const val ALERT_REGISTRATION = 3
     }
 }

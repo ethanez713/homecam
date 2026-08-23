@@ -1,0 +1,53 @@
+package com.homecam.app.alerts
+
+import com.homecam.app.AppGraph
+import com.homecam.proto.AlertPayload
+import kotlinx.coroutines.launch
+
+/**
+ * The camera's alert fan-out. §2.7 wants a push to **every** paired viewer when any
+ * session starts — the point being that if a device you don't recognise starts watching,
+ * your phone buzzes. Detection alerts go to the same place.
+ */
+class Alerts(private val graph: AppGraph) {
+
+    private val publisher = AlertPublisher()
+
+    fun onSessionStarted(viewerLabel: String, viewerFingerprint: String) {
+        send(sessionAlert = true) {
+            base()
+                .addLabels("session")
+                .setCameraAlias("${graph.settings.current.alias} — $viewerLabel ($viewerFingerprint)")
+                .build()
+        }
+    }
+
+    fun onDetection(labels: List<String>, clipId: String, thumbnailJpeg: ByteArray?) {
+        send(sessionAlert = false) {
+            base()
+                .addAllLabels(labels)
+                .setClipId(clipId)
+                .apply {
+                    if (thumbnailJpeg != null) {
+                        setThumbnailJpeg(com.google.protobuf.ByteString.copyFrom(thumbnailJpeg))
+                    }
+                }
+                .build()
+        }
+    }
+
+    private fun base(): AlertPayload.Builder = AlertPayload.newBuilder()
+        .setAtMs(System.currentTimeMillis())
+        .setCameraAlias(graph.settings.current.alias)
+        .setCameraFingerprint(graph.identity.identity.shortFingerprint)
+
+    private fun send(sessionAlert: Boolean, build: () -> AlertPayload) {
+        graph.scope.launch {
+            val recipients = graph.database.viewers().alertable()
+                .filter { if (sessionAlert) it.sessionAlerts else it.detectionAlerts }
+            if (recipients.isEmpty()) return@launch
+            val payload = build()
+            recipients.forEach { publisher.publish(it, payload) }
+        }
+    }
+}

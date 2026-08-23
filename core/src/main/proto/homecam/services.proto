@@ -211,6 +211,20 @@ message Viewer {
 message ViewerList { repeated Viewer viewers = 1; }
 message RevokeViewer { string fingerprint = 1; bool all = 2; bool revoked = 3; }
 
+/**
+ * How a viewer asks to be told about things. Sent over the authenticated RPC channel
+ * rather than in the handshake, so alert settings can be changed without re-pairing.
+ */
+message AlertRegistration {
+  bytes alert_public_key = 1;
+  // Random per viewer, so the push provider cannot correlate topics with anything.
+  string topic = 2;
+  string endpoint = 3;
+  bool enabled = 4;
+  bool session_alerts = 5;
+  bool detection_alerts = 6;
+}
+
 message PairingMode {
   bool active = 1;
   int64 expires_at_ms = 2;
@@ -236,4 +250,21 @@ message DetectionFrame {
   }
   int64 at_ms = 1;
   repeated Box boxes = 2;
+}
+
+// ----------------------------------------------------------------- ALERTS
+
+/**
+ * What a detection alert says, *before* encryption. This never travels in the clear: the
+ * camera seals it to the viewer's agreement key and posts only the ciphertext, so the
+ * push provider sees opaque bytes and a random topic name rather than a thumbnail of
+ * somebody's living room (§2.8).
+ */
+message AlertPayload {
+  int64 at_ms = 1;
+  string camera_alias = 2;
+  string camera_fingerprint = 3;
+  repeated string labels = 4;
+  string clip_id = 5;
+  bytes thumbnail_jpeg = 6;
 }

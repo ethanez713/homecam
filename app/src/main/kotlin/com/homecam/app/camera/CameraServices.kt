@@ -10,6 +10,7 @@ import com.homecam.core.rpc.RpcPeer
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import com.homecam.proto.AlertRegistration
 import com.homecam.proto.Alias
 import com.homecam.proto.Armed
 import com.homecam.proto.AuditQuery
@@ -283,6 +284,26 @@ class CameraServices(
                 )
                 .build()
                 .toByteString()
+        }
+
+        peer.register(RpcMessage.Service.ACCESS, Controls.Access.ALERT_REGISTRATION) { request ->
+            val registration = AlertRegistration.parseFrom(request.payload)
+            graph.database.viewers().setAlerts(
+                fingerprint = viewerFingerprint,
+                key = registration.alertPublicKey.toByteArray().takeIf { it.isNotEmpty() },
+                topic = registration.topic,
+                endpoint = registration.endpoint,
+                enabled = registration.enabled,
+                sessionAlerts = registration.sessionAlerts,
+                detectionAlerts = registration.detectionAlerts,
+            )
+            graph.audit.record(
+                AuditEvent.Kind.SETTINGS_CHANGED,
+                viewerFingerprint = viewerFingerprint,
+                viewerLabel = viewerLabel,
+                detail = if (registration.enabled) "alerts on" else "alerts off",
+            )
+            registration.toByteString()
         }
 
         peer.register(RpcMessage.Service.ACCESS, Controls.Access.REVOKE_VIEWER) { request ->

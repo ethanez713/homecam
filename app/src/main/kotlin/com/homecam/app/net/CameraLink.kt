@@ -5,6 +5,7 @@ import com.homecam.core.rpc.RpcPeer
 import java.io.File
 import com.homecam.proto.Alias
 import com.homecam.proto.Armed
+import com.homecam.proto.AlertRegistration
 import com.homecam.proto.AuditQuery
 import com.homecam.proto.ClipData
 import com.homecam.proto.ClipDelete
@@ -73,6 +74,34 @@ class CameraLink(private val peer: RpcPeer) {
                 .toByteString(),
         )
     )
+
+    /**
+     * Alerts are off until this says otherwise (§2.9). The camera stores the public key
+     * and topic; it never learns the private half, so it can address this phone without
+     * being able to read what it sends.
+     */
+    suspend fun registerAlerts(
+        alertPublicKey: ByteArray,
+        topic: String,
+        endpoint: String,
+        enabled: Boolean,
+        sessionAlerts: Boolean = true,
+        detectionAlerts: Boolean = true,
+    ) {
+        peer.request(
+            RpcMessage.Service.ACCESS,
+            Controls.Access.ALERT_REGISTRATION,
+            AlertRegistration.newBuilder()
+                .setAlertPublicKey(com.google.protobuf.ByteString.copyFrom(alertPublicKey))
+                .setTopic(topic)
+                .setEndpoint(endpoint)
+                .setEnabled(enabled)
+                .setSessionAlerts(sessionAlerts)
+                .setDetectionAlerts(detectionAlerts)
+                .build()
+                .toByteString(),
+        )
+    }
 
     suspend fun viewers(): ViewerList =
         ViewerList.parseFrom(peer.request(RpcMessage.Service.ACCESS, Controls.Access.VIEWER_LIST))

@@ -12,6 +12,13 @@ data class ViewerEntity(
     val label: String,
     val pairedAtMs: Long,
     val lastSeenMs: Long,
+    /** Null until the viewer registers for alerts; alerts are off by default (§2.9). */
+    val alertPublicKey: ByteArray? = null,
+    val alertTopic: String = "",
+    val alertEndpoint: String = "",
+    val alertsEnabled: Boolean = false,
+    val sessionAlerts: Boolean = true,
+    val detectionAlerts: Boolean = true,
 ) {
     override fun equals(other: Any?) = other is ViewerEntity && other.fingerprint == fingerprint
     override fun hashCode() = fingerprint.hashCode()
@@ -28,6 +35,13 @@ data class CameraEntity(
     val alias: String,
     val lastHost: String,
     val lastPort: Int,
+    /**
+     * A stable address to try when the camera is not on this LAN — a Tailscale name or a
+     * static host. mDNS cannot cross a tailnet, so remote access needs an address the user
+     * supplies rather than one discovery can find (§2.9).
+     */
+    val remoteHost: String = "",
+    val remotePort: Int = 0,
     val pairedAtMs: Long,
     val lastSeenMs: Long,
 ) {

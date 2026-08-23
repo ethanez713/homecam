@@ -79,6 +79,9 @@ class ViewerNode(private val graph: AppGraph) {
 
     suspend fun byFingerprint(fingerprint: String): CameraEntity? = cameras.byFingerprint(fingerprint)
 
+    suspend fun setRemoteAddress(fingerprint: String, host: String, port: Int) =
+        cameras.setRemote(fingerprint, host.trim(), port)
+
     suspend fun seen(fingerprint: String, host: String, port: Int) =
         cameras.touch(fingerprint, host, port, System.currentTimeMillis())
 
@@ -88,7 +91,13 @@ class ViewerNode(private val graph: AppGraph) {
      */
     suspend fun locate(camera: CameraEntity): CameraAddress? =
         CameraLocator(graph.app)
-            .locate(camera.publicKey, camera.lastHost, camera.lastPort)
+            .locate(
+                pinnedIdentitySpki = camera.publicKey,
+                lastHost = camera.lastHost,
+                lastPort = camera.lastPort,
+                remoteHost = camera.remoteHost,
+                remotePort = camera.remotePort,
+            )
             ?.also { seen(camera.fingerprint, it.host, it.port) }
 
     /** Opens an authenticated signaling connection to a camera that is already paired. */

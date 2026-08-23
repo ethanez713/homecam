@@ -34,6 +34,10 @@ fun CameraSettingsScreen(
     onAlias: (String) -> Unit,
     onMicrophone: (Boolean) -> Unit,
     onDetectionMode: (person: Boolean, vehicle: Boolean, pet: Boolean, packages: Boolean) -> Unit,
+    alertsEnabled: Boolean,
+    onAlerts: (Boolean) -> Unit,
+    remoteAddress: String,
+    onRemoteAddress: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     if (settings == null) {
@@ -82,6 +86,33 @@ fun CameraSettingsScreen(
         }
         Toggle("Packages", null, mode.getPackage()) {
             onDetectionMode(mode.person, mode.vehicle, mode.pet, it)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text("Alerts", style = MaterialTheme.typography.titleMedium)
+        Toggle(
+            "Push alerts",
+            "The camera encrypts each alert to this phone and posts only ciphertext. " +
+                "The push provider sees opaque bytes and a random topic.",
+            alertsEnabled,
+            onAlerts,
+        )
+
+        Spacer(Modifier.height(16.dp))
+        Text("Remote access", style = MaterialTheme.typography.titleMedium)
+        var remote by remember(remoteAddress) { mutableStateOf(remoteAddress) }
+        OutlinedTextField(
+            value = remote,
+            onValueChange = { remote = it },
+            label = { Text("host or host:port") },
+            supportingText = { Text("Used when the camera is not on this network. A Tailscale name works here; mDNS does not cross a tailnet.") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { onRemoteAddress(remote) }, enabled = remote != remoteAddress) {
+                Text("Save")
+            }
         }
 
         Spacer(Modifier.height(24.dp))

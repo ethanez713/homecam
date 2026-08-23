@@ -16,6 +16,7 @@ import com.homecam.app.R
 import com.homecam.app.net.MdnsAdvertiser
 import com.homecam.app.net.Signaling
 import com.homecam.app.net.SignalingServer
+import com.homecam.app.alerts.Alerts
 import com.homecam.app.data.ClipStore
 import com.homecam.app.detect.DetectionPipeline
 import com.homecam.app.media.CameraMediaSession
@@ -50,6 +51,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private lateinit var capture: ContinuousCapture
     private lateinit var recorder: Recorder
     private lateinit var detection: DetectionPipeline
+    private lateinit var alerts: Alerts
 
     /**
      * At most one media session at a time, and the newest wins. A camera that answers
@@ -81,7 +83,12 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         detection = DetectionPipeline(
             context = this,
             settings = { graph.settings.current },
-            onEvent = { recorder.onDetection(it, System.currentTimeMillis()) },
+            onEvent = { detections ->
+                recorder.onDetection(detections, System.currentTimeMillis())
+                if (detections.isNotEmpty()) {
+                    alerts.onDetection(detections.map { it.category }, clipId = "", thumbnailJpeg = null)
+                }
+            },
         ).also { capture.addSink(it) }
         startClipRollover()
 
@@ -91,6 +98,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             it.clipStore = recorder.clips
             it.start()
         }
+        alerts = Alerts(graph)
         ClipPruneWorker.schedule(this)
         observeArming()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
@@ -225,6 +233,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         live = LiveSession(peer, media)
         media.start()
         showLive(peer.label)
+        alerts.onSessionStarted(peer.label, viewerFingerprint)
 
         graph.audit.record(
             AuditEvent.Kind.SESSION_OPENED,

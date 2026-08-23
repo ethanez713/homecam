@@ -19,6 +19,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.homecam.app.AppGraph
+import com.homecam.app.alerts.AlertKeys
+import com.homecam.app.alerts.AlertPreferences
+import com.homecam.app.alerts.AlertSubscriber
 import com.homecam.app.camera.ui.AuditScreen
 import com.homecam.app.data.CameraEntity
 import com.homecam.app.viewer.ui.CameraSettingsScreen
@@ -59,6 +62,15 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
     var torch by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
     var mic by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
     var zoom by remember(camera.fingerprint, attempt) { mutableFloatStateOf(0f) }
+    val alertKeys = remember { AlertKeys(context) }
+    var alertsOn by remember { mutableStateOf(AlertPreferences.enabled(context)) }
+    var remoteAddress by remember(camera.fingerprint) {
+        mutableStateOf(
+            if (camera.remoteHost.isBlank()) ""
+            else if (camera.remotePort > 0) "${camera.remoteHost}:${camera.remotePort}"
+            else camera.remoteHost
+        )
+    }
 
     DisposableEffect(session) { onDispose { session?.close() } }
 
@@ -169,6 +181,27 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     edit(scope, open) {
                         settings = it.link.setDetectionMode(person, vehicle, pet, packages)
                     }
+                },
+                alertsEnabled = alertsOn,
+                onAlerts = { on ->
+                    alertsOn = on
+                    edit(scope, open) {
+                        it.link.registerAlerts(
+                            alertPublicKey = alertKeys.publicKeySpki,
+                            topic = alertKeys.topic(context),
+                            endpoint = AlertSubscriber.endpointOf(context),
+                            enabled = on,
+                        )
+                        AlertPreferences.setEnabled(context, on)
+                        if (on) AlertSubscriber.start(context) else AlertSubscriber.stop(context)
+                    }
+                },
+                remoteAddress = remoteAddress,
+                onRemoteAddress = { entered ->
+                    val host = entered.substringBefore(':').trim()
+                    val port = entered.substringAfter(':', "").toIntOrNull() ?: 0
+                    remoteAddress = entered
+                    scope.launch { node.setRemoteAddress(camera.fingerprint, host, port) }
                 },
                 onBack = { tab = CameraTab.LIVE },
             )

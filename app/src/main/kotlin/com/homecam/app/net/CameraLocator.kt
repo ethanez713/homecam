@@ -19,22 +19,36 @@ data class CameraAddress(val host: String, val port: Int)
  */
 class CameraLocator(private val context: Context) {
 
+    /**
+     * Tried in order of how likely each is to be both correct and cheap: the address that
+     * worked last time, then whatever is on this LAN, then the remote address the user
+     * configured. The remote one goes last because on a tailnet it will often succeed from
+     * the sofa too, and routing local traffic over an overlay for no reason is a
+     * needlessly slow way to be right.
+     */
     suspend fun locate(
         pinnedIdentitySpki: ByteArray,
         lastHost: String,
         lastPort: Int,
+        remoteHost: String = "",
+        remotePort: Int = 0,
         discoveryTimeoutMs: Long = DISCOVERY_TIMEOUT_MS,
     ): CameraAddress? {
         if (lastHost.isNotBlank() && probe(lastHost, lastPort, pinnedIdentitySpki)) {
             return CameraAddress(lastHost, lastPort)
         }
+
         val discovered = withTimeoutOrNull(discoveryTimeoutMs) {
             MdnsDiscovery(context).discover().take(MAX_CANDIDATES).toList()
         }.orEmpty()
+        discovered.firstOrNull { probe(it.host, it.port, pinnedIdentitySpki) }
+            ?.let { return CameraAddress(it.host, it.port) }
 
-        return discovered
-            .firstOrNull { probe(it.host, it.port, pinnedIdentitySpki) }
-            ?.let { CameraAddress(it.host, it.port) }
+        if (remoteHost.isNotBlank()) {
+            val port = remotePort.takeIf { it > 0 } ?: Signaling.DEFAULT_PORT
+            if (probe(remoteHost, port, pinnedIdentitySpki)) return CameraAddress(remoteHost, port)
+        }
+        return null
     }
 
     /**

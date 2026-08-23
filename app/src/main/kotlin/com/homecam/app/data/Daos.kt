@@ -17,6 +17,21 @@ interface ViewerDao {
     @Query("DELETE FROM viewers WHERE fingerprint = :fingerprint") suspend fun delete(fingerprint: String)
     @Query("DELETE FROM viewers") suspend fun deleteAll()
     @Query("UPDATE viewers SET lastSeenMs = :atMs WHERE fingerprint = :fingerprint") suspend fun touch(fingerprint: String, atMs: Long)
+    @Query("SELECT * FROM viewers WHERE alertsEnabled = 1 AND alertTopic != ''") suspend fun alertable(): List<ViewerEntity>
+    @Query(
+        "UPDATE viewers SET alertPublicKey = :key, alertTopic = :topic, alertEndpoint = :endpoint, " +
+            "alertsEnabled = :enabled, sessionAlerts = :sessionAlerts, detectionAlerts = :detectionAlerts " +
+            "WHERE fingerprint = :fingerprint"
+    )
+    suspend fun setAlerts(
+        fingerprint: String,
+        key: ByteArray?,
+        topic: String,
+        endpoint: String,
+        enabled: Boolean,
+        sessionAlerts: Boolean,
+        detectionAlerts: Boolean,
+    )
 }
 
 @Dao
@@ -28,6 +43,8 @@ interface CameraDao {
     @Query("DELETE FROM cameras WHERE fingerprint = :fingerprint") suspend fun delete(fingerprint: String)
     @Query("UPDATE cameras SET lastHost = :host, lastPort = :port, lastSeenMs = :atMs WHERE fingerprint = :fingerprint")
     suspend fun touch(fingerprint: String, host: String, port: Int, atMs: Long)
+    @Query("UPDATE cameras SET remoteHost = :host, remotePort = :port WHERE fingerprint = :fingerprint")
+    suspend fun setRemote(fingerprint: String, host: String, port: Int)
 }
 
 @Dao
