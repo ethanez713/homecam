@@ -1,0 +1,219 @@
+syntax = "proto3";
+
+package homecam;
+
+option java_package = "com.homecam.proto";
+option java_multiple_files = true;
+
+// ---------------------------------------------------------------- SESSION (1)
+
+message SessionConfig {
+  enum Mode {
+    LIVE = 0;
+    AUDIO_ONLY = 1;
+    LOW_BANDWIDTH = 2;
+  }
+  bool video = 1;
+  bool audio = 2;
+  Mode mode = 3;
+}
+
+message PushToTalk { bool active = 1; }
+message ManualRecord { bool recording = 1; uint32 seconds = 2; }
+message Torch { bool on = 1; }
+message Orientation { uint32 degrees = 1; }
+message Resolution { uint32 width = 1; uint32 height = 2; uint32 fps = 3; }
+message Zoom { float ratio = 1; }
+message Lens { enum Facing { BACK = 0; FRONT = 1; } Facing facing = 1; }
+
+// --------------------------------------------------------------- SETTINGS (2)
+
+message SettingsSnapshot {
+  bool armed = 1;
+  string alias = 2;
+  bool microphone = 3;
+  bool low_light = 4;
+  DetectionMode detection_mode = 16;
+  DetectionSchedule detection_schedule = 17;
+  DetectionZone detection_zone = 18;
+  PrivacyMask privacy_mask = 19;
+  bool bounding_box_overlay = 22;
+  RetentionPolicy retention = 32;
+}
+
+message Armed { bool armed = 1; }
+message Alias { string alias = 1; }
+message Microphone { bool enabled = 1; }
+message LowLight { bool enabled = 1; }
+
+message DetectionMode {
+  bool person = 1;
+  bool vehicle = 2;
+  bool pet = 3;
+  bool package = 4;
+  bool motion_only = 5;
+  float min_confidence = 6;
+}
+
+message DetectionSchedule {
+  message Window {
+    // Minutes past local midnight.
+    uint32 start_minute = 1;
+    uint32 end_minute = 2;
+    // Bit 0 = Monday .. bit 6 = Sunday.
+    uint32 days_mask = 3;
+  }
+  bool enabled = 1;
+  repeated Window windows = 2;
+}
+
+message Point { float x = 1; float y = 2; }
+
+// Normalised polygon; detection runs only inside it.
+message DetectionZone { repeated Point points = 1; bool enabled = 2; }
+
+// Normalised rectangles blanked in the frame before it reaches the encoder, so
+// masked areas exist in neither the live stream nor the recording (§2.8).
+message PrivacyMask {
+  message Rect { float left = 1; float top = 2; float right = 3; float bottom = 4; }
+  repeated Rect rects = 1;
+}
+
+message BoundingBoxOverlay { bool enabled = 1; }
+
+message RetentionPolicy {
+  uint32 max_age_days = 1;
+  uint32 max_size_gb = 2;
+  uint32 min_free_space_gb = 3;
+}
+
+// ----------------------------------------------------------------- STATUS (3)
+
+message RuntimeStatus {
+  float battery_percent = 1;
+  bool charging = 2;
+  float battery_temp_c = 3;
+  int64 free_bytes = 4;
+  int64 clip_bytes = 5;
+  float capture_fps = 6;
+  int64 uptime_ms = 7;
+  bool armed = 8;
+  uint32 viewers_with_access = 9;
+  string camera_alias = 10;
+  float detector_fps = 11;
+  bool thermal_throttled = 12;
+}
+
+message SessionStatus {
+  string session_id = 1;
+  bool active = 2;
+  int64 started_at_ms = 3;
+  uint32 video_width = 4;
+  uint32 video_height = 5;
+  uint32 bitrate_kbps = 6;
+  uint32 rtt_ms = 7;
+  uint32 packets_lost = 8;
+}
+
+// ------------------------------------------------------------------ MEDIA (4)
+
+message Clip {
+  string id = 1;
+  int64 started_at_ms = 2;
+  uint32 duration_ms = 3;
+  int64 size_bytes = 4;
+  bool pinned = 5;
+  repeated string labels = 6;
+  uint32 width = 7;
+  uint32 height = 8;
+  bool has_audio = 9;
+}
+
+message ClipList {
+  // Request fields.
+  int64 since_ms = 1;
+  int64 until_ms = 2;
+  uint32 limit = 3;
+  // Response field.
+  repeated Clip clips = 4;
+}
+
+message ClipDelete { string id = 1; bool deleted = 2; }
+message Thumbnail { string clip_id = 1; bytes jpeg = 2; }
+message ClipData { string clip_id = 1; int64 offset = 2; bytes chunk = 3; bool eof = 4; }
+message DateList { repeated string dates = 1; repeated uint32 counts = 2; }
+
+message TimelineQuery {
+  int64 since_ms = 1;
+  int64 until_ms = 2;
+  message Entry { int64 at_ms = 1; string clip_id = 2; string label = 3; }
+  repeated Entry entries = 3;
+}
+
+message ClipPin { string id = 1; bool pinned = 2; }
+
+// ------------------------------------------------------------------ AUDIT (5)
+
+message AuditEvent {
+  enum Kind {
+    UNSPECIFIED = 0;
+    SESSION_OPENED = 1;
+    SESSION_CLOSED = 2;
+    CLIP_VIEWED = 3;
+    CLIP_DELETED = 4;
+    SETTINGS_CHANGED = 5;
+    PRIVACY_MASK_EDITED = 6;
+    PAIRING_STARTED = 7;
+    PAIRING_COMPLETED = 8;
+    PAIRING_EXPIRED = 9;
+    VIEWER_REVOKED = 10;
+    CONNECTION_REJECTED = 11;
+    FINGERPRINT_MISMATCH = 12;
+    CAMERA_STARTED = 13;
+    CAMERA_STOPPED = 14;
+    DETECTION = 15;
+  }
+  uint64 seq = 1;
+  int64 at_ms = 2;
+  Kind kind = 3;
+  string viewer_fingerprint = 4;
+  string viewer_label = 5;
+  string source_ip = 6;
+  string detail = 7;
+  // SHA-256 over (previous entry hash || this entry's canonical bytes). Editing
+  // or deleting a row breaks the chain from that point on (§2.7).
+  bytes chain_hash = 8;
+  bytes prev_hash = 9;
+}
+
+message AuditQuery {
+  int64 since_ms = 1;
+  int64 until_ms = 2;
+  uint32 limit = 3;
+  repeated AuditEvent.Kind kinds = 4;
+  repeated AuditEvent events = 5;
+  bool chain_valid = 6;
+  uint64 first_broken_seq = 7;
+}
+
+// ----------------------------------------------------------------- ACCESS (6)
+
+message Viewer {
+  bytes public_key = 1;
+  string fingerprint = 2;
+  string label = 3;
+  int64 paired_at_ms = 4;
+  int64 last_seen_ms = 5;
+  uint32 sessions_30d = 6;
+  bool online = 7;
+}
+
+message ViewerList { repeated Viewer viewers = 1; }
+message RevokeViewer { string fingerprint = 1; bool all = 2; bool revoked = 3; }
+
+message PairingMode {
+  bool active = 1;
+  int64 expires_at_ms = 2;
+  // Only ever sent camera->camera-UI; never over the wire to a viewer.
+  bytes invite = 3;
+}

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nothing this app holds should ever leave the device in a backup: the identity key is
+     non-exportable anyway, and the allowlist, audit log and clips are the private state
+     the whole design exists to protect. -->
+<data-extraction-rules>
+    <cloud-backup><exclude domain="root" /></cloud-backup>
+    <device-transfer><exclude domain="root" /></device-transfer>
+</data-extraction-rules>

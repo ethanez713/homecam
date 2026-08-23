@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package homecam;
+
+option java_package = "com.homecam.proto";
+option java_multiple_files = true;
+
+// Signaling plane, spoken over the camera's TLS-pinned WebSocket. See §4.1.
+message SignalMessage {
+  oneof body {
+    Hello hello = 1;
+    Challenge challenge = 2;
+    Auth auth = 3;
+    AuthResult auth_result = 4;
+    Presence presence = 5;
+    Sdp offer = 6;
+    Sdp answer = 7;
+    Candidate candidate = 8;
+    Bye bye = 9;
+  }
+}
+
+message Hello {
+  // X.509 SubjectPublicKeyInfo of the viewer's identity key.
+  bytes viewer_public_key = 1;
+  bytes viewer_nonce = 2;
+  uint32 protocol_version = 3;
+  // Marks this as a pairing handshake. The one-time token itself is never transmitted:
+  // the viewer proves possession by signing a transcript that binds it (§2.3).
+  bool pairing = 4;
+}
+
+message Challenge {
+  bytes camera_public_key = 1;
+  bytes camera_nonce = 2;
+  // Signature by the camera identity key over the transcript.
+  bytes signature = 3;
+}
+
+message Auth {
+  // Signature by the viewer identity key over the transcript.
+  bytes signature = 1;
+  string device_label = 2;
+}
+
+message AuthResult {
+  bool ok = 1;
+  Bye.Reason reason = 2;
+  // Short verification phrase derived from both public keys; shown on both ends.
+  string verification_phrase = 3;
+}
+
+message Presence {
+  enum State {
+    OFFLINE = 0;
+    AVAILABLE = 1;
+    BUSY = 2;
+    DISABLED = 3;
+  }
+  State state = 1;
+  string camera_alias = 2;
+}
+
+message Sdp {
+  string sdp = 1;
+  // The DTLS fingerprint the sender commits to over this authenticated channel.
+  // The fingerprint parsed out of `sdp` must equal this or the session is torn
+  // down — authenticating signaling alone does not protect the media path (§2.5).
+  string dtls_fingerprint = 2;
+  string session_id = 3;
+}
+
+message Candidate {
+  string sdp_mid = 1;
+  int32 sdp_m_line_index = 2;
+  string candidate = 3;
+}
+
+message Bye {
+  // Product-level rather than transport-level, which is what makes the message
+  // shown to the user useful.
+  enum Reason {
+    UNSPECIFIED = 0;
+    HANGUP = 1;
+    CAMERA_DISABLED = 2;
+    CAMERA_BUSY = 3;
+    NO_FRAME = 4;
+    ACCESS_DENIED = 5;
+    SESSION_REPLACED = 6;
+    INCOMPATIBLE = 7;
+    AUTH_FAILED = 8;
+    FINGERPRINT_MISMATCH = 9;
+    PAIRING_EXPIRED = 10;
+    REVOKED = 11;
+  }
+  Reason reason = 1;
+  string detail = 2;
+}

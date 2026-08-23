@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package homecam;
+
+option java_package = "com.homecam.proto";
+option java_multiple_files = true;
+
+// Contents of the pairing QR. Base64url-encoded so it fits a QR comfortably.
+message PairingInvite {
+  uint32 version = 1;
+  bytes camera_public_key = 2;
+  // SHA-256 of the camera's self-signed TLS certificate (DER), pinned by the
+  // viewer at pairing time and checked on every connection thereafter.
+  bytes cert_fingerprint = 3;
+  string host = 4;
+  uint32 port = 5;
+  bytes token = 6;
+  // Wall-clock ms at which the token stops being accepted.
+  int64 expires_at_ms = 7;
+  string camera_alias = 8;
+}
