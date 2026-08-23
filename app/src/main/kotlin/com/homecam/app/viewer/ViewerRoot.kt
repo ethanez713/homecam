@@ -18,6 +18,8 @@ import com.homecam.app.viewer.ui.PairConfirmScreen
 import com.homecam.app.viewer.ui.PairState
 import com.homecam.app.viewer.ui.ScanScreen
 import com.homecam.app.viewer.ui.ViewerHomeScreen
+import com.homecam.app.ui.NetworkActivityScreen
+import com.homecam.app.ui.viewerEgress
 import com.homecam.core.audit.AuditChain
 import com.homecam.proto.PairingInvite
 import kotlinx.coroutines.launch
@@ -28,6 +30,7 @@ private sealed interface ViewerScreen {
     data class Pairing(val invite: PairingInvite) : ViewerScreen
     data class Live(val camera: CameraEntity) : ViewerScreen
     data object Log : ViewerScreen
+    data object Network : ViewerScreen
 }
 
 @Composable
@@ -47,6 +50,7 @@ fun ViewerRoot() {
             onOpen = { screen = ViewerScreen.Live(it) },
             onForget = { scope.launch { node.forget(it) } },
             onLog = { screen = ViewerScreen.Log },
+            onNetwork = { screen = ViewerScreen.Network },
         )
 
         ViewerScreen.Scan -> ScanScreen { invite -> screen = ViewerScreen.Pairing(invite) }
@@ -82,6 +86,14 @@ fun ViewerRoot() {
             node = node,
             camera = current.camera,
             onExit = { screen = ViewerScreen.Home },
+        )
+
+        ViewerScreen.Network -> NetworkActivityScreen(
+            entries = viewerEgress(
+                alertsEnabled = com.homecam.app.alerts.AlertPreferences.enabled(context),
+                alertEndpoint = com.homecam.app.alerts.AlertSubscriber.endpointOf(context),
+            ),
+            onBack = { screen = ViewerScreen.Home },
         )
 
         ViewerScreen.Log -> {

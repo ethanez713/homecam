@@ -30,6 +30,7 @@ fun ViewerHomeScreen(
     onOpen: (CameraEntity) -> Unit,
     onForget: (String) -> Unit,
     onLog: () -> Unit,
+    onNetwork: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("Cameras", style = MaterialTheme.typography.headlineMedium)
@@ -75,5 +76,6 @@ fun ViewerHomeScreen(
         Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Text("Add a camera") }
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = onLog, modifier = Modifier.fillMaxWidth()) { Text("Access log") }
+        TextButton(onClick = onNetwork, modifier = Modifier.fillMaxWidth()) { Text("Network activity") }
     }
 }

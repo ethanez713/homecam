@@ -99,3 +99,22 @@ encoder and its own bitrate.
 
 Both encoders read the same masked frames from the same capture, so the privacy mask and
 the camera controls apply identically to each.
+
+## D7 — The audit log keeps a tail marker outside the database
+
+§2.7's hash chain detects an edited or deleted row, and the instrumented test written to
+prove it found the gap: **deleting the last row leaves a chain that verifies perfectly.**
+A chain proves nothing about entries that were never there.
+
+That is not a corner case. The last row is `CONNECTION_REJECTED` for somebody who was just
+refused, or `SESSION_OPENED` for somebody who just looked — truncation is the natural
+attack, not an exotic one.
+
+So `AuditLog` also writes `{seq, chainHash}` to `audit-head.bin` in app-private storage
+after every append, and `verify()` reports a log shorter than its own marker as tampering
+rather than as a short history. It is defence in depth rather than a proof — somebody who
+can rewrite the database can rewrite the file next to it — but it turns a silent,
+single-statement truncation into one that has to know about and match a second artifact.
+
+Covered by `AuditTamperTest` on device, which deletes from the middle, deletes the tail,
+and empties the table.

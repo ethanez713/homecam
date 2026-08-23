@@ -10,6 +10,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         applicationId = "com.homecam.app"
         minSdk = 26
         targetSdk = 35
@@ -46,6 +47,7 @@ android {
     }
 
     sourceSets["main"].kotlin.srcDir("src/main/kotlin")
+    sourceSets["androidTest"].kotlin.srcDir("src/androidTest/kotlin")
 }
 
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
@@ -92,5 +94,8 @@ dependencies {
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.test.espresso.core)
 }

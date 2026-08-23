@@ -37,6 +37,7 @@ fun CameraHomeScreen(
     onManage: () -> Unit,
     onPair: () -> Unit,
     onLog: () -> Unit,
+    onNetwork: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         if (liveViewerLabel != null) {
@@ -94,6 +95,9 @@ fun CameraHomeScreen(
             }
             OutlinedButton(onClick = onLog, modifier = Modifier.fillMaxWidth()) {
                 Text("Access log")
+            }
+            OutlinedButton(onClick = onNetwork, modifier = Modifier.fillMaxWidth()) {
+                Text("Network activity")
             }
         }
 

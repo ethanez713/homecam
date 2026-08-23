@@ -43,6 +43,8 @@ class CameraMediaSession(
     private var videoTrack: VideoTrack? = null
     private var audioTrack: AudioTrack? = null
     private var closed = false
+    private var lastBytesSent = 0L
+    private var lastStatsAtMs = 0L
 
     fun start() {
         val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
@@ -133,6 +135,53 @@ class CameraMediaSession(
             else -> transport.tearDown(Bye.Reason.FINGERPRINT_MISMATCH, result.name)
         }
     }
+
+    /**
+     * Live transport numbers, straight from libwebrtc. Worth surfacing because "the video
+     * is choppy" and "the camera is thermally throttled" look identical from the sofa and
+     * are fixed by completely different things.
+     */
+    fun stats(onStats: (Stats) -> Unit) {
+        val connection = connection ?: return onStats(Stats())
+        connection.getStats { report ->
+            var bitrateKbps = 0
+            var rttMs = 0
+            var packetsLost = 0
+            var width = 0
+            var height = 0
+
+            report.statsMap.values.forEach { entry ->
+                when (entry.type) {
+                    "outbound-rtp" -> {
+                        (entry.members["frameWidth"] as? Long)?.let { width = it.toInt() }
+                        (entry.members["frameHeight"] as? Long)?.let { height = it.toInt() }
+                        (entry.members["bytesSent"] as? java.math.BigInteger)?.let {
+                            val now = System.currentTimeMillis()
+                            val elapsed = (now - lastStatsAtMs).coerceAtLeast(1)
+                            if (lastStatsAtMs > 0) {
+                                bitrateKbps = ((it.toLong() - lastBytesSent) * 8 / elapsed).toInt()
+                            }
+                            lastBytesSent = it.toLong()
+                            lastStatsAtMs = now
+                        }
+                    }
+                    "remote-inbound-rtp" -> {
+                        (entry.members["roundTripTime"] as? Double)?.let { rttMs = (it * 1000).toInt() }
+                        (entry.members["packetsLost"] as? Int)?.let { packetsLost = it }
+                    }
+                }
+            }
+            onStats(Stats(bitrateKbps, rttMs, packetsLost, width, height))
+        }
+    }
+
+    data class Stats(
+        val bitrateKbps: Int = 0,
+        val rttMs: Int = 0,
+        val packetsLost: Int = 0,
+        val width: Int = 0,
+        val height: Int = 0,
+    )
 
     fun onCandidate(candidate: Candidate) {
         connection?.addIceCandidate(

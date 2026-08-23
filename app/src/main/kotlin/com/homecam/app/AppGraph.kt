@@ -20,7 +20,7 @@ class AppGraph private constructor(context: Context) {
     val app: Context = context.applicationContext
     val identity: DeviceIdentity = DeviceIdentity.get()
     val database: HomecamDatabase = HomecamDatabase.get(app)
-    val audit: AuditLog = AuditLog(database.audit())
+    val audit: AuditLog = AuditLog(database.audit(), java.io.File(app.filesDir, "audit-head.bin"))
     val settings: SettingsStore = SettingsStore(app)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 

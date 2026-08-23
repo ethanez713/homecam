@@ -15,11 +15,13 @@ import com.homecam.app.camera.ui.AuditScreen
 import com.homecam.app.camera.ui.CameraHomeScreen
 import com.homecam.app.camera.ui.PairingScreen
 import com.homecam.app.camera.ui.RosterScreen
+import com.homecam.app.ui.NetworkActivityScreen
 import com.homecam.app.ui.PermissionGate
+import com.homecam.app.ui.cameraEgress
 import com.homecam.core.audit.AuditChain
 import kotlinx.coroutines.launch
 
-private enum class CameraScreen { HOME, ROSTER, PAIRING, LOG }
+private enum class CameraScreen { HOME, ROSTER, PAIRING, LOG, NETWORK }
 
 @Composable
 fun CameraRoot() {
@@ -69,6 +71,7 @@ private fun CameraContent() {
             onManage = { screen = CameraScreen.ROSTER },
             onPair = { screen = CameraScreen.PAIRING },
             onLog = { screen = CameraScreen.LOG },
+            onNetwork = { screen = CameraScreen.NETWORK },
         )
 
         CameraScreen.ROSTER -> RosterScreen(
@@ -85,6 +88,19 @@ private fun CameraContent() {
             onCancel = { node.cancelPairing(); screen = CameraScreen.HOME },
             onDone = { node.acknowledgePhrase(); screen = CameraScreen.HOME },
         )
+
+        CameraScreen.NETWORK -> {
+            val alertable by produceState(0, roster.size) {
+                value = graph.database.viewers().alertable().size
+            }
+            NetworkActivityScreen(
+                entries = cameraEgress(
+                    alertsRegistered = alertable > 0,
+                    alertEndpoint = roster.firstOrNull { it.alertsEnabled }?.alertEndpoint.orEmpty(),
+                ),
+                onBack = { screen = CameraScreen.HOME },
+            )
+        }
 
         CameraScreen.LOG -> {
             val events by graph.audit.observeRecent().collectAsState(emptyList())

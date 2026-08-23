@@ -254,12 +254,22 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     override suspend fun sessionStatus(viewerFingerprint: String): SessionStatus {
         val current = live?.takeIf { it.peer.viewer?.shortFingerprint == viewerFingerprint }
             ?: return SessionStatus.getDefaultInstance()
+
+        val stats = kotlinx.coroutines.withTimeoutOrNull(STATS_TIMEOUT_MS) {
+            kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                current.media.stats { continuation.resume(it) { _, _, _ -> } }
+            }
+        } ?: CameraMediaSession.Stats()
+
         return SessionStatus.newBuilder()
             .setSessionId(current.media.id)
             .setActive(true)
             .setStartedAtMs(current.startedAtMs)
-            .setVideoWidth(capture.format.width)
-            .setVideoHeight(capture.format.height)
+            .setVideoWidth(stats.width.takeIf { it > 0 } ?: capture.format.width)
+            .setVideoHeight(stats.height.takeIf { it > 0 } ?: capture.format.height)
+            .setBitrateKbps(stats.bitrateKbps)
+            .setRttMs(stats.rttMs)
+            .setPacketsLost(stats.packetsLost)
             .build()
     }
 
@@ -342,6 +352,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         private const val TAG = "CameraService"
         private const val CHANNEL_ID = "homecam.camera"
         private const val ROLLOVER_TICK_MS = 2_000L
+        private const val STATS_TIMEOUT_MS = 2_000L
         private const val NOTIFICATION_ID = 1
         private const val SHUTDOWN_GRACE_MS = 1_000
 
