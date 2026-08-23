@@ -60,3 +60,21 @@ exist until TLS has completed.
 
 Dropping the field also takes the invite from ~280 to ~245 characters, back inside a
 version-10 QR.
+
+## D5 — RPC rides the signaling channel, and the DataChannel when one exists
+
+`PLAN.md` §4.2 puts the RPC envelope on the WebRTC DataChannel. Here it goes over
+whichever of the two authenticated transports is available, preferring the DataChannel
+when a media session is up.
+
+Alfred puts RPC on the DataChannel because its signaling is a cloud relay it does not want
+to route control traffic through. Ours is a direct, pinned, mutually authenticated
+WebSocket to the camera itself — so the reason does not carry over, and insisting on the
+DataChannel would mean **spinning up a peer connection and a media session to read the
+battery level or the access roster**. Browsing clips or checking who has access should not
+cost a camera wakeup and an H.264 encode.
+
+The DataChannel is still preferred whenever it is open, because when a media session is
+running it is the path that survives NAT traversal without the WebSocket needing its own.
+Both feed one `RpcPeer` with one registry and one dispatcher; which socket the bytes leave
+by is a transport detail, not a second protocol.

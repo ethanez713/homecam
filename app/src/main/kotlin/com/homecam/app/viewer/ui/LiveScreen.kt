@@ -21,8 +21,37 @@ import com.homecam.proto.Presence
 sealed interface LiveState {
     data class Locating(val alias: String) : LiveState
     data class Connecting(val host: String, val port: Int) : LiveState
-    data class Connected(val phrase: String, val presence: Presence?) : LiveState
+    data class Connected(
+        val phrase: String,
+        val presence: Presence?,
+        val status: com.homecam.proto.RuntimeStatus?,
+    ) : LiveState
     data class Failed(val message: String) : LiveState
+}
+
+@Composable
+private fun StatusReadout(status: com.homecam.proto.RuntimeStatus) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            "%.0f%% battery%s · %.1f°C".format(
+                status.batteryPercent,
+                if (status.charging) " (charging)" else "",
+                status.batteryTempC,
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            "${com.homecam.app.ui.formatBytes(status.freeBytes)} free · " +
+                "${com.homecam.app.ui.formatBytes(status.clipBytes)} of clips",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            "up ${com.homecam.app.ui.formatDuration(status.uptimeMs)} · " +
+                "${status.viewersWithAccess} with access · " +
+                if (status.armed) "armed" else "not armed",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
 }
 
 @Composable
@@ -65,11 +94,7 @@ fun LiveScreen(state: LiveState, onBack: () -> Unit, onRetry: () -> Unit) {
                         .copy(fontFamily = FontFamily.Monospace),
                 )
                 Spacer(Modifier.height(24.dp))
-                Text(
-                    "Live video arrives at M4; the authenticated channel it rides on is here.",
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                )
+                state.status?.let { StatusReadout(it) }
             }
 
             is LiveState.Failed -> {

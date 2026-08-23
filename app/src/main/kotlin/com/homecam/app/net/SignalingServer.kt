@@ -3,12 +3,16 @@ package com.homecam.app.net
 import android.util.Log
 import com.homecam.app.AppGraph
 import com.homecam.app.camera.CameraNode
+import com.homecam.app.camera.CameraServices
+import com.homecam.app.camera.RuntimeStatusProvider
+import com.homecam.core.rpc.RpcPeer
 import com.homecam.core.crypto.IdentityKey
 import com.homecam.core.signaling.CameraHandshake
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
 import com.homecam.proto.Presence
+import com.homecam.proto.RpcMessage
 import com.homecam.proto.Sdp
 import com.homecam.proto.SignalMessage
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +51,8 @@ class SignalingServer(
 
     var listener: Listener? = null
 
+    val statusProvider = RuntimeStatusProvider(graph, node)
+
     /**
      * One authenticated (or still-authenticating) connection. Messages are drained by a
      * single consumer coroutine so that handling stays in arrival order — a handshake
@@ -77,6 +83,20 @@ class SignalingServer(
         var committedDtlsFingerprint: String? = null
 
         val openedAtMs: Long = System.currentTimeMillis()
+
+        /**
+         * Control RPC for this connection. `send` goes out over the DataChannel once one
+         * is open and over this WebSocket until then, so reading status or the roster
+         * never requires a media session (docs/DECISIONS.md D5).
+         */
+        val rpc: RpcPeer = RpcPeer { message ->
+            val channel = dataChannelSender
+            if (channel != null) channel(message)
+            else send(SignalMessage.newBuilder().setRpc(message).build())
+        }
+
+        /** Set by the WebRTC layer at M4 once a DataChannel is open. */
+        @Volatile var dataChannelSender: (suspend (RpcMessage) -> Unit)? = null
 
         internal val inbox = Channel<SignalMessage>(Channel.UNLIMITED)
         internal var pump: Job? = null
@@ -161,6 +181,7 @@ class SignalingServer(
     override fun onClose(conn: WebSocket, code: Int, reason: String?, remote: Boolean) {
         val session = sessions.remove(conn) ?: return
         session.inbox.close()
+        scope.launch { session.rpc.failAllPending("signaling channel closed") }
         session.pump?.cancel()
         if (session.authenticated) {
             listener?.onClosed(session, Bye.Reason.HANGUP)
@@ -190,6 +211,7 @@ class SignalingServer(
             SignalMessage.BodyCase.OFFER -> ifAuthenticated(session) { listener?.onOffer(it, message.offer) }
             SignalMessage.BodyCase.ANSWER -> ifAuthenticated(session) { listener?.onAnswer(it, message.answer) }
             SignalMessage.BodyCase.CANDIDATE -> ifAuthenticated(session) { listener?.onCandidate(it, message.candidate) }
+            SignalMessage.BodyCase.RPC -> ifAuthenticated(session) { it.rpc.onMessage(message.rpc) }
             SignalMessage.BodyCase.BYE -> session.socket.close()
             // An unknown body from a newer viewer degrades rather than erroring (§4.2).
             else -> Unit
@@ -233,6 +255,13 @@ class SignalingServer(
                         )
                         .build()
                 )
+                CameraServices(
+                    graph = graph,
+                    node = node,
+                    status = statusProvider,
+                    viewerLabel = outcome.label,
+                    viewerFingerprint = outcome.viewer.shortFingerprint,
+                ).registerOn(session.rpc)
                 listener?.onAuthenticated(session)
             }
             is CameraHandshake.Outcome.Rejected -> reject(session, outcome.reason, "auth")
@@ -240,7 +269,7 @@ class SignalingServer(
         }
     }
 
-    private inline fun ifAuthenticated(session: PeerSession, block: (PeerSession) -> Unit) {
+    private suspend inline fun ifAuthenticated(session: PeerSession, block: (PeerSession) -> Unit) {
         if (session.authenticated) block(session) else session.sendBye(Bye.Reason.ACCESS_DENIED)
     }
 

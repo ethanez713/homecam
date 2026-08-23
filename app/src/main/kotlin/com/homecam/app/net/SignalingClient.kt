@@ -4,13 +4,19 @@ import android.util.Log
 import com.homecam.app.crypto.DeviceIdentity
 import com.homecam.core.crypto.IdentityKey
 import com.homecam.core.signaling.CameraHandshake
+import com.homecam.core.rpc.RpcPeer
 import com.homecam.core.signaling.ViewerHandshake
 import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
 import com.homecam.proto.Presence
+import com.homecam.proto.RpcMessage
 import com.homecam.proto.Sdp
 import com.homecam.proto.SignalMessage
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import java.net.URI
@@ -40,6 +46,24 @@ class SignalingClient(
     }
 
     var listener: Listener? = null
+
+    /**
+     * Control RPC for this connection, over the DataChannel when one is open and this
+     * WebSocket until then (docs/DECISIONS.md D5).
+     */
+    val rpc: RpcPeer = RpcPeer { message ->
+        val channel = dataChannelSender
+        if (channel != null) channel(message)
+        else send(SignalMessage.newBuilder().setRpc(message).build())
+    }
+
+    /** Set by the WebRTC layer once a DataChannel is open. */
+    @Volatile var dataChannelSender: (suspend (RpcMessage) -> Unit)? = null
+
+    /** Typed calls against this camera. */
+    val link = CameraLink(rpc)
+
+    private val rpcScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * Built in `onOpen` rather than up front, because the transcript binds the hash of the
@@ -84,6 +108,7 @@ class SignalingClient(
                     SignalingRefused(closeReason.takeIf { it != Bye.Reason.UNSPECIFIED } ?: Bye.Reason.HANGUP)
                 )
             }
+            rpcScope.launch { rpc.failAllPending("signaling channel closed") }
             listener?.onClosed(closeReason, reason.orEmpty())
         }
 
@@ -123,6 +148,7 @@ class SignalingClient(
             SignalMessage.BodyCase.OFFER -> listener?.onOffer(message.offer)
             SignalMessage.BodyCase.ANSWER -> listener?.onAnswer(message.answer)
             SignalMessage.BodyCase.CANDIDATE -> listener?.onCandidate(message.candidate)
+            SignalMessage.BodyCase.RPC -> rpcScope.launch { rpc.onMessage(message.rpc) }
             SignalMessage.BodyCase.BYE -> {
                 closeReason = message.bye.reason
                 socket.close()

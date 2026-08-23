@@ -100,7 +100,11 @@ fun ViewerRoot() {
                 }.fold(
                     onSuccess = { connected ->
                         client = connected
-                        LiveState.Connected(connected.verificationPhrase.orEmpty(), null)
+                        LiveState.Connected(
+                            connected.verificationPhrase.orEmpty(),
+                            null,
+                            runCatching { connected.link.runtimeStatus() }.getOrNull(),
+                        )
                     },
                     onFailure = { LiveState.Failed(describe(it)) },
                 )

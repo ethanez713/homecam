@@ -1,0 +1,163 @@
+package com.homecam.app.camera
+
+import com.google.protobuf.ByteString
+import com.homecam.app.AppGraph
+import com.homecam.core.rpc.Controls
+import com.homecam.core.rpc.RpcException
+import com.homecam.core.rpc.RpcPeer
+import com.homecam.proto.Alias
+import com.homecam.proto.Armed
+import com.homecam.proto.AuditQuery
+import com.homecam.proto.AuditEvent
+import com.homecam.proto.BoundingBoxOverlay
+import com.homecam.proto.DetectionMode
+import com.homecam.proto.DetectionSchedule
+import com.homecam.proto.DetectionZone
+import com.homecam.proto.LowLight
+import com.homecam.proto.Microphone
+import com.homecam.proto.PrivacyMask
+import com.homecam.proto.RetentionPolicy
+import com.homecam.proto.RpcError
+import com.homecam.proto.RpcMessage
+import com.homecam.proto.RevokeViewer
+import com.homecam.proto.SettingsSnapshot
+import com.homecam.proto.Viewer
+import com.homecam.proto.ViewerList
+
+/**
+ * The camera's half of the service registry (§4.2). Registration is per authenticated
+ * connection, so a handler never has to ask who is calling — if it is running at all, the
+ * caller already proved possession of an allowlisted identity key.
+ */
+class CameraServices(
+    private val graph: AppGraph,
+    private val node: CameraNode,
+    private val status: RuntimeStatusProvider,
+    private val viewerLabel: String,
+    private val viewerFingerprint: String,
+) {
+    fun registerOn(peer: RpcPeer) {
+        registerStatus(peer)
+        registerSettings(peer)
+        registerAccess(peer)
+        registerAudit(peer)
+    }
+
+    private fun registerStatus(peer: RpcPeer) {
+        peer.register(RpcMessage.Service.STATUS, Controls.Status.RUNTIME) {
+            status.snapshot(clipBytes = graph.database.clips().all().sumOf { it.sizeBytes })
+                .toByteString()
+        }
+    }
+
+    private fun registerSettings(peer: RpcPeer) {
+        peer.register(RpcMessage.Service.SETTINGS, Controls.Settings.SNAPSHOT) {
+            graph.settings.current.toByteString()
+        }
+        settingSetter(peer, Controls.Settings.ARMED) { setArmed(Armed.parseFrom(it).armed) }
+        settingSetter(peer, Controls.Settings.ALIAS) { setAlias(Alias.parseFrom(it).alias) }
+        settingSetter(peer, Controls.Settings.MICROPHONE) { setMicrophone(Microphone.parseFrom(it).enabled) }
+        settingSetter(peer, Controls.Settings.LOW_LIGHT) { setLowLight(LowLight.parseFrom(it).enabled) }
+        settingSetter(peer, Controls.Settings.DETECTION_MODE) { setDetectionMode(DetectionMode.parseFrom(it)) }
+        settingSetter(peer, Controls.Settings.DETECTION_SCHEDULE) { setDetectionSchedule(DetectionSchedule.parseFrom(it)) }
+        settingSetter(peer, Controls.Settings.DETECTION_ZONE) { setDetectionZone(DetectionZone.parseFrom(it)) }
+        settingSetter(peer, Controls.Settings.PRIVACY_MASK) { setPrivacyMask(PrivacyMask.parseFrom(it)) }
+        settingSetter(peer, Controls.Settings.BOUNDING_BOX_OVERLAY) {
+            setBoundingBoxOverlay(BoundingBoxOverlay.parseFrom(it).enabled)
+        }
+        settingSetter(peer, Controls.Settings.RETENTION) { setRetention(RetentionPolicy.parseFrom(it)) }
+    }
+
+    /**
+     * Every settings write is an audited event, because §2.7 counts changing what the
+     * camera does as an access to it — arming, aliasing and privacy masks especially.
+     */
+    private fun settingSetter(
+        peer: RpcPeer,
+        control: Int,
+        edit: SettingsSnapshot.Builder.(ByteString) -> Unit,
+    ) {
+        peer.register(RpcMessage.Service.SETTINGS, control) { request ->
+            val updated = graph.settings.update { edit(request.payload) }
+            graph.audit.record(
+                if (control == Controls.Settings.PRIVACY_MASK) AuditEvent.Kind.PRIVACY_MASK_EDITED
+                else AuditEvent.Kind.SETTINGS_CHANGED,
+                viewerFingerprint = viewerFingerprint,
+                viewerLabel = viewerLabel,
+                detail = nameOfSetting(control),
+            )
+            updated.toByteString()
+        }
+    }
+
+    private fun registerAccess(peer: RpcPeer) {
+        peer.register(RpcMessage.Service.ACCESS, Controls.Access.VIEWER_LIST) {
+            // §2.6: the roster is readable from the viewer app, so the camera can be
+            // audited from the phone in your pocket rather than only from the hallway.
+            val now = System.currentTimeMillis()
+            ViewerList.newBuilder()
+                .addAllViewers(
+                    graph.database.viewers().all().map { row ->
+                        Viewer.newBuilder()
+                            .setPublicKey(ByteString.copyFrom(row.publicKey))
+                            .setFingerprint(row.fingerprint)
+                            .setLabel(row.label)
+                            .setPairedAtMs(row.pairedAtMs)
+                            .setLastSeenMs(row.lastSeenMs)
+                            .setSessions30D(node.sessionsIn30d(row.fingerprint))
+                            .setOnline(now - row.lastSeenMs < ONLINE_WINDOW_MS)
+                            .build()
+                    }
+                )
+                .build()
+                .toByteString()
+        }
+
+        peer.register(RpcMessage.Service.ACCESS, Controls.Access.REVOKE_VIEWER) { request ->
+            val ask = RevokeViewer.parseFrom(request.payload)
+            if (ask.all) node.revokeAll() else node.revoke(ask.fingerprint)
+            ask.toBuilder().setRevoked(true).build().toByteString()
+        }
+    }
+
+    private fun registerAudit(peer: RpcPeer) {
+        peer.register(RpcMessage.Service.AUDIT, Controls.Audit.QUERY) { request ->
+            val query = AuditQuery.parseFrom(request.payload)
+            val until = query.untilMs.takeIf { it > 0 } ?: System.currentTimeMillis()
+            val limit = query.limit.takeIf { it in 1..MAX_AUDIT_ROWS } ?: DEFAULT_AUDIT_ROWS
+            val kinds = query.kindsList.map { it.number }.toSet()
+            val events = graph.audit.between(query.sinceMs, until, limit)
+                .filter { kinds.isEmpty() || it.kindValue in kinds }
+            val verification = graph.audit.verify()
+
+            AuditQuery.newBuilder()
+                .setSinceMs(query.sinceMs)
+                .setUntilMs(until)
+                .addAllEvents(events)
+                .setChainValid(verification.valid)
+                .setFirstBrokenSeq(verification.firstBrokenSeq.coerceAtLeast(0))
+                .build()
+                .toByteString()
+        }
+    }
+
+    private fun nameOfSetting(control: Int): String = when (control) {
+        Controls.Settings.ARMED -> "armed"
+        Controls.Settings.ALIAS -> "alias"
+        Controls.Settings.MICROPHONE -> "microphone"
+        Controls.Settings.LOW_LIGHT -> "low light"
+        Controls.Settings.DETECTION_MODE -> "detection mode"
+        Controls.Settings.DETECTION_SCHEDULE -> "detection schedule"
+        Controls.Settings.DETECTION_ZONE -> "detection zone"
+        Controls.Settings.PRIVACY_MASK -> "privacy mask"
+        Controls.Settings.BOUNDING_BOX_OVERLAY -> "bounding boxes"
+        Controls.Settings.RETENTION -> "retention"
+        else -> throw RpcException(RpcError.Code.UNIMPLEMENTED, "unknown setting $control")
+    }
+
+    private companion object {
+        const val ONLINE_WINDOW_MS = 60_000L
+        const val DEFAULT_AUDIT_ROWS = 200
+        const val MAX_AUDIT_ROWS = 2_000
+    }
+}

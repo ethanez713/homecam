@@ -5,6 +5,8 @@ package homecam;
 option java_package = "com.homecam.proto";
 option java_multiple_files = true;
 
+import "homecam/rpc.proto";
+
 // Signaling plane, spoken over the camera's TLS-pinned WebSocket. See §4.1.
 message SignalMessage {
   oneof body {
@@ -17,6 +19,9 @@ message SignalMessage {
     Sdp answer = 7;
     Candidate candidate = 8;
     Bye bye = 9;
+    // Control RPC also rides this channel, so reading status or the access roster does
+    // not require standing up a media session first (docs/DECISIONS.md D5).
+    RpcMessage rpc = 12;
   }
 }
 
