@@ -9,9 +9,7 @@ option java_multiple_files = true;
 message PairingInvite {
   uint32 version = 1;
   bytes camera_public_key = 2;
-  // SHA-256 of the camera's self-signed TLS certificate (DER), pinned by the
-  // viewer at pairing time and checked on every connection thereafter.
-  bytes cert_fingerprint = 3;
+  reserved 3;  // was cert_fingerprint, made redundant when the TLS cert became the identity key
   string host = 4;
   uint32 port = 5;
   bytes token = 6;

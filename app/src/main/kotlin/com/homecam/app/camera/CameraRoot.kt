@@ -9,11 +9,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.LaunchedEffect
 import com.homecam.app.AppGraph
 import com.homecam.app.camera.ui.AuditScreen
 import com.homecam.app.camera.ui.CameraHomeScreen
 import com.homecam.app.camera.ui.PairingScreen
 import com.homecam.app.camera.ui.RosterScreen
+import com.homecam.app.ui.PermissionGate
 import com.homecam.core.audit.AuditChain
 import kotlinx.coroutines.launch
 
@@ -21,6 +23,23 @@ private enum class CameraScreen { HOME, ROSTER, PAIRING, LOG }
 
 @Composable
 fun CameraRoot() {
+    PermissionGate(
+        permissions = cameraRolePermissions(),
+        rationale = "This phone is the camera. It needs the camera to see, the microphone " +
+            "for two-way audio, and notifications so it can tell you when someone connects.",
+    ) { CameraContent() }
+}
+
+private fun cameraRolePermissions(): List<String> = buildList {
+    add(android.Manifest.permission.CAMERA)
+    add(android.Manifest.permission.RECORD_AUDIO)
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        add(android.Manifest.permission.POST_NOTIFICATIONS)
+    }
+}
+
+@Composable
+private fun CameraContent() {
     val context = LocalContext.current
     val graph = remember { AppGraph.get(context) }
     val node = remember { graph.cameraNode }
@@ -32,12 +51,17 @@ fun CameraRoot() {
     val roster by node.roster.collectAsState()
     val accessCount by node.accessCount.collectAsState()
     val pairing by node.pairing.collectAsState()
+    val pairingPhrase by node.pairingPhrase.collectAsState()
+    val serviceRunning by CameraService.isRunning.collectAsState()
+
+    LaunchedEffect(Unit) { CameraService.start(context) }
 
     when (screen) {
         CameraScreen.HOME -> CameraHomeScreen(
             alias = settings.alias,
             accessCount = accessCount,
             liveViewerLabel = null,
+            serving = serviceRunning,
             armed = settings.armed,
             hardwareBacked = graph.identity.hardwareBacked,
             onArmedChange = { armed -> scope.launch { graph.settings.update { setArmed(armed) } } },
@@ -55,10 +79,10 @@ fun CameraRoot() {
 
         CameraScreen.PAIRING -> PairingScreen(
             session = pairing,
-            verificationPhrase = null,
+            verificationPhrase = pairingPhrase,
             onStart = { node.startPairing(com.homecam.app.net.Signaling.DEFAULT_PORT) },
             onCancel = { node.cancelPairing(); screen = CameraScreen.HOME },
-            onDone = { screen = CameraScreen.HOME },
+            onDone = { node.acknowledgePhrase(); screen = CameraScreen.HOME },
         )
 
         CameraScreen.LOG -> {

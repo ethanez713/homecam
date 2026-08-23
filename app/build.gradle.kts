@@ -77,6 +77,8 @@ dependencies {
     implementation(libs.androidx.camera.view)
 
     implementation(libs.webrtc.android)
+    implementation(libs.java.websocket)
+    implementation(libs.slf4j.api)
     implementation(libs.zxing.core)
     implementation(libs.mlkit.barcode.scanning)
 

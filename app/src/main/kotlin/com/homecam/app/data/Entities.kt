@@ -17,12 +17,14 @@ data class ViewerEntity(
     override fun hashCode() = fingerprint.hashCode()
 }
 
-/** A camera the viewer has paired with, including the certificate it pinned. */
+/**
+ * A camera the viewer has paired with. [publicKey] is the pin: the camera's TLS
+ * certificate is issued from this very key, so there is nothing else to remember.
+ */
 @Entity(tableName = "cameras")
 data class CameraEntity(
     @PrimaryKey val fingerprint: String,
     val publicKey: ByteArray,
-    val certFingerprint: ByteArray,
     val alias: String,
     val lastHost: String,
     val lastPort: Int,

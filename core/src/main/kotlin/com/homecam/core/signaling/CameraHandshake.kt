@@ -21,7 +21,7 @@ import java.security.SecureRandom
  */
 class CameraHandshake(
     private val signer: IdentitySigner,
-    private val certFingerprint: ByteArray,
+    private val servedCertificateHash: ByteArray,
     private val isAllowed: (IdentityKey) -> Boolean,
     private val activePairing: () -> CameraPairingSession?,
     private val nowMs: () -> Long,
@@ -70,7 +70,7 @@ class CameraHandshake(
             viewer = peer,
             cameraNonce = cameraNonce,
             viewerNonce = hello.viewerNonce.toByteArray(),
-            certFingerprint = certFingerprint,
+            servedCertificateHash = servedCertificateHash,
             pairingToken = token,
         )
         viewer = peer

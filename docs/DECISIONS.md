@@ -38,3 +38,25 @@ Every signature covers a canonical transcript in which each field is length-pref
 no two different field splits can produce the same bytes. Camera and viewer signatures
 cover the *same* transcript under *different* role labels, so a signature from one role
 can never be replayed as the other's.
+
+## D4 — The invite pins the identity key, not the certificate
+
+`PLAN.md` §2.3 puts four things in the QR: the camera's identity public key, its
+certificate fingerprint, host/port, and the one-time token. The certificate fingerprint
+is gone.
+
+D1 made the TLS certificate an artifact of the identity key — the Keystore issues it from
+that key and nothing else. Pinning both is therefore pinning the same secret twice, and
+two pins for one key is a state that can disagree with itself for no benefit. The viewer
+pins the SubjectPublicKeyInfo and its trust manager checks the served certificate's key
+against it, which additionally survives the camera reissuing its certificate.
+
+The transcript still binds a certificate hash, and that binding is not redundant: it is
+the SHA-256 of the certificate **actually presented on this connection**, which the viewer
+reads off the live TLS session rather than from the QR. That is what makes the signature
+say something about *which* channel was authenticated (§2.5's argument, one layer down).
+It is why `ViewerHandshake` is constructed in `onOpen` and not before — the value does not
+exist until TLS has completed.
+
+Dropping the field also takes the invite from ~280 to ~245 characters, back inside a
+version-10 QR.

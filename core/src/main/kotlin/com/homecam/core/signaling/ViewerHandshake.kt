@@ -21,7 +21,7 @@ import java.security.SecureRandom
 class ViewerHandshake(
     private val signer: IdentitySigner,
     private val expectedCamera: IdentityKey?,
-    private val certFingerprint: ByteArray,
+    private val servedCertificateHash: ByteArray,
     private val deviceLabel: String,
     private val pairingToken: ByteArray = ByteArray(0),
     private val random: SecureRandom = SecureRandom(),
@@ -56,7 +56,7 @@ class ViewerHandshake(
             viewer = signer.identity,
             cameraNonce = challenge.cameraNonce.toByteArray(),
             viewerNonce = viewerNonce,
-            certFingerprint = certFingerprint,
+            servedCertificateHash = servedCertificateHash,
             pairingToken = pairingToken,
         )
         if (!camera.verify(transcript.forRole(Transcript.Role.CAMERA), challenge.signature.toByteArray())) {

@@ -34,6 +34,16 @@ class CameraNode(private val graph: AppGraph) {
     private val _pairing = MutableStateFlow<CameraPairingSession?>(null)
     val pairing: StateFlow<CameraPairingSession?> = _pairing.asStateFlow()
 
+    /**
+     * Set the moment a pairing handshake is accepted, so the camera screen can show the
+     * phrase while the viewer is still holding its phone up (§2.3). Both ends derive it
+     * from the same transcript; a relay in the middle cannot make them agree.
+     */
+    private val _pairingPhrase = MutableStateFlow<String?>(null)
+    val pairingPhrase: StateFlow<String?> = _pairingPhrase.asStateFlow()
+
+    fun acknowledgePhrase() { _pairingPhrase.value = null }
+
     val roster: StateFlow<List<ViewerEntity>> = viewers.observeAll()
         .stateIn(graph.scope, SharingStarted.Eagerly, emptyList())
 
@@ -61,7 +71,6 @@ class CameraNode(private val graph: AppGraph) {
         val host = LocalAddress.best() ?: return null
         val session = CameraPairingSession(
             cameraIdentity = graph.identity.identity,
-            certFingerprint = graph.identity.certificateFingerprint,
             host = host,
             port = port,
             cameraAlias = graph.settings.current.alias,
@@ -82,7 +91,12 @@ class CameraNode(private val graph: AppGraph) {
     }
 
     /** Called by the signaling server once a pairing handshake has been accepted. */
-    suspend fun completePairing(viewer: IdentityKey, label: String, sourceIp: String) {
+    suspend fun completePairing(
+        viewer: IdentityKey,
+        label: String,
+        sourceIp: String,
+        verificationPhrase: String,
+    ) {
         viewers.upsert(
             ViewerEntity(
                 fingerprint = viewer.shortFingerprint,
@@ -94,6 +108,7 @@ class CameraNode(private val graph: AppGraph) {
         )
         allowed = allowed + viewer
         _pairing.value = null
+        _pairingPhrase.value = verificationPhrase
         graph.audit.record(
             AuditEvent.Kind.PAIRING_COMPLETED,
             viewerFingerprint = viewer.shortFingerprint,

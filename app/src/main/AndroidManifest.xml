@@ -38,5 +38,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".camera.CameraService"
+            android:exported="false"
+            android:foregroundServiceType="camera|microphone" />
     </application>
 </manifest>

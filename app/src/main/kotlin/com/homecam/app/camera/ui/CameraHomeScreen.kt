@@ -30,6 +30,7 @@ fun CameraHomeScreen(
     alias: String,
     accessCount: Int,
     liveViewerLabel: String?,
+    serving: Boolean,
     armed: Boolean,
     hardwareBacked: Boolean,
     onArmedChange: (Boolean) -> Unit,
@@ -97,6 +98,10 @@ fun CameraHomeScreen(
         }
 
         Spacer(Modifier.weight(1f))
+        Text(
+            if (serving) "Listening for paired devices" else "Not listening — the camera service is stopped",
+            style = MaterialTheme.typography.bodySmall,
+        )
         Text(
             if (hardwareBacked) "Identity key is held in this phone's secure hardware"
             else "Identity key is held in software — this phone has no hardware keystore",

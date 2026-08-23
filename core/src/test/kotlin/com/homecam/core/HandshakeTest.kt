@@ -15,14 +15,14 @@ class HandshakeTest {
 
     private val camera = JvmIdentitySigner.generate()
     private val viewer = JvmIdentitySigner.generate()
-    private val certFingerprint = ByteArray(32) { it.toByte() }
+    private val servedCertHash = ByteArray(32) { it.toByte() }
     private var now = 1_000_000L
     private val allowlist = mutableSetOf<IdentityKey>()
     private var pairing: CameraPairingSession? = null
 
     private fun cameraSide() = CameraHandshake(
         signer = camera,
-        certFingerprint = certFingerprint,
+        servedCertificateHash = servedCertHash,
         isAllowed = allowlist::contains,
         activePairing = { pairing },
         nowMs = { now },
@@ -31,7 +31,6 @@ class HandshakeTest {
     private fun openPairingWindow(): CameraPairingSession =
         CameraPairingSession(
             cameraIdentity = camera.identity,
-            certFingerprint = certFingerprint,
             host = "192.168.1.50",
             port = 8443,
             cameraAlias = "Front door",
@@ -41,13 +40,13 @@ class HandshakeTest {
     private fun runPairing(
         window: CameraPairingSession,
         viewerSigner: JvmIdentitySigner = viewer,
-        viewerCertFingerprint: ByteArray = certFingerprint,
+        viewerCertHash: ByteArray = servedCertHash,
     ): Pair<CameraHandshake.Outcome, ViewerHandshake.Outcome?> {
         val server = cameraSide()
         val client = ViewerHandshake(
             signer = viewerSigner,
             expectedCamera = IdentityKey(window.invite().cameraPublicKey.toByteArray()),
-            certFingerprint = viewerCertFingerprint,
+            servedCertificateHash = viewerCertHash,
             deviceLabel = "Ethan's S25",
             pairingToken = window.token,
         )
@@ -102,7 +101,7 @@ class HandshakeTest {
     @Test
     fun `an unpaired key is refused before any application data`() {
         val stranger = JvmIdentitySigner.generate()
-        val client = ViewerHandshake(stranger, camera.identity, certFingerprint, "Stranger")
+        val client = ViewerHandshake(stranger, camera.identity, servedCertHash, "Stranger")
         val outcome = cameraSide().onHello(client.hello())
         assertEquals(
             Bye.Reason.ACCESS_DENIED,
@@ -118,7 +117,7 @@ class HandshakeTest {
         pairing = null
 
         val server = cameraSide()
-        val client = ViewerHandshake(viewer, camera.identity, certFingerprint, "Ethan's S25")
+        val client = ViewerHandshake(viewer, camera.identity, servedCertHash, "Ethan's S25")
         val challenged = server.onHello(client.hello()) as CameraHandshake.Outcome.Challenged
         val auth = client.onChallenge(challenged.challenge) as ViewerHandshake.Outcome.Authenticating
         assertTrue(server.onAuth(auth.auth) is CameraHandshake.Outcome.Accepted)
@@ -132,7 +131,7 @@ class HandshakeTest {
         pairing = null
 
         val server = cameraSide()
-        val client = ViewerHandshake(viewer, camera.identity, certFingerprint, "Ethan's S25")
+        val client = ViewerHandshake(viewer, camera.identity, servedCertHash, "Ethan's S25")
         val challenged = server.onHello(client.hello()) as CameraHandshake.Outcome.Challenged
         val auth = client.onChallenge(challenged.challenge) as ViewerHandshake.Outcome.Authenticating
         allowlist.clear()
@@ -147,7 +146,7 @@ class HandshakeTest {
     @Test
     fun `a viewer that pinned a different certificate refuses the camera signature`() {
         val window = openPairingWindow()
-        val (_, client) = runPairing(window, viewerCertFingerprint = ByteArray(32) { 0x7F })
+        val (_, client) = runPairing(window, viewerCertHash = ByteArray(32) { 0x7F })
         assertEquals(
             Bye.Reason.AUTH_FAILED,
             (client as ViewerHandshake.Outcome.Rejected).reason,
@@ -158,8 +157,8 @@ class HandshakeTest {
     fun `a substituted camera key is refused against the pinned one`() {
         val window = openPairingWindow()
         val impostor = JvmIdentitySigner.generate()
-        val server = CameraHandshake(impostor, certFingerprint, { true }, { pairing }, { now })
-        val client = ViewerHandshake(viewer, camera.identity, certFingerprint, "Ethan's S25", window.token)
+        val server = CameraHandshake(impostor, servedCertHash, { true }, { pairing }, { now })
+        val client = ViewerHandshake(viewer, camera.identity, servedCertHash, "Ethan's S25", window.token)
         val challenged = server.onHello(client.hello()) as CameraHandshake.Outcome.Challenged
         val outcome = client.onChallenge(challenged.challenge)
         assertEquals(
@@ -181,7 +180,7 @@ class HandshakeTest {
 
     @Test
     fun `a mismatched protocol version is refused as incompatible`() {
-        val client = ViewerHandshake(viewer, camera.identity, certFingerprint, "Ethan's S25")
+        val client = ViewerHandshake(viewer, camera.identity, servedCertHash, "Ethan's S25")
         val hello = client.hello().toBuilder().setProtocolVersion(99).build()
         val outcome = cameraSide().onHello(hello)
         assertEquals(
@@ -192,7 +191,7 @@ class HandshakeTest {
 
     @Test
     fun `a malformed public key is refused rather than crashing`() {
-        val client = ViewerHandshake(viewer, camera.identity, certFingerprint, "Ethan's S25")
+        val client = ViewerHandshake(viewer, camera.identity, servedCertHash, "Ethan's S25")
         val hello = client.hello().toBuilder()
             .setViewerPublicKey(com.google.protobuf.ByteString.copyFrom(ByteArray(17) { 0x41 }))
             .build()

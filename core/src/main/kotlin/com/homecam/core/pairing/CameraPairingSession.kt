@@ -12,7 +12,6 @@ import java.util.Base64
  */
 class CameraPairingSession(
     private val cameraIdentity: IdentityKey,
-    private val certFingerprint: ByteArray,
     private val host: String,
     private val port: Int,
     private val cameraAlias: String,
@@ -49,7 +48,6 @@ class CameraPairingSession(
     fun invite(): PairingInvite = PairingInvite.newBuilder()
         .setVersion(INVITE_VERSION)
         .setCameraPublicKey(ByteString.copyFrom(cameraIdentity.spki))
-        .setCertFingerprint(ByteString.copyFrom(certFingerprint))
         .setHost(host)
         .setPort(port)
         .setToken(ByteString.copyFrom(token))

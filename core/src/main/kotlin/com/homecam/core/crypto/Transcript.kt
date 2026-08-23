@@ -24,16 +24,19 @@ class Transcript private constructor(private val bytes: ByteArray) {
 
     companion object {
         /**
-         * Binding the pinned certificate fingerprint in here is what stops a MITM that
-         * terminates TLS with its own certificate from replaying a signature captured
-         * from the real camera.
+         * [servedCertificateHash] is the SHA-256 of the certificate actually presented on
+         * this TLS connection — the camera's own, the viewer's as read off the live
+         * session. That is what stops a MITM which terminates TLS with a different
+         * certificate from replaying a signature captured from the real camera; without
+         * it, authenticating the signaling channel would say nothing about *which*
+         * channel was authenticated.
          */
         fun of(
             camera: IdentityKey,
             viewer: IdentityKey,
             cameraNonce: ByteArray,
             viewerNonce: ByteArray,
-            certFingerprint: ByteArray,
+            servedCertificateHash: ByteArray,
             pairingToken: ByteArray = ByteArray(0),
         ): Transcript = Transcript(
             Canonical.encode(
@@ -42,7 +45,7 @@ class Transcript private constructor(private val bytes: ByteArray) {
                 viewer.spki,
                 cameraNonce,
                 viewerNonce,
-                certFingerprint,
+                servedCertificateHash,
                 pairingToken,
             )
         )
