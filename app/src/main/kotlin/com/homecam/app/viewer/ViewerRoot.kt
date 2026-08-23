@@ -14,8 +14,9 @@ import com.homecam.app.camera.ui.AuditScreen
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import com.homecam.app.data.CameraEntity
-import com.homecam.app.net.SignalingClient
 import com.homecam.app.net.SignalingRefused
+import androidx.compose.runtime.mutableFloatStateOf
+import com.homecam.app.viewer.ui.LiveControls
 import com.homecam.app.viewer.ui.LiveScreen
 import com.homecam.app.viewer.ui.LiveState
 import com.homecam.app.viewer.ui.PairConfirmScreen
@@ -86,32 +87,58 @@ fun ViewerRoot() {
             var state by remember(current.camera.fingerprint, current.attempt) {
                 mutableStateOf<LiveState>(LiveState.Locating(current.camera.alias))
             }
-            var client by remember(current.camera.fingerprint, current.attempt) {
-                mutableStateOf<SignalingClient?>(null)
+            var session by remember(current.camera.fingerprint, current.attempt) {
+                mutableStateOf<ViewerSession?>(null)
             }
-            DisposableEffect(client) { onDispose { client?.close() } }
+            var torch by remember(current.camera.fingerprint, current.attempt) { mutableStateOf(false) }
+            var mic by remember(current.camera.fingerprint, current.attempt) { mutableStateOf(false) }
+            var zoom by remember(current.camera.fingerprint, current.attempt) { mutableFloatStateOf(0f) }
+
+            DisposableEffect(session) { onDispose { session?.close() } }
 
             LaunchedEffect(current.camera.fingerprint, current.attempt) {
-                state = runCatching {
+                runCatching {
                     val address = node.locate(current.camera)
                         ?: error("${current.camera.alias} is not answering on this network.")
                     state = LiveState.Connecting(address.host, address.port)
-                    node.connect(current.camera)
-                }.fold(
-                    onSuccess = { connected ->
-                        client = connected
-                        LiveState.Connected(
-                            connected.verificationPhrase.orEmpty(),
-                            null,
-                            runCatching { connected.link.runtimeStatus() }.getOrNull(),
-                        )
-                    },
-                    onFailure = { LiveState.Failed(describe(it)) },
-                )
+                    val client = node.connect(current.camera)
+                    val opened = ViewerSession(context, client)
+                    session = opened
+                    state = LiveState.Connected(
+                        client.verificationPhrase.orEmpty(),
+                        null,
+                        runCatching { client.link.runtimeStatus() }.getOrNull(),
+                        null,
+                    )
+                    opened.start()
+                    opened
+                }.onFailure { state = LiveState.Failed(describe(it)) }
+            }
+
+            val open = session
+            if (open != null) {
+                val video by open.video.collectAsState()
+                val presence by open.presence.collectAsState()
+                val ended by open.ended.collectAsState()
+                LaunchedEffect(video, presence, ended) {
+                    val connected = state as? LiveState.Connected ?: return@LaunchedEffect
+                    state = ended?.let { LiveState.Failed(describeBye(it.first, it.second)) }
+                        ?: connected.copy(presence = presence, video = video)
+                }
             }
 
             LiveScreen(
                 state = state,
+                controls = open?.let {
+                    LiveControls(
+                        torchOn = torch,
+                        micOn = mic,
+                        zoom = zoom,
+                        onTorch = { on -> torch = on; scope.launch { it.setTorch(on) } },
+                        onMic = { on -> mic = on; scope.launch { it.setPushToTalk(on) } },
+                        onZoom = { value -> zoom = value; scope.launch { it.setZoom(value) } },
+                    )
+                },
                 onBack = { screen = ViewerScreen.Home },
                 onRetry = { screen = ViewerScreen.Live(current.camera, current.attempt + 1) },
             )
@@ -125,6 +152,18 @@ fun ViewerRoot() {
             AuditScreen(events, verification)
         }
     }
+}
+
+private fun describeBye(reason: com.homecam.proto.Bye.Reason, detail: String): String = when (reason) {
+    com.homecam.proto.Bye.Reason.FINGERPRINT_MISMATCH ->
+        "The media stream did not match the camera that was authenticated. The session was " +
+            "torn down and both devices logged it."
+    com.homecam.proto.Bye.Reason.SESSION_REPLACED -> "Another device took over the camera."
+    com.homecam.proto.Bye.Reason.REVOKED -> "This device's access was revoked."
+    com.homecam.proto.Bye.Reason.CAMERA_BUSY -> "The camera is busy."
+    com.homecam.proto.Bye.Reason.NO_FRAME -> "The camera connected but never sent a frame."
+    com.homecam.proto.Bye.Reason.HANGUP -> "The session ended."
+    else -> detail.ifBlank { reason.name }
 }
 
 private fun describe(error: Throwable): String = when {

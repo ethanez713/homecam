@@ -16,13 +16,17 @@ import com.homecam.proto.DetectionZone
 import com.homecam.proto.LowLight
 import com.homecam.proto.Microphone
 import com.homecam.proto.PrivacyMask
+import com.homecam.proto.PushToTalk
 import com.homecam.proto.RetentionPolicy
 import com.homecam.proto.RpcError
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.RevokeViewer
+import com.homecam.proto.SessionConfig
 import com.homecam.proto.SettingsSnapshot
+import com.homecam.proto.Torch
 import com.homecam.proto.Viewer
 import com.homecam.proto.ViewerList
+import com.homecam.proto.Zoom
 
 /**
  * The camera's half of the service registry (§4.2). Registration is per authenticated
@@ -33,15 +37,43 @@ class CameraServices(
     private val graph: AppGraph,
     private val node: CameraNode,
     private val status: RuntimeStatusProvider,
+    private val media: MediaController?,
     private val viewerLabel: String,
     private val viewerFingerprint: String,
 ) {
     fun registerOn(peer: RpcPeer) {
+        registerSession(peer)
         registerStatus(peer)
         registerSettings(peer)
         registerAccess(peer)
         registerAudit(peer)
     }
+
+    private fun registerSession(peer: RpcPeer) {
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.CONFIG) { request ->
+            // The first RPC of every session (§4.2): it is what actually starts the media.
+            media().startSession(viewerFingerprint, SessionConfig.parseFrom(request.payload))
+                .toByteString()
+        }
+        peer.register(RpcMessage.Service.STATUS, Controls.Status.SESSION) {
+            media().sessionStatus(viewerFingerprint).toByteString()
+        }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.TORCH) { request ->
+            media().setTorch(Torch.parseFrom(request.payload).on)
+            request.payload
+        }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.ZOOM) { request ->
+            media().setZoom(Zoom.parseFrom(request.payload).ratio)
+            request.payload
+        }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.PUSH_TO_TALK) { request ->
+            media().setPushToTalk(PushToTalk.parseFrom(request.payload).active)
+            request.payload
+        }
+    }
+
+    private fun media(): MediaController = media
+        ?: throw RpcException(RpcError.Code.UNAVAILABLE, "the camera pipeline is not running")
 
     private fun registerStatus(peer: RpcPeer) {
         peer.register(RpcMessage.Service.STATUS, Controls.Status.RUNTIME) {

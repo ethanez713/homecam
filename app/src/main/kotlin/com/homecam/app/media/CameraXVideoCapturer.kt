@@ -1,0 +1,134 @@
+package com.homecam.app.media
+
+import android.content.Context
+import android.util.Size
+import android.view.Surface
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.core.SurfaceRequest
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.LifecycleOwner
+import org.webrtc.CapturerObserver
+import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoCapturer
+
+/**
+ * The CameraX-to-WebRTC bridge §6 flags as the project's main technical risk.
+ *
+ * The trick that makes it small: WebRTC's [SurfaceTextureHelper] already owns a
+ * SurfaceTexture and already knows how to turn its frames into texture-backed
+ * [org.webrtc.VideoFrame]s. So rather than shuttling byte arrays, CameraX's `Preview` is
+ * pointed at a Surface wrapping *that* texture, and frames arrive in WebRTC's own format
+ * having never been copied through the CPU.
+ *
+ * If a device fights this, the fallback is WebRTC's own Camera2 capturer; nothing above
+ * this class depends on which one is in use.
+ */
+class CameraXVideoCapturer(
+    private val context: Context,
+    private val lifecycleOwner: LifecycleOwner,
+    private val lensFacing: Int = CameraSelector.LENS_FACING_BACK,
+) : VideoCapturer {
+
+    private var helper: SurfaceTextureHelper? = null
+    private var observer: CapturerObserver? = null
+    private var provider: ProcessCameraProvider? = null
+    private var preview: Preview? = null
+    private var surface: Surface? = null
+    private var camera: Camera? = null
+
+    override fun initialize(
+        surfaceTextureHelper: SurfaceTextureHelper,
+        applicationContext: Context,
+        capturerObserver: CapturerObserver,
+    ) {
+        helper = surfaceTextureHelper
+        observer = capturerObserver
+    }
+
+    override fun startCapture(width: Int, height: Int, framerate: Int) {
+        val helper = helper ?: return
+        val observer = observer ?: return
+
+        helper.setTextureSize(width, height)
+        helper.startListening { frame -> observer.onFrameCaptured(frame) }
+        observer.onCapturerStarted(true)
+
+        val main = ContextCompat.getMainExecutor(context)
+        val future = ProcessCameraProvider.getInstance(context)
+        future.addListener({
+            val cameraProvider = future.get()
+            provider = cameraProvider
+
+            val useCase = Preview.Builder()
+                .setResolutionSelector(
+                    ResolutionSelector.Builder()
+                        .setResolutionStrategy(
+                            ResolutionStrategy(
+                                Size(width, height),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                            )
+                        )
+                        .build()
+                )
+                .build()
+
+            useCase.setSurfaceProvider(main) { request: SurfaceRequest ->
+                val target = Surface(helper.surfaceTexture)
+                surface = target
+                request.provideSurface(target, main) { it.surface.release() }
+            }
+
+            preview = useCase
+            cameraProvider.unbindAll()
+            camera = cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.Builder().requireLensFacing(lensFacing).build(),
+                useCase,
+            )
+        }, main)
+    }
+
+    fun setTorch(on: Boolean) {
+        ContextCompat.getMainExecutor(context).execute { camera?.cameraControl?.enableTorch(on) }
+    }
+
+    /**
+     * [ratio] is a linear 0..1 position across the device's zoom range rather than an
+     * absolute factor, because the range differs per lens and a viewer slider that means
+     * something different on each phone is worse than no slider.
+     */
+    fun setZoom(ratio: Float) {
+        ContextCompat.getMainExecutor(context).execute {
+            camera?.cameraControl?.setLinearZoom(ratio.coerceIn(0f, 1f))
+        }
+    }
+
+    override fun stopCapture() {
+        ContextCompat.getMainExecutor(context).execute {
+            preview?.let { provider?.unbind(it) }
+            preview = null
+            camera = null
+        }
+        helper?.stopListening()
+        surface?.release()
+        surface = null
+        observer?.onCapturerStopped()
+    }
+
+    override fun changeCaptureFormat(width: Int, height: Int, framerate: Int) {
+        stopCapture()
+        startCapture(width, height, framerate)
+    }
+
+    override fun dispose() {
+        stopCapture()
+        provider = null
+    }
+
+    override fun isScreencast(): Boolean = false
+}

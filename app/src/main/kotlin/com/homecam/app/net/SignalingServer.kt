@@ -4,6 +4,7 @@ import android.util.Log
 import com.homecam.app.AppGraph
 import com.homecam.app.camera.CameraNode
 import com.homecam.app.camera.CameraServices
+import com.homecam.app.camera.MediaController
 import com.homecam.app.camera.RuntimeStatusProvider
 import com.homecam.core.rpc.RpcPeer
 import com.homecam.core.crypto.IdentityKey
@@ -52,6 +53,9 @@ class SignalingServer(
     var listener: Listener? = null
 
     val statusProvider = RuntimeStatusProvider(graph, node)
+
+    /** Set by [com.homecam.app.camera.CameraService] once the capture pipeline is up. */
+    var mediaController: MediaController? = null
 
     /**
      * One authenticated (or still-authenticating) connection. Messages are drained by a
@@ -130,6 +134,9 @@ class SignalingServer(
         // A revoke has to reach a live connection, not just the next one (§2.6).
         node.onRevoked = { fingerprint -> disconnect(fingerprint, Bye.Reason.REVOKED) }
     }
+
+    fun sessionOf(viewerFingerprint: String): PeerSession? =
+        sessions.values.firstOrNull { it.viewer?.shortFingerprint == viewerFingerprint }
 
     fun disconnect(viewerFingerprint: String, reason: Bye.Reason) {
         sessions.values
@@ -259,6 +266,7 @@ class SignalingServer(
                     graph = graph,
                     node = node,
                     status = statusProvider,
+                    media = mediaController,
                     viewerLabel = outcome.label,
                     viewerFingerprint = outcome.viewer.shortFingerprint,
                 ).registerOn(session.rpc)

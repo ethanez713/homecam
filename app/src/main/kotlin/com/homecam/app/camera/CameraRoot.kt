@@ -53,6 +53,7 @@ private fun CameraContent() {
     val pairing by node.pairing.collectAsState()
     val pairingPhrase by node.pairingPhrase.collectAsState()
     val serviceRunning by CameraService.isRunning.collectAsState()
+    val liveViewer by CameraService.liveViewerLabel.collectAsState()
 
     LaunchedEffect(Unit) { CameraService.start(context) }
 
@@ -60,7 +61,7 @@ private fun CameraContent() {
         CameraScreen.HOME -> CameraHomeScreen(
             alias = settings.alias,
             accessCount = accessCount,
-            liveViewerLabel = null,
+            liveViewerLabel = liveViewer,
             serving = serviceRunning,
             armed = settings.armed,
             hardwareBacked = graph.identity.hardwareBacked,
