@@ -21,4 +21,5 @@ interface MediaController {
     fun setPrivacyMask(mask: PrivacyMask)
     suspend fun setResolution(resolution: Resolution): SessionStatus
     fun setLens(facing: Lens.Facing)
+    fun recordManually(seconds: Int, start: Boolean)
 }

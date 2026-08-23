@@ -78,3 +78,24 @@ The DataChannel is still preferred whenever it is open, because when a media ses
 running it is the path that survives NAT traversal without the WebSocket needing its own.
 Both feed one `RpcPeer` with one registry and one dispatcher; which socket the bytes leave
 by is a transport detail, not a second protocol.
+
+## D6 — One encoder continuously; a second one only while somebody is watching
+
+`PLAN.md` §6 makes "one H.264 encode feeds both the live session and the recorder" the
+key battery and thermal trick. Implemented as: **the continuous path has exactly one
+encoder**, and a second encoder exists only for the minutes a viewer is actually
+connected.
+
+With nobody watching — which is the state the camera is in essentially always — there is
+no WebRTC encode at all, only the recorder's MediaCodec. That is where the trick pays,
+and it is paid in full.
+
+Teeing WebRTC's encoder into the muxer during a live session was the alternative, and it
+is worse for a reason that has nothing to do with effort: **WebRTC's bitrate is driven by
+congestion control**. Feeding its output to the file would mean a recording that gets
+worse because the Wi-Fi was busy — degrading the one artifact that has to be good later,
+in exchange for saving encoder time during the rarest state. The recording keeps its own
+encoder and its own bitrate.
+
+Both encoders read the same masked frames from the same capture, so the privacy mask and
+the camera controls apply identically to each.

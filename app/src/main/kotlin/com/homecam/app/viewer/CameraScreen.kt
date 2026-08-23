@@ -22,6 +22,7 @@ import com.homecam.app.AppGraph
 import com.homecam.app.camera.ui.AuditScreen
 import com.homecam.app.data.CameraEntity
 import com.homecam.app.viewer.ui.CameraSettingsScreen
+import com.homecam.app.viewer.ui.ClipsScreen
 import com.homecam.app.viewer.ui.LiveControls
 import com.homecam.app.viewer.ui.LiveScreen
 import com.homecam.app.viewer.ui.LiveState
@@ -32,7 +33,7 @@ import com.homecam.proto.Viewer
 import kotlinx.coroutines.launch
 
 private enum class CameraTab(val label: String) {
-    LIVE("Live"), SETTINGS("Settings"), ACCESS("Access"), LOG("Log")
+    LIVE("Live"), CLIPS("Clips"), SETTINGS("Settings"), ACCESS("Access"), LOG("Log")
 }
 
 /**
@@ -121,6 +122,40 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 onBack = onExit,
                 onRetry = { attempt++ },
             )
+
+            CameraTab.CLIPS -> {
+                var clips by remember(open) { mutableStateOf<List<com.homecam.proto.Clip>?>(null) }
+                var playing by remember(open) { mutableStateOf<java.io.File?>(null) }
+                var downloading by remember(open) { mutableStateOf<String?>(null) }
+
+                suspend fun refresh() {
+                    clips = open?.let { runCatching { it.link.clips().clipsList }.getOrNull() }
+                }
+                LaunchedEffect(open) { refresh() }
+
+                ClipsScreen(
+                    clips = clips,
+                    playing = playing,
+                    downloadingId = downloading,
+                    projectedDays = null,
+                    onPlay = { clip ->
+                        edit(scope, open) {
+                            downloading = clip.id
+                            val file = java.io.File(context.cacheDir, "clips/${clip.id}.mp4")
+                            runCatching { it.link.downloadClip(clip.id, file) }
+                                .onSuccess { playing = file }
+                            downloading = null
+                        }
+                    },
+                    onPin = { clip ->
+                        edit(scope, open) { it.link.pinClip(clip.id, !clip.pinned); refresh() }
+                    },
+                    onDelete = { clip ->
+                        edit(scope, open) { it.link.deleteClip(clip.id); refresh() }
+                    },
+                    onClosePlayer = { playing = null },
+                )
+            }
 
             CameraTab.SETTINGS -> CameraSettingsScreen(
                 settings = settings,

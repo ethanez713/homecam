@@ -2,9 +2,15 @@ package com.homecam.app.net
 
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcPeer
+import java.io.File
 import com.homecam.proto.Alias
 import com.homecam.proto.Armed
 import com.homecam.proto.AuditQuery
+import com.homecam.proto.ClipData
+import com.homecam.proto.ClipDelete
+import com.homecam.proto.ClipList
+import com.homecam.proto.ClipPin
+import com.homecam.proto.ManualRecord
 import com.homecam.proto.DetectionMode
 import com.homecam.proto.Microphone
 import com.homecam.proto.RevokeViewer
@@ -87,6 +93,51 @@ class CameraLink(private val peer: RpcPeer) {
         )
     ).revoked
 
+    suspend fun clips(sinceMs: Long = 0, limit: Int = 100): ClipList = ClipList.parseFrom(
+        peer.request(
+            RpcMessage.Service.MEDIA,
+            Controls.Media.CLIP_LIST,
+            ClipList.newBuilder().setSinceMs(sinceMs).setLimit(limit).build().toByteString(),
+        )
+    )
+
+    suspend fun pinClip(id: String, pinned: Boolean) {
+        peer.request(
+            RpcMessage.Service.MEDIA,
+            Controls.Media.CLIP_PIN,
+            ClipPin.newBuilder().setId(id).setPinned(pinned).build().toByteString(),
+        )
+    }
+
+    suspend fun deleteClip(id: String): Boolean = ClipDelete.parseFrom(
+        peer.request(
+            RpcMessage.Service.MEDIA,
+            Controls.Media.CLIP_DELETE,
+            ClipDelete.newBuilder().setId(id).build().toByteString(),
+        )
+    ).deleted
+
+    /** Streams a clip into [destination]. Chunked because a clip does not fit one frame. */
+    suspend fun downloadClip(id: String, destination: File) {
+        destination.parentFile?.mkdirs()
+        destination.outputStream().use { out ->
+            peer.requestStream(
+                RpcMessage.Service.MEDIA,
+                Controls.Media.CLIP_DATA,
+                ClipData.newBuilder().setClipId(id).build().toByteString(),
+                timeoutMs = CLIP_DOWNLOAD_TIMEOUT_MS,
+            ) { chunk -> out.write(ClipData.parseFrom(chunk).chunk.toByteArray()) }
+        }
+    }
+
+    suspend fun recordManually(seconds: Int, start: Boolean = true) {
+        peer.request(
+            RpcMessage.Service.SESSION,
+            Controls.Session.MANUAL_RECORD,
+            ManualRecord.newBuilder().setRecording(start).setSeconds(seconds).build().toByteString(),
+        )
+    }
+
     suspend fun audit(sinceMs: Long = 0, limit: Int = 200): AuditQuery = AuditQuery.parseFrom(
         peer.request(
             RpcMessage.Service.AUDIT,
@@ -100,5 +151,6 @@ class CameraLink(private val peer: RpcPeer) {
         // Verifying the chain rehashes the whole log, which on a camera that has been up
         // for weeks is thousands of rows.
         const val AUDIT_TIMEOUT_MS = 30_000L
+        const val CLIP_DOWNLOAD_TIMEOUT_MS = 120_000L
     }
 }

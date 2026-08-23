@@ -16,7 +16,9 @@ import com.homecam.app.R
 import com.homecam.app.net.MdnsAdvertiser
 import com.homecam.app.net.Signaling
 import com.homecam.app.net.SignalingServer
+import com.homecam.app.data.ClipStore
 import com.homecam.app.media.CameraMediaSession
+import com.homecam.app.media.ContinuousCapture
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
@@ -27,6 +29,9 @@ import com.homecam.proto.SignalMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -41,6 +46,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private lateinit var node: CameraNode
     private var server: SignalingServer? = null
     private var mdns: MdnsAdvertiser? = null
+    private lateinit var capture: ContinuousCapture
+    private lateinit var recorder: Recorder
 
     /**
      * At most one media session at a time, and the newest wins. A camera that answers
@@ -62,11 +69,22 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         createChannel()
         startForegroundWithNotification(idleNotification())
 
+        capture = ContinuousCapture(this, this).also {
+            it.start(mask = graph.settings.current.privacyMask)
+        }
+        recorder = Recorder(graph, capture, ClipStore(this, graph.database.clips())).also {
+            it.start()
+            it.setArmed(graph.settings.current.armed)
+        }
+
         server = SignalingServer(graph, node).also {
             it.listener = this
             it.mediaController = this
+            it.clipStore = recorder.clips
             it.start()
         }
+        ClipPruneWorker.schedule(this)
+        observeArming()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
         running.value = true
     }
@@ -80,6 +98,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         running.value = false
         graph.scope.launch { endLive(Bye.Reason.CAMERA_DISABLED, "camera stopped") }
         mdns?.stop()
+        recorder.stop()
+        capture.stop()
         runCatching { server?.stop(SHUTDOWN_GRACE_MS) }
             .onFailure { Log.w(TAG, "signaling server did not stop cleanly", it) }
         graph.scope.launch { graph.audit.record(AuditEvent.Kind.CAMERA_STOPPED) }
@@ -139,6 +159,18 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
+    /**
+     * Arming is a setting a viewer can change over RPC, so the recorder follows the
+     * setting rather than the call site that happened to change it.
+     */
+    private fun observeArming() {
+        lifecycleScope.launch {
+            graph.settings.settings.map { it.armed }.distinctUntilChanged().collect {
+                recorder.setArmed(it)
+            }
+        }
+    }
+
     // ------------------------------------------------------- MediaController
 
     override suspend fun startSession(viewerFingerprint: String, config: SessionConfig): SessionStatus {
@@ -149,10 +181,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
         val media = CameraMediaSession(
             context = this,
-            lifecycleOwner = this,
+            capture = capture,
             config = CameraMediaSession.Config(
                 audio = config.audio && graph.settings.current.microphone,
-                privacyMask = graph.settings.current.privacyMask,
             ),
             transport = object : CameraMediaSession.Transport {
                 override fun sendOffer(sdp: Sdp) =
@@ -193,38 +224,39 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             .setSessionId(current.media.id)
             .setActive(true)
             .setStartedAtMs(current.startedAtMs)
-            .setVideoWidth(current.media.resolution.first)
-            .setVideoHeight(current.media.resolution.second)
+            .setVideoWidth(capture.format.width)
+            .setVideoHeight(capture.format.height)
             .build()
     }
 
-    override fun setTorch(on: Boolean) { live?.media?.setTorch(on) }
+    override fun setTorch(on: Boolean) = capture.setTorch(on) ?: Unit
 
-    override fun setZoom(ratio: Float) { live?.media?.setZoom(ratio) }
+    override fun setZoom(ratio: Float) = capture.setZoom(ratio) ?: Unit
 
     override fun setPushToTalk(active: Boolean) = Unit
 
     override suspend fun setResolution(resolution: com.homecam.proto.Resolution): SessionStatus {
-        val current = live ?: return SessionStatus.getDefaultInstance()
-        current.media.setResolution(
-            resolution.width.coerceIn(320, 1920),
-            resolution.height.coerceIn(240, 1080),
-            resolution.fps.coerceIn(5, 30),
+        capture.setFormat(
+            ContinuousCapture.Format(
+                width = resolution.width.coerceIn(320, 1920),
+                height = resolution.height.coerceIn(240, 1080),
+                framerate = resolution.fps.coerceIn(5, 30),
+            )
         )
-        return sessionStatus(current.peer.viewer?.shortFingerprint.orEmpty())
+        return sessionStatus(live?.peer?.viewer?.shortFingerprint.orEmpty())
     }
 
-    override fun setLens(facing: com.homecam.proto.Lens.Facing) {
-        live?.media?.setLens(facing == com.homecam.proto.Lens.Facing.FRONT)
+    override fun setLens(facing: com.homecam.proto.Lens.Facing) = capture.setLens(facing) ?: Unit
+
+    override fun recordManually(seconds: Int, start: Boolean) {
+        if (start) recorder.recordManually(seconds) else recorder.stopManual()
     }
 
     /**
      * A mask edited while somebody is watching has to take effect on that stream, not the
      * next one — the whole point is that the pixels never leave.
      */
-    override fun setPrivacyMask(mask: com.homecam.proto.PrivacyMask) {
-        live?.media?.setPrivacyMask(mask)
-    }
+    override fun setPrivacyMask(mask: com.homecam.proto.PrivacyMask) = capture.setPrivacyMask(mask)
 
     // ------------------------------------------------ SignalingServer.Listener
 

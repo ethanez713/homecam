@@ -6,6 +6,7 @@ import org.webrtc.VideoFrame
 import org.webrtc.VideoProcessor
 import org.webrtc.VideoSink
 import java.nio.ByteBuffer
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Blanks masked regions **in the frame, before it reaches the encoder** (§2.8), so masked
@@ -24,27 +25,38 @@ class PrivacyMaskProcessor : VideoProcessor {
 
     private var sink: VideoSink? = null
 
+    /**
+     * Extra consumers — the recorder — attached downstream of the mask, so they see
+     * exactly the frames a viewer would and cannot be given the unmasked original.
+     */
+    private val extraSinks = CopyOnWriteArrayList<VideoSink>()
+
     override fun setSink(sink: VideoSink?) { this.sink = sink }
+
+    fun addSink(sink: VideoSink) { extraSinks.addIfAbsent(sink) }
+
+    fun removeSink(sink: VideoSink) { extraSinks.remove(sink) }
 
     override fun onCapturerStarted(success: Boolean) = Unit
     override fun onCapturerStopped() = Unit
 
     override fun onFrameCaptured(frame: VideoFrame) {
-        val target = sink ?: return
         val rects = mask.rectsList
         if (rects.isEmpty()) {
-            target.onFrame(frame)
+            deliver(frame)
             return
         }
-        val masked = applyMask(frame, rects)
-        if (masked == null) {
-            // A frame we cannot mask is a frame we must not forward: silently streaming
-            // the unmasked version would defeat the only control that promises the pixels
-            // never leave.
-            return
-        }
-        target.onFrame(masked)
+        // A frame we cannot mask is a frame we must not forward: silently streaming the
+        // unmasked version would defeat the one control that promises the pixels never
+        // leave the phone.
+        val masked = applyMask(frame, rects) ?: return
+        deliver(masked)
         masked.release()
+    }
+
+    private fun deliver(frame: VideoFrame) {
+        sink?.onFrame(frame)
+        extraSinks.forEach { it.onFrame(frame) }
     }
 
     private fun applyMask(frame: VideoFrame, rects: List<PrivacyMask.Rect>): VideoFrame? {

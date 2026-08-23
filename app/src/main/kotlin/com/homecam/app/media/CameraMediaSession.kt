@@ -2,19 +2,16 @@ package com.homecam.app.media
 
 import android.content.Context
 import android.util.Log
-import androidx.lifecycle.LifecycleOwner
 import com.homecam.core.signaling.DtlsCommitment
 import com.homecam.core.signaling.DtlsFingerprint
 import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
-import com.homecam.proto.PrivacyMask
 import com.homecam.proto.Sdp
 import org.webrtc.AudioTrack
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.PeerConnection
 import org.webrtc.SessionDescription
-import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoTrack
 import java.util.UUID
 
@@ -24,17 +21,11 @@ import java.util.UUID
  */
 class CameraMediaSession(
     private val context: Context,
-    private val lifecycleOwner: LifecycleOwner,
+    private val capture: ContinuousCapture,
     private val config: Config,
     private val transport: Transport,
 ) {
-    data class Config(
-        val width: Int = 1280,
-        val height: Int = 720,
-        val framerate: Int = 24,
-        val audio: Boolean = true,
-        val privacyMask: PrivacyMask = PrivacyMask.getDefaultInstance(),
-    )
+    data class Config(val audio: Boolean = true)
 
     interface Transport {
         fun sendOffer(sdp: Sdp)
@@ -45,15 +36,11 @@ class CameraMediaSession(
 
     val id: String = UUID.randomUUID().toString()
 
-    private var current = config
     private val factory = WebRtc.factory(context)
     private val commitment = DtlsCommitment()
 
     private var connection: PeerConnection? = null
-    private var capturer: CameraXVideoCapturer? = null
-    private var textureHelper: SurfaceTextureHelper? = null
     private var videoTrack: VideoTrack? = null
-    private val maskProcessor = PrivacyMaskProcessor().apply { mask = config.privacyMask }
     private var audioTrack: AudioTrack? = null
     private var closed = false
 
@@ -77,20 +64,12 @@ class CameraMediaSession(
         createOffer()
     }
 
+    /**
+     * The track draws from the always-on capture rather than starting a camera of its
+     * own, so a second viewer costs a track and not a second camera bind.
+     */
     private fun addVideo() {
-        val helper = SurfaceTextureHelper.create("homecam-capture", WebRtc.eglBase.eglBaseContext)
-        textureHelper = helper
-
-        val source = factory.createVideoSource(false)
-        source.setVideoProcessor(maskProcessor)
-        val videoCapturer = CameraXVideoCapturer(context, lifecycleOwner)
-        capturer = videoCapturer
-        videoCapturer.initialize(helper, context, source.capturerObserver)
-        videoCapturer.startCapture(current.width, current.height, current.framerate)
-
-        videoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, source).also {
-            connection?.addTrack(it, listOf(STREAM_ID))
-        }
+        videoTrack = capture.newTrack()?.also { connection?.addTrack(it, listOf(STREAM_ID)) }
     }
 
     private fun addAudio() {
@@ -161,30 +140,9 @@ class CameraMediaSession(
         )
     }
 
-    fun setPrivacyMask(mask: PrivacyMask) { maskProcessor.mask = mask }
-
-    /**
-     * Changed on the capturer rather than by renegotiating: WebRTC adapts to a new frame
-     * size on its own, so a resolution change costs a camera rebind and nothing else.
-     */
-    fun setResolution(width: Int, height: Int, framerate: Int) {
-        current = current.copy(width = width, height = height, framerate = framerate)
-        capturer?.changeCaptureFormat(width, height, framerate)
-    }
-
-    fun setLens(front: Boolean) = capturer?.setLensFacing(front)
-
-    val resolution: Triple<Int, Int, Int> get() = Triple(current.width, current.height, current.framerate)
-
-    fun setTorch(on: Boolean) = capturer?.setTorch(on)
-
-    fun setZoom(ratio: Float) = capturer?.setZoom(ratio)
-
     fun close() {
         if (closed) return
         closed = true
-        runCatching { capturer?.dispose() }
-        runCatching { textureHelper?.dispose() }
         runCatching { videoTrack?.dispose() }
         runCatching { audioTrack?.dispose() }
         runCatching { connection?.close(); connection?.dispose() }
@@ -217,7 +175,6 @@ class CameraMediaSession(
     private companion object {
         const val TAG = "CameraMediaSession"
         const val STREAM_ID = "homecam"
-        const val VIDEO_TRACK_ID = "homecam-video"
         const val AUDIO_TRACK_ID = "homecam-audio"
     }
 }

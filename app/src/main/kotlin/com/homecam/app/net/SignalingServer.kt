@@ -57,6 +57,9 @@ class SignalingServer(
     /** Set by [com.homecam.app.camera.CameraService] once the capture pipeline is up. */
     var mediaController: MediaController? = null
 
+    /** Set alongside [mediaController] once the recorder is up. */
+    var clipStore: com.homecam.app.data.ClipStore? = null
+
     /**
      * One authenticated (or still-authenticating) connection. Messages are drained by a
      * single consumer coroutine so that handling stays in arrival order — a handshake
@@ -267,6 +270,7 @@ class SignalingServer(
                     node = node,
                     status = statusProvider,
                     media = mediaController,
+                    clips = clipStore,
                     viewerLabel = outcome.label,
                     viewerFingerprint = outcome.viewer.shortFingerprint,
                 ).registerOn(session.rpc)

@@ -2,19 +2,30 @@ package com.homecam.app.camera
 
 import com.google.protobuf.ByteString
 import com.homecam.app.AppGraph
+import com.homecam.app.data.ClipStore
+import com.homecam.app.data.toProto
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcException
 import com.homecam.core.rpc.RpcPeer
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import com.homecam.proto.Alias
 import com.homecam.proto.Armed
 import com.homecam.proto.AuditQuery
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.BoundingBoxOverlay
+import com.homecam.proto.ClipData
+import com.homecam.proto.ClipDelete
+import com.homecam.proto.ClipList
+import com.homecam.proto.ClipPin
+import com.homecam.proto.DateList
 import com.homecam.proto.DetectionMode
 import com.homecam.proto.DetectionSchedule
 import com.homecam.proto.DetectionZone
 import com.homecam.proto.Lens
 import com.homecam.proto.LowLight
+import com.homecam.proto.ManualRecord
 import com.homecam.proto.Microphone
 import com.homecam.proto.PrivacyMask
 import com.homecam.proto.PushToTalk
@@ -40,6 +51,7 @@ class CameraServices(
     private val node: CameraNode,
     private val status: RuntimeStatusProvider,
     private val media: MediaController?,
+    private val clips: ClipStore?,
     private val viewerLabel: String,
     private val viewerFingerprint: String,
 ) {
@@ -49,7 +61,94 @@ class CameraServices(
         registerSettings(peer)
         registerAccess(peer)
         registerAudit(peer)
+        registerMedia(peer)
     }
+
+    private fun registerMedia(peer: RpcPeer) {
+        peer.register(RpcMessage.Service.MEDIA, Controls.Media.CLIP_LIST) { request ->
+            val query = ClipList.parseFrom(request.payload)
+            val until = query.untilMs.takeIf { it > 0 } ?: System.currentTimeMillis()
+            val limit = query.limit.takeIf { it in 1..MAX_CLIP_ROWS } ?: DEFAULT_CLIP_ROWS
+            ClipList.newBuilder()
+                .setSinceMs(query.sinceMs)
+                .setUntilMs(until)
+                .addAllClips(
+                    graph.database.clips().between(query.sinceMs, until, limit).map { it.toProto() }
+                )
+                .build()
+                .toByteString()
+        }
+
+        peer.register(RpcMessage.Service.MEDIA, Controls.Media.CLIP_DELETE) { request ->
+            val ask = ClipDelete.parseFrom(request.payload)
+            val deleted = clips().delete(ask.id)
+            if (!deleted) throw RpcException(RpcError.Code.NOT_FOUND, "no clip ${ask.id}")
+            graph.audit.record(
+                AuditEvent.Kind.CLIP_DELETED,
+                viewerFingerprint = viewerFingerprint,
+                viewerLabel = viewerLabel,
+                detail = ask.id,
+            )
+            ask.toBuilder().setDeleted(true).build().toByteString()
+        }
+
+        peer.register(RpcMessage.Service.MEDIA, Controls.Media.CLIP_PIN) { request ->
+            val ask = ClipPin.parseFrom(request.payload)
+            clips().setPinned(ask.id, ask.pinned)
+            ask.toByteString()
+        }
+
+        peer.register(RpcMessage.Service.MEDIA, Controls.Media.DATE_LIST) {
+            val byDate = graph.database.clips().all()
+                .groupingBy { LocalDate.ofInstant(Instant.ofEpochMilli(it.startedAtMs), ZoneId.systemDefault()).toString() }
+                .eachCount()
+                .toSortedMap()
+            DateList.newBuilder()
+                .addAllDates(byDate.keys)
+                .addAllCounts(byDate.values)
+                .build()
+                .toByteString()
+        }
+
+        peer.register(RpcMessage.Service.MEDIA, Controls.Media.CLIP_DATA) { request ->
+            // Streamed in chunks: a two-minute 720p clip is tens of megabytes and would
+            // not fit one DataChannel message, let alone one WebSocket frame.
+            val ask = ClipData.parseFrom(request.payload)
+            val file = clips().file(ask.clipId)
+                ?: throw RpcException(RpcError.Code.NOT_FOUND, "no clip ${ask.clipId}")
+
+            graph.audit.record(
+                AuditEvent.Kind.CLIP_VIEWED,
+                viewerFingerprint = viewerFingerprint,
+                viewerLabel = viewerLabel,
+                detail = ask.clipId,
+            )
+
+            file.inputStream().use { stream ->
+                stream.skip(ask.offset)
+                var offset = ask.offset
+                val buffer = ByteArray(CLIP_CHUNK_BYTES)
+                while (true) {
+                    val read = stream.read(buffer)
+                    if (read <= 0) break
+                    peer.sendStreamChunk(
+                        request,
+                        ClipData.newBuilder()
+                            .setClipId(ask.clipId)
+                            .setOffset(offset)
+                            .setChunk(ByteString.copyFrom(buffer, 0, read))
+                            .build()
+                            .toByteString(),
+                    )
+                    offset += read
+                }
+            }
+            ClipData.newBuilder().setClipId(ask.clipId).setEof(true).build().toByteString()
+        }
+    }
+
+    private fun clips(): ClipStore = clips
+        ?: throw RpcException(RpcError.Code.UNAVAILABLE, "the clip store is not running")
 
     private fun registerSession(peer: RpcPeer) {
         peer.register(RpcMessage.Service.SESSION, Controls.Session.CONFIG) { request ->
@@ -66,6 +165,11 @@ class CameraServices(
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.ZOOM) { request ->
             media().setZoom(Zoom.parseFrom(request.payload).ratio)
+            request.payload
+        }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.MANUAL_RECORD) { request ->
+            val ask = ManualRecord.parseFrom(request.payload)
+            media().recordManually(ask.seconds.takeIf { it > 0 } ?: 30, ask.recording)
             request.payload
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.RESOLUTION) { request ->
@@ -201,6 +305,9 @@ class CameraServices(
 
     private companion object {
         const val ONLINE_WINDOW_MS = 60_000L
+        const val DEFAULT_CLIP_ROWS = 100
+        const val MAX_CLIP_ROWS = 1_000
+        const val CLIP_CHUNK_BYTES = 48 * 1024
         const val DEFAULT_AUDIT_ROWS = 200
         const val MAX_AUDIT_ROWS = 2_000
     }
