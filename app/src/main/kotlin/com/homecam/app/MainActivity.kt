@@ -11,7 +11,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.fillMaxSize
+import com.homecam.app.camera.CameraRoot
 import com.homecam.app.ui.RolePickerScreen
+import com.homecam.app.viewer.ViewerRoot
 import com.homecam.app.ui.theme.HomecamTheme
 
 class MainActivity : ComponentActivity() {
