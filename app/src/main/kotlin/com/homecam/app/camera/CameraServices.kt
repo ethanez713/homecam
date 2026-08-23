@@ -36,6 +36,7 @@ import com.homecam.proto.RpcMessage
 import com.homecam.proto.RevokeViewer
 import com.homecam.proto.SessionConfig
 import com.homecam.proto.SettingsSnapshot
+import com.homecam.proto.TimelineQuery
 import com.homecam.proto.Torch
 import com.homecam.proto.Viewer
 import com.homecam.proto.ViewerList
@@ -106,6 +107,29 @@ class CameraServices(
             DateList.newBuilder()
                 .addAllDates(byDate.keys)
                 .addAllCounts(byDate.values)
+                .build()
+                .toByteString()
+        }
+
+        peer.register(RpcMessage.Service.MEDIA, Controls.Media.TIMELINE) { request ->
+            val query = TimelineQuery.parseFrom(request.payload)
+            val until = query.untilMs.takeIf { it > 0 } ?: System.currentTimeMillis()
+            TimelineQuery.newBuilder()
+                .setSinceMs(query.sinceMs)
+                .setUntilMs(until)
+                .addAllEntries(
+                    graph.database.clips().between(query.sinceMs, until, MAX_CLIP_ROWS)
+                        .flatMap { clip ->
+                            clip.labels.split(",").filter { it.isNotBlank() }.ifEmpty { listOf("motion") }
+                                .map { label ->
+                                    TimelineQuery.Entry.newBuilder()
+                                        .setAtMs(clip.startedAtMs)
+                                        .setClipId(clip.id)
+                                        .setLabel(label)
+                                        .build()
+                                }
+                        }
+                )
                 .build()
                 .toByteString()
         }

@@ -22,7 +22,25 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import com.homecam.app.detect.DetectionTrackReader
+import com.homecam.proto.DetectionFrame
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,10 +61,11 @@ fun ClipsScreen(
     onPlay: (Clip) -> Unit,
     onPin: (Clip) -> Unit,
     onDelete: (Clip) -> Unit,
+    showBoxes: Boolean,
     onClosePlayer: () -> Unit,
 ) {
     if (playing != null) {
-        Player(playing, onClosePlayer)
+        Player(playing, showBoxes, onClosePlayer)
         return
     }
 
@@ -114,7 +133,22 @@ fun ClipsScreen(
 }
 
 @Composable
-private fun Player(file: File, onClose: () -> Unit) {
+private fun Player(file: File, showBoxes: Boolean, onClose: () -> Unit) {
+    // Straight from the file: the clip carries its own boxes, so playback needs neither a
+    // sidecar nor the camera to be reachable.
+    val frames by produceState(emptyMap<Long, DetectionFrame>(), file) {
+        value = withContext(Dispatchers.IO) { DetectionTrackReader.read(file) }
+    }
+    var view by remember { mutableStateOf<VideoView?>(null) }
+    var position by remember { mutableLongStateOf(0L) }
+
+    LaunchedEffect(view, showBoxes) {
+        while (showBoxes && view != null) {
+            position = view?.currentPosition?.toLong() ?: 0L
+            delay(100)
+        }
+    }
+
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -123,11 +157,41 @@ private fun Player(file: File, onClose: () -> Unit) {
                     setVideoPath(file.absolutePath)
                     setMediaController(MediaController(context).also { it.setAnchorView(this) })
                     setOnPreparedListener { start() }
+                    view = this
                 }
             },
         )
+
+        if (showBoxes) {
+            DetectionTrackReader.at(frames, position)?.let { BoxOverlay(it) }
+        }
+
         TextButton(onClick = onClose, modifier = Modifier.padding(16.dp)) {
             Text("Close", color = Color.White)
+        }
+    }
+}
+
+@Composable
+private fun BoxOverlay(frame: DetectionFrame) {
+    val labelStyle = MaterialTheme.typography.labelMedium
+    val measurer = rememberTextMeasurer()
+    Canvas(Modifier.fillMaxSize()) {
+        frame.boxesList.forEach { box ->
+            val left = box.left * size.width
+            val top = box.top * size.height
+            drawRect(
+                color = Color(0xFF7FD1B9),
+                topLeft = Offset(left, top),
+                size = Size((box.right - box.left) * size.width, (box.bottom - box.top) * size.height),
+                style = Stroke(width = 3f),
+            )
+            drawText(
+                measurer,
+                "${box.label} ${(box.confidence * 100).toInt()}%",
+                topLeft = Offset(left, (top - 36f).coerceAtLeast(0f)),
+                style = labelStyle.copy(color = Color(0xFF7FD1B9)),
+            )
         }
     }
 }

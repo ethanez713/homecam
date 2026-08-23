@@ -48,6 +48,7 @@ class ClipRecorder(
     private var renderer: EglRenderer? = null
     private var muxer: MediaMuxer? = null
     private var videoTrackIndex = -1
+    private var metadataTrackIndex = -1
 
     private var currentClip: File? = null
     private var currentId: String? = null
@@ -116,6 +117,7 @@ class ClipRecorder(
 
             val output = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             videoTrackIndex = output.addTrack(format)
+            metadataTrackIndex = addMetadataTrack(output)
             output.start()
 
             muxer = output
@@ -131,6 +133,33 @@ class ClipRecorder(
             } ?: 0L)
             fromKeyframe.forEach { writeSample(output, it) }
             preRoll.clear()
+        }
+    }
+
+    /**
+     * Timed metadata in MPEG-4 only became muxable at API 29. Below that the detections
+     * are still recorded — they live in the clip index and are queryable over the
+     * TIMELINE service — but the file stops being self-describing, so this is the one
+     * place the artifact is weaker on an Android 8 camera.
+     */
+    private fun addMetadataTrack(output: MediaMuxer): Int =
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) -1
+        else runCatching {
+            output.addTrack(MediaFormat().apply { setString(MediaFormat.KEY_MIME, METADATA_MIME) })
+        }.getOrElse {
+            Log.w(TAG, "no timed-metadata track on this device", it)
+            -1
+        }
+
+    /** Written against the clip's own timeline, so the boxes line up on playback. */
+    fun writeDetections(payload: ByteArray, atMs: Long) {
+        synchronized(lock) {
+            val output = muxer ?: return
+            if (metadataTrackIndex < 0) return
+            val offsetUs = ((atMs - clipStartedAtMs) * 1000).coerceAtLeast(0)
+            val info = MediaCodec.BufferInfo().apply { set(0, payload.size, offsetUs, 0) }
+            runCatching { output.writeSampleData(metadataTrackIndex, ByteBuffer.wrap(payload), info) }
+                .onFailure { Log.w(TAG, "metadata sample dropped", it) }
         }
     }
 
@@ -244,6 +273,7 @@ class ClipRecorder(
     private companion object {
         const val TAG = "ClipRecorder"
         const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
+        const val METADATA_MIME = "application/x-homecam-detections"
         const val DRAIN_TIMEOUT_US = 100_000L
     }
 }

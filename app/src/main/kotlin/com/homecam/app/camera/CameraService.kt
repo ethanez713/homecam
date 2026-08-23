@@ -17,6 +17,7 @@ import com.homecam.app.net.MdnsAdvertiser
 import com.homecam.app.net.Signaling
 import com.homecam.app.net.SignalingServer
 import com.homecam.app.data.ClipStore
+import com.homecam.app.detect.DetectionPipeline
 import com.homecam.app.media.CameraMediaSession
 import com.homecam.app.media.ContinuousCapture
 import com.homecam.proto.AuditEvent
@@ -48,6 +49,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private var mdns: MdnsAdvertiser? = null
     private lateinit var capture: ContinuousCapture
     private lateinit var recorder: Recorder
+    private lateinit var detection: DetectionPipeline
 
     /**
      * At most one media session at a time, and the newest wins. A camera that answers
@@ -76,6 +78,12 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             it.start()
             it.setArmed(graph.settings.current.armed)
         }
+        detection = DetectionPipeline(
+            context = this,
+            settings = { graph.settings.current },
+            onEvent = { recorder.onDetection(it, System.currentTimeMillis()) },
+        ).also { capture.addSink(it) }
+        startClipRollover()
 
         server = SignalingServer(graph, node).also {
             it.listener = this
@@ -98,6 +106,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         running.value = false
         graph.scope.launch { endLive(Bye.Reason.CAMERA_DISABLED, "camera stopped") }
         mdns?.stop()
+        capture.removeSink(detection)
+        detection.close()
         recorder.stop()
         capture.stop()
         runCatching { server?.stop(SHUTDOWN_GRACE_MS) }
@@ -157,6 +167,21 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             NotificationManager.IMPORTANCE_LOW,
         ).apply { description = "Shows whether the camera is running and who is watching" }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    /** Closes a clip once nothing has been detected for its tail duration. */
+    private fun startClipRollover() {
+        lifecycleScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(ROLLOVER_TICK_MS)
+                recorder.tick()
+                statusFromPipeline()
+            }
+        }
+    }
+
+    private fun statusFromPipeline() {
+        server?.statusProvider?.detectorFps = detection.framesPerSecond
     }
 
     /**
@@ -307,6 +332,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     companion object {
         private const val TAG = "CameraService"
         private const val CHANNEL_ID = "homecam.camera"
+        private const val ROLLOVER_TICK_MS = 2_000L
         private const val NOTIFICATION_ID = 1
         private const val SHUTDOWN_GRACE_MS = 1_000
 

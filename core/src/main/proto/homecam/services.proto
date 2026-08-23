@@ -217,3 +217,23 @@ message PairingMode {
   // Only ever sent camera->camera-UI; never over the wire to a viewer.
   bytes invite = 3;
 }
+
+// ------------------------------------------------------------- DETECTION
+
+/**
+ * One sample of the clip's timed-metadata track. Muxing detections into the MP4 is what
+ * makes a clip a self-describing artifact: copy it anywhere and the boxes travel with it,
+ * with no sidecar and no server to ask.
+ */
+message DetectionFrame {
+  message Box {
+    string label = 1;
+    float confidence = 2;
+    float left = 3;
+    float top = 4;
+    float right = 5;
+    float bottom = 6;
+  }
+  int64 at_ms = 1;
+  repeated Box boxes = 2;
+}

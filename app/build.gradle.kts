@@ -35,6 +35,12 @@ android {
 
     buildFeatures { compose = true }
 
+    androidResources {
+        // A compressed .tflite cannot be memory-mapped, and the interpreter falls back to
+        // copying the whole model into the heap on every load.
+        noCompress += "tflite"
+    }
+
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "META-INF/DEPENDENCIES")
     }
@@ -77,6 +83,8 @@ dependencies {
     implementation(libs.androidx.camera.view)
 
     implementation(libs.webrtc.android)
+    implementation(libs.tensorflow.lite.task.vision)
+
     implementation(libs.java.websocket)
     implementation(libs.slf4j.api)
     implementation(libs.zxing.core)

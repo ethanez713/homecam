@@ -138,6 +138,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     playing = playing,
                     downloadingId = downloading,
                     projectedDays = null,
+                    showBoxes = settings?.boundingBoxOverlay ?: true,
                     onPlay = { clip ->
                         edit(scope, open) {
                             downloading = clip.id
