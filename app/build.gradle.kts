@@ -16,6 +16,12 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1"
+
+        // libwebrtc and TFLite each ship a native library per ABI, and they dominate the
+        // APK — all four ABIs is 119 MB against 30 for one. Both phones in this project
+        // are arm64; pass -Phomecam.abis=arm64-v8a,x86_64 to add the emulator's, or the
+        // full set for a release meant to run anywhere.
+        ndk { abiFilters += (findProperty("homecam.abis") as String? ?: "arm64-v8a").split(",") }
     }
 
     buildTypes {
