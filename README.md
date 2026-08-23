@@ -23,10 +23,15 @@ devices have access, and every access is logged where you can see it.
 source ~/android-tooling/env.sh
 ./gradlew :core:test          # 80 tests, pure JVM, seconds
 ./gradlew assembleDebug
-./gradlew :app:connectedDebugAndroidTest   # audit tamper tests, needs a device
+./gradlew :app:connectedDebugAndroidTest   # 13 tests: audit tampering + the detector, needs a device
 ```
 
 One APK carries both roles; which one a phone is gets chosen at first launch.
+
+`assembleDebug` and `assembleRelease` are followed by `verifyNativeAlignment`, which fails
+the build if any packaged native library cannot be mapped on a 16 KB page device. Every
+`.so` comes from a prebuilt dependency, so that property is decided by which versions are
+pinned and is worth checking rather than trusting.
 
 The build targets `arm64-v8a` only, because libwebrtc and TFLite each ship a native
 library per ABI and all four is a 119 MB APK against 49. Pass

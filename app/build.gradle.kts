@@ -1,3 +1,7 @@
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -91,7 +95,7 @@ dependencies {
     implementation(libs.androidx.camera.view)
 
     implementation(libs.webrtc.android)
-    implementation(libs.tensorflow.lite.task.vision)
+    implementation(libs.litert)
 
     implementation(libs.java.websocket)
     implementation(libs.slf4j.api)
@@ -104,4 +108,89 @@ dependencies {
     androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.test.espresso.core)
+}
+
+/**
+ * Android 15 devices may use a 16 KB memory page, and a native library whose LOAD segments
+ * are aligned to 4 KB cannot be mapped on one. Every `.so` in this APK comes from a
+ * prebuilt dependency, so the property is entirely decided by which versions are pinned —
+ * which makes it exactly the kind of thing that regresses silently on a routine bump.
+ *
+ * So it is checked at build time rather than trusted. The ELF headers are parsed here
+ * instead of shelling out to `readelf`, because the NDK is not a build dependency of this
+ * project and adding one to run a check would be a poor trade.
+ */
+val verifyNativeAlignment by tasks.registering {
+    description = "Fails if any packaged native library cannot be mapped on a 16 KB page device."
+    group = "verification"
+
+    val apks = fileTree(layout.buildDirectory.dir("outputs/apk")) { include("**/*.apk") }
+    inputs.files(apks)
+
+    doLast {
+        val required = 16 * 1024L
+        val offenders = mutableListOf<String>()
+        var checked = 0
+
+        apks.forEach { apk ->
+            ZipFile(apk).use { zip ->
+                zip.entries().asSequence()
+                    .filter { it.name.startsWith("lib/") && it.name.endsWith(".so") }
+                    .forEach { entry ->
+                        val bytes = zip.getInputStream(entry).readBytes()
+                        val alignment = maxLoadAlignment(bytes)
+                        checked++
+                        if (alignment != null && alignment < required) {
+                            offenders += "${apk.name}!${entry.name} aligned to $alignment"
+                        }
+                    }
+            }
+        }
+
+        if (offenders.isNotEmpty()) {
+            throw GradleException(
+                "Not 16 KB page compatible:\n" + offenders.joinToString("\n") { "  $it" } +
+                    "\nThese come from prebuilt dependencies; the fix is a version that ships " +
+                    "16 KB-aligned libraries, not a build flag."
+            )
+        }
+        logger.lifecycle("16 KB alignment: $checked native libraries OK")
+    }
+}
+
+/** Largest `p_align` across the PT_LOAD segments, or null if this is not an ELF file. */
+fun maxLoadAlignment(bytes: ByteArray): Long? {
+    if (bytes.size < 64 || bytes[0] != 0x7F.toByte() ||
+        bytes[1] != 'E'.code.toByte() || bytes[2] != 'L'.code.toByte() || bytes[3] != 'F'.code.toByte()
+    ) return null
+
+    val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+    val is64Bit = bytes[4] == 2.toByte()
+
+    val programHeaderOffset: Long
+    val entrySize: Int
+    val entryCount: Int
+    if (is64Bit) {
+        programHeaderOffset = buffer.getLong(32)
+        entrySize = buffer.getShort(54).toInt()
+        entryCount = buffer.getShort(56).toInt()
+    } else {
+        programHeaderOffset = buffer.getInt(28).toLong()
+        entrySize = buffer.getShort(42).toInt()
+        entryCount = buffer.getShort(44).toInt()
+    }
+
+    var maximum = 0L
+    for (i in 0 until entryCount) {
+        val base = (programHeaderOffset + i.toLong() * entrySize).toInt()
+        if (base < 0 || base + entrySize > bytes.size) return maximum.takeIf { it > 0 }
+        if (buffer.getInt(base) != 1) continue  // PT_LOAD
+        val align = if (is64Bit) buffer.getLong(base + 48) else buffer.getInt(base + 28).toLong()
+        if (align > maximum) maximum = align
+    }
+    return maximum.takeIf { it > 0 }
+}
+
+listOf("assembleDebug", "assembleRelease").forEach { name ->
+    tasks.matching { it.name == name }.configureEach { finalizedBy(verifyNativeAlignment) }
 }

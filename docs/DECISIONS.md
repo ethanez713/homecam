@@ -118,3 +118,37 @@ single-statement truncation into one that has to know about and match a second a
 
 Covered by `AuditTamperTest` on device, which deletes from the middle, deletes the tail,
 and empties the table.
+
+
+## D8 — LiteRT instead of the TFLite Task Library, for 16 KB page compatibility
+
+Android 15 allows a 16 KB memory page, and a native library whose ELF `LOAD` segments are
+aligned to 4 KB cannot be mapped on such a device. Of the six native libraries this APK
+packages, exactly one was 4 KB aligned: `libtask_vision_jni.so`, from
+`org.tensorflow:tensorflow-lite-task-vision:0.4.4`. The other five — including libwebrtc
+and ML Kit — were already at `0x4000`.
+
+`0.4.4` is that library's **last** release; the Task Library was deprecated before the
+16 KB requirement existed, so there is no version to upgrade to. Two replacements were
+measured rather than assumed:
+
+| Candidate | Alignment | Why not / why |
+|---|---|---|
+| MediaPipe `tasks-vision` | 16 KB | Pulls `datatransport` + `firebase-encoders`, a telemetry stack. §2.9 says no analytics — not "disabled", absent. |
+| `com.google.ai.edge.litert:litert:1.4.0` | 16 KB | Depends on nothing but its own API. **Chosen.** |
+| `litert:2.0.2` | — | Pulls Play services and asset delivery. |
+
+LiteRT is the interpreter alone, so the two things the Task Library was doing now live in
+our code: the label map ships beside the model as an asset, and the four output tensors are
+read directly. That is less of a change than it sounds, because the model ends in a
+`TFLite_Detection_PostProcess` op — decoding and non-maximum suppression already happened
+inside the graph, so there is no postprocessing to get wrong. The output *order* is a
+contract of that op rather than of this file, so `ObjectDetector.create` verifies the
+tensor shapes and returns null instead of producing confident nonsense.
+
+**The property is now checked at build time.** Every `.so` here comes from a prebuilt
+dependency, so 16 KB compatibility is decided entirely by which versions are pinned —
+exactly the thing that regresses silently on a routine bump. `verifyNativeAlignment` parses
+the ELF program headers of every packaged library and fails the build below 16 KB; it runs
+after `assembleDebug` and `assembleRelease`, and was itself tested against a deliberately
+4 KB-aligned APK to confirm it fails rather than merely passing.

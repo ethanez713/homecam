@@ -13,7 +13,7 @@ room = "2.6.1"
 camerax = "1.4.1"
 work = "2.10.0"
 webrtc = "125.6422.07"
-tflite = "2.16.1"
+litert = "1.4.0"
 javaWebsocket = "1.5.7"
 slf4j = "2.0.16"
 zxing = "3.5.3"
@@ -59,10 +59,7 @@ androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version
 
 webrtc-android = { module = "io.github.webrtc-sdk:android", version.ref = "webrtc" }
 
-tensorflow-lite = { module = "org.tensorflow:tensorflow-lite", version.ref = "tflite" }
-tensorflow-lite-gpu = { module = "org.tensorflow:tensorflow-lite-gpu", version.ref = "tflite" }
-tensorflow-lite-support = { module = "org.tensorflow:tensorflow-lite-support", version = "0.4.4" }
-tensorflow-lite-task-vision = { module = "org.tensorflow:tensorflow-lite-task-vision", version = "0.4.4" }
+litert = { module = "com.google.ai.edge.litert:litert", version.ref = "litert" }
 
 java-websocket = { module = "org.java-websocket:Java-WebSocket", version.ref = "javaWebsocket" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
