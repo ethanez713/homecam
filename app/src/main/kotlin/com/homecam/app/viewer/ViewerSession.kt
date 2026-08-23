@@ -26,6 +26,8 @@ class ViewerSession(
     context: Context,
     private val client: SignalingClient,
 ) {
+    val link get() = client.link
+
     private val _video = MutableStateFlow<VideoTrack?>(null)
     val video: StateFlow<VideoTrack?> = _video.asStateFlow()
 

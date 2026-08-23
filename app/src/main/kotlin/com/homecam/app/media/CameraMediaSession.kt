@@ -7,6 +7,7 @@ import com.homecam.core.signaling.DtlsCommitment
 import com.homecam.core.signaling.DtlsFingerprint
 import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
+import com.homecam.proto.PrivacyMask
 import com.homecam.proto.Sdp
 import org.webrtc.AudioTrack
 import org.webrtc.IceCandidate
@@ -32,6 +33,7 @@ class CameraMediaSession(
         val height: Int = 720,
         val framerate: Int = 24,
         val audio: Boolean = true,
+        val privacyMask: PrivacyMask = PrivacyMask.getDefaultInstance(),
     )
 
     interface Transport {
@@ -43,6 +45,7 @@ class CameraMediaSession(
 
     val id: String = UUID.randomUUID().toString()
 
+    private var current = config
     private val factory = WebRtc.factory(context)
     private val commitment = DtlsCommitment()
 
@@ -50,6 +53,7 @@ class CameraMediaSession(
     private var capturer: CameraXVideoCapturer? = null
     private var textureHelper: SurfaceTextureHelper? = null
     private var videoTrack: VideoTrack? = null
+    private val maskProcessor = PrivacyMaskProcessor().apply { mask = config.privacyMask }
     private var audioTrack: AudioTrack? = null
     private var closed = false
 
@@ -78,10 +82,11 @@ class CameraMediaSession(
         textureHelper = helper
 
         val source = factory.createVideoSource(false)
+        source.setVideoProcessor(maskProcessor)
         val videoCapturer = CameraXVideoCapturer(context, lifecycleOwner)
         capturer = videoCapturer
         videoCapturer.initialize(helper, context, source.capturerObserver)
-        videoCapturer.startCapture(config.width, config.height, config.framerate)
+        videoCapturer.startCapture(current.width, current.height, current.framerate)
 
         videoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, source).also {
             connection?.addTrack(it, listOf(STREAM_ID))
@@ -155,6 +160,21 @@ class CameraMediaSession(
             IceCandidate(candidate.sdpMid, candidate.sdpMLineIndex, candidate.candidate)
         )
     }
+
+    fun setPrivacyMask(mask: PrivacyMask) { maskProcessor.mask = mask }
+
+    /**
+     * Changed on the capturer rather than by renegotiating: WebRTC adapts to a new frame
+     * size on its own, so a resolution change costs a camera rebind and nothing else.
+     */
+    fun setResolution(width: Int, height: Int, framerate: Int) {
+        current = current.copy(width = width, height = height, framerate = framerate)
+        capturer?.changeCaptureFormat(width, height, framerate)
+    }
+
+    fun setLens(front: Boolean) = capturer?.setLensFacing(front)
+
+    val resolution: Triple<Int, Int, Int> get() = Triple(current.width, current.height, current.framerate)
 
     fun setTorch(on: Boolean) = capturer?.setTorch(on)
 

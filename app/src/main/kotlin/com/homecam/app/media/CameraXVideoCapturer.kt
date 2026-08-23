@@ -31,8 +31,11 @@ import org.webrtc.VideoCapturer
 class CameraXVideoCapturer(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
-    private val lensFacing: Int = CameraSelector.LENS_FACING_BACK,
+    initialLensFacing: Int = CameraSelector.LENS_FACING_BACK,
 ) : VideoCapturer {
+
+    private var lensFacing = initialLensFacing
+    private var format = Triple(1280, 720, 24)
 
     private var helper: SurfaceTextureHelper? = null
     private var observer: CapturerObserver? = null
@@ -51,6 +54,7 @@ class CameraXVideoCapturer(
     }
 
     override fun startCapture(width: Int, height: Int, framerate: Int) {
+        format = Triple(width, height, framerate)
         val helper = helper ?: return
         val observer = observer ?: return
 
@@ -91,6 +95,14 @@ class CameraXVideoCapturer(
                 useCase,
             )
         }, main)
+    }
+
+    fun setLensFacing(front: Boolean) {
+        val next = if (front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+        if (next == lensFacing) return
+        lensFacing = next
+        val (width, height, framerate) = format
+        changeCaptureFormat(width, height, framerate)
     }
 
     fun setTorch(on: Boolean) {

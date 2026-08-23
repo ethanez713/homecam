@@ -152,6 +152,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             lifecycleOwner = this,
             config = CameraMediaSession.Config(
                 audio = config.audio && graph.settings.current.microphone,
+                privacyMask = graph.settings.current.privacyMask,
             ),
             transport = object : CameraMediaSession.Transport {
                 override fun sendOffer(sdp: Sdp) =
@@ -192,8 +193,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             .setSessionId(current.media.id)
             .setActive(true)
             .setStartedAtMs(current.startedAtMs)
-            .setVideoWidth(DEFAULT_WIDTH)
-            .setVideoHeight(DEFAULT_HEIGHT)
+            .setVideoWidth(current.media.resolution.first)
+            .setVideoHeight(current.media.resolution.second)
             .build()
     }
 
@@ -202,6 +203,28 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     override fun setZoom(ratio: Float) { live?.media?.setZoom(ratio) }
 
     override fun setPushToTalk(active: Boolean) = Unit
+
+    override suspend fun setResolution(resolution: com.homecam.proto.Resolution): SessionStatus {
+        val current = live ?: return SessionStatus.getDefaultInstance()
+        current.media.setResolution(
+            resolution.width.coerceIn(320, 1920),
+            resolution.height.coerceIn(240, 1080),
+            resolution.fps.coerceIn(5, 30),
+        )
+        return sessionStatus(current.peer.viewer?.shortFingerprint.orEmpty())
+    }
+
+    override fun setLens(facing: com.homecam.proto.Lens.Facing) {
+        live?.media?.setLens(facing == com.homecam.proto.Lens.Facing.FRONT)
+    }
+
+    /**
+     * A mask edited while somebody is watching has to take effect on that stream, not the
+     * next one — the whole point is that the pixels never leave.
+     */
+    override fun setPrivacyMask(mask: com.homecam.proto.PrivacyMask) {
+        live?.media?.setPrivacyMask(mask)
+    }
 
     // ------------------------------------------------ SignalingServer.Listener
 
@@ -251,8 +274,6 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     companion object {
         private const val TAG = "CameraService"
-        private const val DEFAULT_WIDTH = 1280
-        private const val DEFAULT_HEIGHT = 720
         private const val CHANNEL_ID = "homecam.camera"
         private const val NOTIFICATION_ID = 1
         private const val SHUTDOWN_GRACE_MS = 1_000

@@ -13,10 +13,12 @@ import com.homecam.proto.BoundingBoxOverlay
 import com.homecam.proto.DetectionMode
 import com.homecam.proto.DetectionSchedule
 import com.homecam.proto.DetectionZone
+import com.homecam.proto.Lens
 import com.homecam.proto.LowLight
 import com.homecam.proto.Microphone
 import com.homecam.proto.PrivacyMask
 import com.homecam.proto.PushToTalk
+import com.homecam.proto.Resolution
 import com.homecam.proto.RetentionPolicy
 import com.homecam.proto.RpcError
 import com.homecam.proto.RpcMessage
@@ -66,6 +68,13 @@ class CameraServices(
             media().setZoom(Zoom.parseFrom(request.payload).ratio)
             request.payload
         }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.RESOLUTION) { request ->
+            media().setResolution(Resolution.parseFrom(request.payload)).toByteString()
+        }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.LENS) { request ->
+            media().setLens(Lens.parseFrom(request.payload).facing)
+            request.payload
+        }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.PUSH_TO_TALK) { request ->
             media().setPushToTalk(PushToTalk.parseFrom(request.payload).active)
             request.payload
@@ -111,6 +120,9 @@ class CameraServices(
     ) {
         peer.register(RpcMessage.Service.SETTINGS, control) { request ->
             val updated = graph.settings.update { edit(request.payload) }
+            if (control == Controls.Settings.PRIVACY_MASK) {
+                media?.setPrivacyMask(updated.privacyMask)
+            }
             graph.audit.record(
                 if (control == Controls.Settings.PRIVACY_MASK) AuditEvent.Kind.PRIVACY_MASK_EDITED
                 else AuditEvent.Kind.SETTINGS_CHANGED,

@@ -1,5 +1,8 @@
 package com.homecam.app.camera
 
+import com.homecam.proto.Lens
+import com.homecam.proto.PrivacyMask
+import com.homecam.proto.Resolution
 import com.homecam.proto.SessionConfig
 import com.homecam.proto.SessionStatus
 
@@ -15,4 +18,7 @@ interface MediaController {
     fun setTorch(on: Boolean)
     fun setZoom(ratio: Float)
     fun setPushToTalk(active: Boolean)
+    fun setPrivacyMask(mask: PrivacyMask)
+    suspend fun setResolution(resolution: Resolution): SessionStatus
+    fun setLens(facing: Lens.Facing)
 }

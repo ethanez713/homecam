@@ -5,6 +5,8 @@ import com.homecam.core.rpc.RpcPeer
 import com.homecam.proto.Alias
 import com.homecam.proto.Armed
 import com.homecam.proto.AuditQuery
+import com.homecam.proto.DetectionMode
+import com.homecam.proto.Microphone
 import com.homecam.proto.RevokeViewer
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.RuntimeStatus
@@ -36,6 +38,33 @@ class CameraLink(private val peer: RpcPeer) {
             RpcMessage.Service.SETTINGS,
             Controls.Settings.ALIAS,
             Alias.newBuilder().setAlias(alias).build().toByteString(),
+        )
+    )
+
+    suspend fun setMicrophone(enabled: Boolean): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.MICROPHONE,
+            Microphone.newBuilder().setEnabled(enabled).build().toByteString(),
+        )
+    )
+
+    suspend fun setDetectionMode(
+        person: Boolean,
+        vehicle: Boolean,
+        pet: Boolean,
+        packages: Boolean,
+    ): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.DETECTION_MODE,
+            DetectionMode.newBuilder()
+                .setPerson(person)
+                .setVehicle(vehicle)
+                .setPet(pet)
+                .setPackage(packages)
+                .build()
+                .toByteString(),
         )
     )
 
