@@ -10,6 +10,7 @@ devices have access, and every access is logged where you can see it.
 
 | | |
 |---|---|
+| [`docs/plans/README.md`](docs/plans/README.md) | The roadmap — what is being built next, and where it is up to |
 | [`docs/PLAN.md`](docs/PLAN.md) | The design: threat model, wire protocol, milestones |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Where the implementation diverged from the plan, and why |
 | [`docs/REMOTE_ACCESS.md`](docs/REMOTE_ACCESS.md) | Watching from outside the house, over Tailscale |
