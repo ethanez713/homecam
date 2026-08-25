@@ -1,3 +1,4 @@
+import com.android.build.api.artifact.SingleArtifact
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -121,42 +122,52 @@ dependencies {
  * So it is checked at build time rather than trusted. The ELF headers are parsed here
  * instead of shelling out to `readelf`, because the NDK is not a build dependency of this
  * project and adding one to run a check would be a poor trade.
+ *
+ * One task per variant, taking that variant's APK directory as a declared input. Globbing
+ * `outputs/apk` instead reads another task's output without depending on it, which Gradle
+ * now fails the build over — correctly, since whether the check saw an APK at all then
+ * depended on task ordering.
  */
-val verifyNativeAlignment by tasks.registering {
-    description = "Fails if any packaged native library cannot be mapped on a 16 KB page device."
-    group = "verification"
+androidComponents {
+    onVariants { variant ->
+        val apkDirectory = variant.artifacts.get(SingleArtifact.APK)
+        val verify = tasks.register("verify${variant.name.replaceFirstChar(Char::titlecase)}NativeAlignment") {
+            description = "Fails if any packaged native library cannot be mapped on a 16 KB page device."
+            group = "verification"
+            inputs.dir(apkDirectory)
 
-    val apks = fileTree(layout.buildDirectory.dir("outputs/apk")) { include("**/*.apk") }
-    inputs.files(apks)
+            doLast {
+                val required = 16 * 1024L
+                val offenders = mutableListOf<String>()
+                var checked = 0
 
-    doLast {
-        val required = 16 * 1024L
-        val offenders = mutableListOf<String>()
-        var checked = 0
-
-        apks.forEach { apk ->
-            ZipFile(apk).use { zip ->
-                zip.entries().asSequence()
-                    .filter { it.name.startsWith("lib/") && it.name.endsWith(".so") }
-                    .forEach { entry ->
-                        val bytes = zip.getInputStream(entry).readBytes()
-                        val alignment = maxLoadAlignment(bytes)
-                        checked++
-                        if (alignment != null && alignment < required) {
-                            offenders += "${apk.name}!${entry.name} aligned to $alignment"
-                        }
+                apkDirectory.get().asFile.walkTopDown().filter { it.extension == "apk" }.forEach { apk ->
+                    ZipFile(apk).use { zip ->
+                        zip.entries().asSequence()
+                            .filter { it.name.startsWith("lib/") && it.name.endsWith(".so") }
+                            .forEach { entry ->
+                                val bytes = zip.getInputStream(entry).readBytes()
+                                val alignment = maxLoadAlignment(bytes)
+                                checked++
+                                if (alignment != null && alignment < required) {
+                                    offenders += "${apk.name}!${entry.name} aligned to $alignment"
+                                }
+                            }
                     }
+                }
+
+                if (offenders.isNotEmpty()) {
+                    throw GradleException(
+                        "Not 16 KB page compatible:\n" + offenders.joinToString("\n") { "  $it" } +
+                            "\nThese come from prebuilt dependencies; the fix is a version that ships " +
+                            "16 KB-aligned libraries, not a build flag."
+                    )
+                }
+                logger.lifecycle("16 KB alignment: $checked native libraries OK")
             }
         }
-
-        if (offenders.isNotEmpty()) {
-            throw GradleException(
-                "Not 16 KB page compatible:\n" + offenders.joinToString("\n") { "  $it" } +
-                    "\nThese come from prebuilt dependencies; the fix is a version that ships " +
-                    "16 KB-aligned libraries, not a build flag."
-            )
-        }
-        logger.lifecycle("16 KB alignment: $checked native libraries OK")
+        tasks.matching { it.name == "assemble${variant.name.replaceFirstChar(Char::titlecase)}" }
+            .configureEach { finalizedBy(verify) }
     }
 }
 
@@ -193,6 +204,3 @@ fun maxLoadAlignment(bytes: ByteArray): Long? {
     return maximum.takeIf { it > 0 }
 }
 
-listOf("assembleDebug", "assembleRelease").forEach { name ->
-    tasks.matching { it.name == name }.configureEach { finalizedBy(verifyNativeAlignment) }
-}
