@@ -138,6 +138,10 @@ measured rather than assumed:
 | `com.google.ai.edge.litert:litert:1.4.0` | 16 KB | Depends on nothing but its own API. **Chosen.** |
 | `litert:2.0.2` | — | Pulls Play services and asset delivery. |
 
+Re-checked at `litert:2.2.0` (August 2026): it still resolves `litert-api`, which still
+depends on `com.google.android.play:ai-delivery`. The 1.4.0 pin stands, and this note
+exists so the next person does not resolve those POMs a third time.
+
 LiteRT is the interpreter alone, so the two things the Task Library was doing now live in
 our code: the label map ships beside the model as an asset, and the four output tensors are
 read directly. That is less of a change than it sounds, because the model ends in a
@@ -148,7 +152,93 @@ tensor shapes and returns null instead of producing confident nonsense.
 
 **The property is now checked at build time.** Every `.so` here comes from a prebuilt
 dependency, so 16 KB compatibility is decided entirely by which versions are pinned —
-exactly the thing that regresses silently on a routine bump. `verifyNativeAlignment` parses
-the ELF program headers of every packaged library and fails the build below 16 KB; it runs
-after `assembleDebug` and `assembleRelease`, and was itself tested against a deliberately
-4 KB-aligned APK to confirm it fails rather than merely passing.
+exactly the thing that regresses silently on a routine bump. `verifyDebugNativeAlignment`
+and `verifyReleaseNativeAlignment` parse the ELF program headers of every packaged library
+and fail the build below 16 KB, each finalizing its own `assemble` task and taking that
+variant's APK directory as a declared input.
+
+The check is only worth having if it has been watched to fail, so it is re-tested against a
+deliberately 4 KB-aligned APK whenever it changes.
+
+## D9 — The toolchain tracks the current stable line, not `PLAN.md` §8
+
+§8 pins a December 2024 toolchain and says checksums are locked in
+`gradle/verification-metadata.xml`. Both statements have been replaced rather than
+adjusted: the versions are now the current stable line — AGP 9, Gradle 9, Kotlin 2.4,
+compileSdk 37 — and the lock file exists.
+
+The bump was not optional. Current AndroidX refuses to be consumed below AGP 9.1 and
+compileSdk 37, so the alternative was pinning AndroidX backwards to keep AGP 8, which
+inverts the intent: the project would be old because it was old.
+
+Two consequences worth knowing before touching the build:
+
+- **AGP 9 carries Kotlin itself.** Applying `org.jetbrains.kotlin.android` to `:app` is
+  now an error, and `kotlinOptions` is `compilerOptions`. `:core` still applies
+  `kotlin-jvm`; it is not an Android module.
+- **compileSdk and targetSdk are deliberately different.** Compile against the newest
+  APIs, but opt into Android 16 runtime behaviour, which is what the viewer phone runs.
+  Android 17's behaviour changes have not been reviewed here, and raising targetSdk is
+  the act that opts into them.
+
+The version that matters for reasons other than currency is **libwebrtc**, which was
+twenty months behind. It is a C++ stack parsing untrusted RTP, SRTP and STUN from anyone
+who can reach the port, which is T3 and T5 — so it is on the short list of dependencies
+where being behind is a vulnerability rather than an inconvenience, along with
+Java-WebSocket. Bump those two on their own schedule, not only when something else forces
+it.
+
+## D10 — Clips are fragmented MP4 written by media3, not `MediaMuxer`
+
+§5 says "fragmented MP4" and the recorder used `MediaMuxer`, which writes the `moov`
+index only on `stop()`. A camera phone that lost power or was killed mid-clip therefore
+produced a file with no index and no recoverable video at all — not a truncated clip,
+nothing. That is the ordinary way this device dies, and it gets more likely the longer a
+clip runs, which phase 4 is about to make routine.
+
+`androidx.media3:media3-muxer` writes the index up front and completes a fragment every
+keyframe interval, so the same interruption costs seconds. Fragment duration is tied to
+the keyframe interval because a fragment that does not begin on an IDR is not
+independently decodable, so no other boundary is worth anything.
+
+It also removed the API 29 floor on timed metadata: media3 writes the `mett` sample entry
+itself, so the detection track — and with it the self-describing clip §6 wants — now
+exists on every device the app supports, not only Android 10 and up.
+
+## D11 — The recorder picks HEVC; the live path stays H.264
+
+§6 assumes H.264 throughout because Alfred needed it: browsers and a decade-wide device
+fleet. Neither applies to two phones that both encode and decode HEVC in hardware.
+
+The recorder now probes for a hardware HEVC encoder and uses it, at 60% of the H.264
+bitrate for the same quality — which is 40% more history inside the same `maxSizeGb`
+ceiling, on a device where storage is what bounds how far back you can look. Only a
+hardware encoder counts: a software one would spend more battery and heat than the
+smaller file saves, which is the entire justification, so the probe rejects it and falls
+back. That also keeps an older camera phone working, since the choice is per device
+rather than per build.
+
+The live path is untouched. It has its own encoder (D6) and its bitrate is set by
+congestion control rather than by us, so there is nothing to win there and interop to
+lose.
+
+## D12 — Alerts run under `specialUse`, and there is a boot receiver
+
+Two ways the app quietly stopped working on a current Android release.
+
+**The alert listener was a `dataSync` foreground service.** For apps targeting Android 15
+that type is capped at six hours in any twenty-four. The listener holds one long-lived
+connection to the user's own push endpoint for as long as alerts are on, so alerts would
+have stopped part-way through every day, silently — the failure §2.8 exists to prevent.
+`specialUse` is the type for a connection the app must keep because there is no
+third-party push service to keep it for us, and it carries no timeout.
+
+**§9.3's boot receiver did not exist**, though the permission was declared —
+`CameraService` was only ever started from a composable, so after a power cut the camera
+stayed down until somebody opened the app.
+
+The receiver now restarts whichever role the install is, and survives an app update too.
+Newer Android versions refuse some foreground-service starts from `BOOT_COMPLETED`, and
+when the system refuses there is nothing the receiver can do about it — so it posts an
+ongoing "not running, tap to resume" notification instead. Stopping is survivable;
+stopping silently is not, which is the same argument §2.7 makes about the audit log.
