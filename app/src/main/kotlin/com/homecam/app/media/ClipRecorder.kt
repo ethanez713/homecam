@@ -2,7 +2,9 @@ package com.homecam.app.media
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
+import android.os.Build
 import android.util.Log
 import androidx.media3.common.Format
 import androidx.media3.common.util.MediaFormatUtil
@@ -19,7 +21,14 @@ import java.nio.ByteBuffer
 import java.util.ArrayDeque
 
 /**
- * Encodes the capture to H.264 and writes fragmented MP4 clips.
+ * Encodes the capture to HEVC where the phone has a hardware encoder for it, H.264
+ * otherwise, and writes fragmented MP4 clips.
+ *
+ * The codec choice is the recorder's alone. The live path stays on H.264 for interop and
+ * because congestion control drives its bitrate anyway (`DECISIONS.md` D6); the recorder
+ * is writing a file that has to be good months later, and HEVC reaches the same quality at
+ * roughly 60% of the bitrate — which is 40% more days of history inside the same
+ * `maxSizeGb` ceiling, on a phone whose storage is the binding constraint.
  *
  * Fragmented, and written by media3's muxer rather than [android.media.MediaMuxer], for
  * one reason: `MediaMuxer` only writes the `moov` index when the file is stopped, so a
@@ -50,6 +59,7 @@ class ClipRecorder(
         val framerate: Int = 24,
         val bitrate: Int = 3_000_000,
         val keyframeIntervalSeconds: Int = 2,
+        /** For H.264. HEVC is given [HEVC_BITRATE_RATIO] of it for the same quality. */
         val preRollMs: Long = 6_000,
         val maxClipMs: Long = 120_000,
     )
@@ -57,6 +67,10 @@ class ClipRecorder(
     data class Written(val id: String, val file: File, val startedAtMs: Long, val durationMs: Int)
 
     private val lock = Any()
+
+    private val mime = if (hasHardwareEncoder(HEVC, config.width, config.height)) HEVC else AVC
+    private val bitrate =
+        if (mime == HEVC) config.bitrate * HEVC_BITRATE_RATIO / 100 else config.bitrate
 
     private var encoder: MediaCodec? = null
     private var renderer: EglRenderer? = null
@@ -92,16 +106,16 @@ class ClipRecorder(
     fun start(eglContext: EglBase.Context) {
         synchronized(lock) {
             if (encoder != null) return
-            val format = MediaFormat.createVideoFormat(MIME, config.width, config.height).apply {
+            val format = MediaFormat.createVideoFormat(mime, config.width, config.height).apply {
                 setInteger(
                     MediaFormat.KEY_COLOR_FORMAT,
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface,
                 )
-                setInteger(MediaFormat.KEY_BIT_RATE, config.bitrate)
+                setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, config.framerate)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, config.keyframeIntervalSeconds)
             }
-            val codec = MediaCodec.createEncoderByType(MIME)
+            val codec = MediaCodec.createEncoderByType(mime)
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             val surface = codec.createInputSurface()
             codec.start()
@@ -306,8 +320,29 @@ class ClipRecorder(
 
     private companion object {
         const val TAG = "ClipRecorder"
-        const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
+        const val AVC = MediaFormat.MIMETYPE_VIDEO_AVC
+        const val HEVC = MediaFormat.MIMETYPE_VIDEO_HEVC
+        const val HEVC_BITRATE_RATIO = 60
         const val METADATA_MIME = "application/x-homecam-detections"
         const val DRAIN_TIMEOUT_US = 100_000L
+
+        /**
+         * A software HEVC encoder would cost more battery and heat than the bitrate saves,
+         * which is the whole reason for the choice, so only a hardware one counts.
+         */
+        private fun hasHardwareEncoder(mime: String, width: Int, height: Int): Boolean =
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+                info.isEncoder && !info.isSoftwareOnlyCompat() &&
+                    info.supportedTypes.any { it.equals(mime, ignoreCase = true) } &&
+                    runCatching {
+                        info.getCapabilitiesForType(mime)
+                            .videoCapabilities?.isSizeSupported(width, height) == true
+                    }.getOrDefault(false)
+            }
+
+        /** `isSoftwareOnly` arrived at API 29; below it the names are the only signal. */
+        private fun MediaCodecInfo.isSoftwareOnlyCompat(): Boolean =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) isSoftwareOnly
+            else name.startsWith("OMX.google.") || name.startsWith("c2.android.")
     }
 }
