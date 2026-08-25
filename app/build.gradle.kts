@@ -95,6 +95,8 @@ dependencies {
     implementation(libs.androidx.camera.view)
 
     implementation(libs.webrtc.android)
+    implementation(libs.androidx.media3.muxer)
+    implementation(libs.androidx.media3.common)
     implementation(libs.litert)
 
     implementation(libs.java.websocket)

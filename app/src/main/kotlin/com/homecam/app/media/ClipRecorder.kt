@@ -3,18 +3,31 @@ package com.homecam.app.media
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
-import android.media.MediaMuxer
 import android.util.Log
+import androidx.media3.common.Format
+import androidx.media3.common.util.MediaFormatUtil
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.muxer.FragmentedMp4Muxer
+import androidx.media3.muxer.MuxerUtil
 import org.webrtc.EglBase
 import org.webrtc.EglRenderer
 import org.webrtc.VideoFrame
 import org.webrtc.VideoSink
 import java.io.File
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
 
 /**
  * Encodes the capture to H.264 and writes fragmented MP4 clips.
+ *
+ * Fragmented, and written by media3's muxer rather than [android.media.MediaMuxer], for
+ * one reason: `MediaMuxer` only writes the `moov` index when the file is stopped, so a
+ * camera phone that loses power or gets killed mid-clip leaves a file with no index and
+ * therefore no clip at all. A fragmented file carries its index up front and is complete
+ * at every fragment boundary, so the same interruption costs at most the last
+ * [Config.keyframeIntervalSeconds] seconds. That is the difference between losing a few
+ * frames and losing the recording that mattered.
  *
  * Frames arrive as WebRTC [VideoFrame]s and are drawn straight into MediaCodec's input
  * Surface through an [EglRenderer] sharing the process EGL context, so a texture-backed
@@ -25,6 +38,7 @@ import java.util.ArrayDeque
  * clip, and the clip then begins several seconds before the thing that triggered it —
  * which is where the useful part of a motion clip always is.
  */
+@UnstableApi
 class ClipRecorder(
     private val clipsDir: File,
     private val config: Config = Config(),
@@ -46,7 +60,8 @@ class ClipRecorder(
 
     private var encoder: MediaCodec? = null
     private var renderer: EglRenderer? = null
-    private var muxer: MediaMuxer? = null
+    private var muxer: FragmentedMp4Muxer? = null
+    private var muxerOutput: FileOutputStream? = null
     private var videoTrackIndex = -1
     private var metadataTrackIndex = -1
 
@@ -115,12 +130,20 @@ class ClipRecorder(
             val file = File(clipsDir, "$id.mp4")
             file.parentFile?.mkdirs()
 
-            val output = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            videoTrackIndex = output.addTrack(format)
+            val stream = FileOutputStream(file)
+            val output = FragmentedMp4Muxer.Builder(stream.channel)
+                // A fragment that does not start on a keyframe is not independently
+                // decodable, so there is nothing to gain from a boundary between IDRs.
+                .setFragmentDurationMs(config.keyframeIntervalSeconds * 1000L)
+                // Every sample handed over is a freshly allocated array that nothing
+                // writes to again, so the muxer's defensive copy is pure cost.
+                .setSampleCopyingEnabled(false)
+                .build()
+            videoTrackIndex = output.addTrack(MediaFormatUtil.createFormatFromMediaFormat(format))
             metadataTrackIndex = addMetadataTrack(output)
-            output.start()
 
             muxer = output
+            muxerOutput = stream
             currentClip = file
             currentId = id
             firstSampleUs = -1
@@ -137,15 +160,13 @@ class ClipRecorder(
     }
 
     /**
-     * Timed metadata in MPEG-4 only became muxable at API 29. Below that the detections
-     * are still recorded — they live in the clip index and are queryable over the
-     * TIMELINE service — but the file stops being self-describing, so this is the one
-     * place the artifact is weaker on an Android 8 camera.
+     * The muxer writes the `mett` sample entry itself, so unlike `MediaMuxer` — which only
+     * accepted timed metadata from API 29 — this works on every device the app runs on and
+     * the clip is self-describing everywhere.
      */
-    private fun addMetadataTrack(output: MediaMuxer): Int =
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) -1
-        else runCatching {
-            output.addTrack(MediaFormat().apply { setString(MediaFormat.KEY_MIME, METADATA_MIME) })
+    private fun addMetadataTrack(output: FragmentedMp4Muxer): Int =
+        runCatching {
+            output.addTrack(Format.Builder().setSampleMimeType(METADATA_MIME).build())
         }.getOrElse {
             Log.w(TAG, "no timed-metadata track on this device", it)
             -1
@@ -158,21 +179,28 @@ class ClipRecorder(
             if (metadataTrackIndex < 0) return
             val offsetUs = ((atMs - clipStartedAtMs) * 1000).coerceAtLeast(0)
             val info = MediaCodec.BufferInfo().apply { set(0, payload.size, offsetUs, 0) }
-            runCatching { output.writeSampleData(metadataTrackIndex, ByteBuffer.wrap(payload), info) }
-                .onFailure { Log.w(TAG, "metadata sample dropped", it) }
+            runCatching {
+                output.writeSampleData(
+                    metadataTrackIndex,
+                    ByteBuffer.wrap(payload),
+                    MuxerUtil.getMuxerBufferInfoFromMediaCodecBufferInfo(info),
+                )
+            }.onFailure { Log.w(TAG, "metadata sample dropped", it) }
         }
     }
 
     fun endClip(): Written? = synchronized(lock) {
         val output = muxer ?: return null
+        val stream = muxerOutput
         val file = currentClip
         val id = currentId
         muxer = null
+        muxerOutput = null
         currentClip = null
         currentId = null
 
-        runCatching { output.stop() }.onFailure { Log.w(TAG, "muxer stop", it) }
-        runCatching { output.release() }
+        runCatching { output.close() }.onFailure { Log.w(TAG, "muxer close", it) }
+        runCatching { stream?.close() }
 
         if (file == null || id == null) return null
         val duration = ((lastSampleUs - firstSampleUs) / 1000).toInt().coerceAtLeast(0)
@@ -245,25 +273,31 @@ class ClipRecorder(
         }
     }
 
-    private fun writeSample(output: MediaMuxer, sample: Sample) {
+    private fun writeSample(output: FragmentedMp4Muxer, sample: Sample) {
         if (firstSampleUs < 0) firstSampleUs = sample.presentationTimeUs
         lastSampleUs = sample.presentationTimeUs
         val info = MediaCodec.BufferInfo().apply {
             set(0, sample.data.size, sample.presentationTimeUs - firstSampleUs, sample.flags)
         }
         runCatching {
-            output.writeSampleData(videoTrackIndex, ByteBuffer.wrap(sample.data), info)
+            output.writeSampleData(
+                videoTrackIndex,
+                ByteBuffer.wrap(sample.data),
+                MuxerUtil.getMuxerBufferInfoFromMediaCodecBufferInfo(info),
+            )
         }.onFailure { Log.w(TAG, "sample dropped", it) }
     }
 
     private fun endClipLocked() {
         val output = muxer ?: return
+        val stream = muxerOutput
         val file = currentClip
         val id = currentId
         muxer = null
+        muxerOutput = null
         currentClip = null
         currentId = null
-        runCatching { output.stop(); output.release() }
+        runCatching { output.close(); stream?.close() }
         if (file != null && id != null) {
             val duration = ((lastSampleUs - firstSampleUs) / 1000).toInt().coerceAtLeast(0)
             onClipWritten?.invoke(Written(id, file, clipStartedAtMs, duration))
