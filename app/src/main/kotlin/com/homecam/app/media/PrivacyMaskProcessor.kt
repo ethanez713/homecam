@@ -23,6 +23,13 @@ class PrivacyMaskProcessor : VideoProcessor {
 
     @Volatile var mask: PrivacyMask = PrivacyMask.getDefaultInstance()
 
+    /**
+     * A quarter-turn added to every delivered frame's rotation. Applied here, upstream of
+     * both the live track and the recorder, so a viewer's rotation lands identically on
+     * the stream and on what gets written — the same reason the mask itself lives here.
+     */
+    @Volatile var orientationDegrees: Int = 0
+
     private var sink: VideoSink? = null
 
     /**
@@ -43,23 +50,31 @@ class PrivacyMaskProcessor : VideoProcessor {
     override fun onFrameCaptured(frame: VideoFrame) {
         val rects = mask.rectsList
         if (rects.isEmpty()) {
-            deliver(frame)
+            // The untouched fast path keeps a texture frame on the GPU all the way to the
+            // encoder, so only pay for a rewrapped frame when a rotation is actually set.
+            if (orientationDegrees == 0) {
+                deliver(frame)
+            } else {
+                deliver(VideoFrame(frame.buffer, rotationOf(frame), frame.timestampNs))
+            }
             return
         }
         // A frame we cannot mask is a frame we must not forward: silently streaming the
         // unmasked version would defeat the one control that promises the pixels never
         // leave the phone.
-        val masked = applyMask(frame, rects) ?: return
+        val masked = applyMask(frame, rects, rotationOf(frame)) ?: return
         deliver(masked)
         masked.release()
     }
+
+    private fun rotationOf(frame: VideoFrame): Int = (frame.rotation + orientationDegrees) % 360
 
     private fun deliver(frame: VideoFrame) {
         sink?.onFrame(frame)
         extraSinks.forEach { it.onFrame(frame) }
     }
 
-    private fun applyMask(frame: VideoFrame, rects: List<PrivacyMask.Rect>): VideoFrame? {
+    private fun applyMask(frame: VideoFrame, rects: List<PrivacyMask.Rect>, rotation: Int): VideoFrame? {
         val i420 = frame.buffer.toI420() ?: return null
         val width = i420.width
         val height = i420.height
@@ -80,7 +95,7 @@ class PrivacyMaskProcessor : VideoProcessor {
             null,
         )
         i420.release()
-        return VideoFrame(copy, frame.rotation, frame.timestampNs)
+        return VideoFrame(copy, rotation, frame.timestampNs)
     }
 
     /**

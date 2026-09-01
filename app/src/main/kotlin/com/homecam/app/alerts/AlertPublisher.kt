@@ -4,6 +4,7 @@ import android.util.Base64
 import android.util.Log
 import com.homecam.app.data.ViewerEntity
 import com.homecam.core.crypto.AlertCrypto
+import com.homecam.core.crypto.AlertLimits
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -25,15 +26,30 @@ class AlertPublisher(private val userAgent: String = "homecam") {
         val key = viewer.alertPublicKey
         if (!viewer.alertsEnabled || endpoint.isBlank() || viewer.alertTopic.isBlank()) return false
 
-        val body = if (key == null) null else runCatching {
-            AlertCrypto.seal(key, payload.toByteArray())
-        }.getOrNull()
+        val body = if (key == null) null else sealWithinLimit(key, payload)
 
         return if (body == null) {
             post(endpoint, viewer.alertTopic, CONTENT_FREE_PING.toByteArray(), plain = true)
         } else {
-            post(endpoint, viewer.alertTopic, Base64.encode(body, Base64.NO_WRAP), plain = false)
+            post(endpoint, viewer.alertTopic, body, plain = false)
         }
+    }
+
+    /**
+     * Seals the payload to a Base64 body under the push-provider limit, dropping the
+     * thumbnail first if the full payload does not fit. Returns null when even the
+     * thumbnail-free payload will not seal — the caller then falls back to a content-free
+     * ping rather than posting anything readable.
+     */
+    private fun sealWithinLimit(key: ByteArray, payload: AlertPayload): ByteArray? {
+        val candidates = sequenceOf(payload, payload.toBuilder().clearThumbnailJpeg().build())
+        for (candidate in candidates) {
+            val sealed = runCatching { AlertCrypto.seal(key, candidate.toByteArray()) }.getOrNull()
+                ?: continue
+            val body = Base64.encode(sealed, Base64.NO_WRAP)
+            if (body.size <= AlertLimits.MAX_SEALED_BODY_BYTES) return body
+        }
+        return null
     }
 
     private suspend fun post(

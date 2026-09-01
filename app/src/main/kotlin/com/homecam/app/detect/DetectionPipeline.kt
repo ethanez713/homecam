@@ -3,6 +3,7 @@ package com.homecam.app.detect
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.homecam.core.crypto.AlertLimits
 import com.homecam.core.detect.Detection
 import com.homecam.core.detect.DetectionPolicy
 import com.homecam.core.detect.MotionGate
@@ -25,7 +26,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DetectionPipeline(
     context: Context,
     private val settings: () -> SettingsSnapshot,
-    private val onEvent: (List<LabelledDetection>) -> Unit,
+    /**
+     * [thumbnailJpeg] is a small still of the frame that fired, bounded for the alert path
+     * and null for a motion-only event that carries no labels. It comes off the masked
+     * capture, so it can never show a region the owner masked out.
+     */
+    private val onEvent: (detections: List<LabelledDetection>, thumbnailJpeg: ByteArray?) -> Unit,
 ) : VideoSink {
 
     data class LabelledDetection(val category: String, val detection: Detection)
@@ -62,14 +68,18 @@ class DetectionPipeline(
 
             val bitmap = toBitmap(i420)
             val detections = detector?.detect(bitmap).orEmpty()
-            bitmap.recycle()
 
             val accepted = detections.mapNotNull { detection ->
                 DetectionPolicy.accepts(snapshot.detectionMode, snapshot.detectionZone, detection)
                     ?.let { LabelledDetection(it, detection) }
             }
             framesPerSecond = 1000f / (now - lastDetectAtMs).coerceAtLeast(1)
-            if (accepted.isNotEmpty() || snapshot.detectionMode.motionOnly) onEvent(accepted)
+            if (accepted.isNotEmpty()) {
+                onEvent(accepted, boundedJpeg(bitmap, AlertLimits.MAX_THUMBNAIL_BYTES))
+            } else if (snapshot.detectionMode.motionOnly) {
+                onEvent(accepted, null)
+            }
+            bitmap.recycle()
         } catch (e: Exception) {
             Log.w(TAG, "detection frame dropped", e)
         } finally {
@@ -143,8 +153,33 @@ class DetectionPipeline(
         return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
+    /** A small JPEG of the detected frame, squeezed under [maxBytes] for the alert path. */
+    private fun boundedJpeg(bitmap: Bitmap, maxBytes: Int): ByteArray? {
+        val scaled = scaleToWidth(bitmap, ALERT_THUMBNAIL_WIDTH)
+        var quality = ALERT_THUMBNAIL_QUALITY
+        var bytes: ByteArray
+        do {
+            val out = java.io.ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            bytes = out.toByteArray()
+            quality -= ALERT_THUMBNAIL_QUALITY_STEP
+        } while (bytes.size > maxBytes && quality >= ALERT_THUMBNAIL_MIN_QUALITY)
+        if (scaled !== bitmap) scaled.recycle()
+        return bytes.takeIf { it.size <= maxBytes }
+    }
+
+    private fun scaleToWidth(bitmap: Bitmap, width: Int): Bitmap {
+        if (bitmap.width <= width) return bitmap
+        val height = (bitmap.height.toLong() * width / bitmap.width).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(bitmap, width, height, true)
+    }
+
     private companion object {
         const val TAG = "DetectionPipeline"
+        const val ALERT_THUMBNAIL_WIDTH = 160
+        const val ALERT_THUMBNAIL_QUALITY = 60
+        const val ALERT_THUMBNAIL_QUALITY_STEP = 10
+        const val ALERT_THUMBNAIL_MIN_QUALITY = 20
         const val GRID = 16
         const val CELL_SAMPLE_STEP = 4
         const val GRID_INTERVAL_MS = 200L

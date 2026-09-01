@@ -24,6 +24,7 @@ message RpcMessage {
     MEDIA = 4;
     AUDIT = 5;
     ACCESS = 6;
+    CAPABILITY = 7;
   }
 
   Type type = 1;

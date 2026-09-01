@@ -5,6 +5,7 @@ import com.homecam.proto.PrivacyMask
 import com.homecam.proto.Resolution
 import com.homecam.proto.SessionConfig
 import com.homecam.proto.SessionStatus
+import com.homecam.proto.Snapshot
 
 /**
  * What the SESSION service can ask of the media pipeline. Split out so [CameraServices]
@@ -21,5 +22,9 @@ interface MediaController {
     fun setPrivacyMask(mask: PrivacyMask)
     suspend fun setResolution(resolution: Resolution): SessionStatus
     fun setLens(facing: Lens.Facing)
+    fun setOrientation(degrees: Int)
     fun recordManually(seconds: Int, start: Boolean)
+
+    /** A still off the live capture. Throws UNAVAILABLE when capture is not running. */
+    suspend fun snapshot(): Snapshot
 }

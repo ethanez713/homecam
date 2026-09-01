@@ -4,11 +4,15 @@ import android.content.Context
 import androidx.lifecycle.LifecycleOwner
 import com.homecam.proto.Lens
 import com.homecam.proto.PrivacyMask
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoFrame
 import org.webrtc.VideoSink
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.roundToInt
 
 /**
  * Capture runs for as long as the camera service does, not for as long as somebody is
@@ -65,6 +69,41 @@ class ContinuousCapture(
 
     fun setPrivacyMask(mask: PrivacyMask) { maskProcessor.mask = mask }
 
+    val orientationDegrees: Int get() = maskProcessor.orientationDegrees
+
+    /** Coerces to the nearest quarter-turn; anything else is not a rotation a camera does. */
+    fun setOrientation(degrees: Int) {
+        maskProcessor.orientationDegrees = (((degrees % 360) + 360) % 360 / 90.0).roundToInt() % 4 * 90
+    }
+
+    /**
+     * A single still off the live capture, JPEG-encoded, without opening a media session.
+     * It rides the same masked, oriented sink chain the recorder does, so a snapshot can
+     * never reveal a region the owner masked out. Null when capture is not running or no
+     * frame arrives in time — the caller turns that into an UNAVAILABLE, never a blank.
+     */
+    suspend fun snapshotJpeg(quality: Int = SNAPSHOT_QUALITY): ByteArray? {
+        if (!running) return null
+        val frameBytes = CompletableDeferred<ByteArray?>()
+        val sink = VideoSink { frame ->
+            if (frameBytes.isCompleted) return@VideoSink
+            val i420 = frame.buffer.toI420() ?: return@VideoSink
+            try {
+                frameBytes.complete(YuvJpeg.encode(i420, quality))
+            } catch (e: Exception) {
+                frameBytes.complete(null)
+            } finally {
+                i420.release()
+            }
+        }
+        maskProcessor.addSink(sink)
+        return try {
+            withTimeoutOrNull(SNAPSHOT_TIMEOUT_MS) { frameBytes.await() }
+        } finally {
+            maskProcessor.removeSink(sink)
+        }
+    }
+
     fun setTorch(on: Boolean) = capturer?.setTorch(on)
 
     fun setZoom(ratio: Float) = capturer?.setZoom(ratio)
@@ -83,5 +122,10 @@ class ContinuousCapture(
         capturer = null
         source = null
         helper = null
+    }
+
+    private companion object {
+        const val SNAPSHOT_QUALITY = 85
+        const val SNAPSHOT_TIMEOUT_MS = 2_000L
     }
 }

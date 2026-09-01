@@ -23,6 +23,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,6 +72,7 @@ fun ClipsScreen(
     onDelete: (Clip) -> Unit,
     showBoxes: Boolean,
     onClosePlayer: () -> Unit,
+    loadThumbnail: (suspend (String) -> ByteArray?)? = null,
 ) {
     if (playing != null) {
         Player(playing, showBoxes, onClosePlayer)
@@ -102,6 +112,10 @@ fun ClipsScreen(
                         Modifier.fillMaxWidth().padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        loadThumbnail?.let {
+                            ClipThumbnail(clip.id, it)
+                            Spacer(Modifier.width(12.dp))
+                        }
                         Column(Modifier.weight(1f)) {
                             Text(formatStamp(clip.startedAtMs), style = MaterialTheme.typography.titleSmall)
                             Text(
@@ -128,6 +142,31 @@ fun ClipsScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ClipThumbnail(clipId: String, load: suspend (String) -> ByteArray?) {
+    val image by produceState<ImageBitmap?>(null, clipId) {
+        val bytes = withContext(Dispatchers.IO) { load(clipId) }
+        value = bytes?.let {
+            android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap()
+        }
+    }
+    Box(
+        Modifier
+            .size(width = 72.dp, height = 48.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        image?.let {
+            Image(
+                bitmap = it,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }

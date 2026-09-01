@@ -26,6 +26,11 @@ message Resolution { uint32 width = 1; uint32 height = 2; uint32 fps = 3; }
 message Zoom { float ratio = 1; }
 message Lens { enum Facing { BACK = 0; FRONT = 1; } Facing facing = 1; }
 
+// A single still, served straight from the live capture without opening a media session —
+// reading a frame must not cost an H.264 encode (Phase 1). Dimensions are the capture
+// format's, so a viewer can lay boxes over it without guessing.
+message Snapshot { bytes jpeg = 1; uint32 width = 2; uint32 height = 3; }
+
 // --------------------------------------------------------------- SETTINGS (2)
 
 message SettingsSnapshot {
@@ -113,6 +118,8 @@ message SessionStatus {
   uint32 bitrate_kbps = 6;
   uint32 rtt_ms = 7;
   uint32 packets_lost = 8;
+  // Quarter-turn applied to the capture, so a viewer can confirm a rotation took effect.
+  uint32 orientation_degrees = 9;
 }
 
 // ------------------------------------------------------------------ MEDIA (4)
@@ -267,4 +274,44 @@ message AlertPayload {
   repeated string labels = 4;
   string clip_id = 5;
   bytes thumbnail_jpeg = 6;
+}
+
+// ------------------------------------------------------------- CAPABILITY
+
+/**
+ * What each end supports, exchanged *after* authentication (never as part of deciding
+ * trust). The dispatcher already drops unknown control ids silently, which stops a version
+ * mismatch from erroring; this exists so the UI can be honest about what will actually
+ * work rather than offering a control the camera cannot honour (Phase 2).
+ *
+ * Presence is modelled as explicit named fields rather than a bitmask: a bitmask saves
+ * bytes nobody is short of and costs readability every time it is debugged.
+ */
+message Capabilities {
+  // Whichever end has the lower version decides what is safe to speak.
+  uint32 protocol_version = 1;
+  // Camera can turn on a flash unit.
+  bool torch = 2;
+  // Response actions (Phase 8); false until the hardware/logic exists.
+  bool siren = 3;
+  bool spotlight = 4;
+  // Both a front and a back lens are present.
+  bool multi_lens = 5;
+  // Camera has a microphone, so it can send audio to the viewer.
+  bool audio_in = 6;
+  // Camera can play the viewer's audio, so push-to-talk has somewhere to land.
+  bool audio_out = 7;
+  // Decibel / sound-event triggers (Phase 6); false until then.
+  bool sound_detection = 8;
+  // Camera can record with nobody watching.
+  bool continuous_recording = 9;
+  EncoderTier hardware_encoder_tier = 10;
+  // The resolutions the camera can actually produce, best first.
+  repeated Resolution resolutions = 11;
+
+  enum EncoderTier {
+    ENCODER_NONE = 0;  // software encode only
+    ENCODER_H264 = 1;  // hardware H.264
+    ENCODER_HEVC = 2;  // hardware HEVC (and H.264)
+  }
 }

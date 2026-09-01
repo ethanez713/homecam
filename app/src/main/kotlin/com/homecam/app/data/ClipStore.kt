@@ -1,6 +1,7 @@
 package com.homecam.app.data
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.util.Log
 import com.homecam.app.media.ClipRecorder
@@ -13,6 +14,7 @@ import com.homecam.proto.RetentionPolicy
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.io.FileOutputStream
 
 /**
  * Clips live in app-private storage — never `MediaStore`, never a shared directory — so
@@ -28,6 +30,9 @@ class ClipStore(context: Context, private val dao: ClipDao) {
 
     suspend fun index(written: ClipRecorder.Written, labels: List<String> = emptyList()): ClipEntity {
         val dimensions = readDimensions(written.file)
+        // Generated once, now, so a viewer scrolling a list never makes the camera decode
+        // video on demand. Stored beside the clip and pruned with it (§5).
+        writeThumbnail(written.file)
         val entity = ClipEntity(
             id = written.id,
             path = written.file.absolutePath,
@@ -48,12 +53,46 @@ class ClipStore(context: Context, private val dao: ClipDao) {
 
     suspend fun delete(id: String): Boolean {
         val clip = dao.byId(id) ?: return false
-        File(clip.path).delete()
+        val file = File(clip.path)
+        file.delete()
+        thumbnailFile(file).delete()
         dao.delete(id)
         return true
     }
 
     suspend fun file(id: String): File? = dao.byId(id)?.let { File(it.path) }?.takeIf { it.exists() }
+
+    suspend fun thumbnail(id: String): File? =
+        dao.byId(id)?.let { thumbnailFile(File(it.path)) }?.takeIf { it.exists() }
+
+    /** The clip's thumbnail sits beside it, so its path is derivable and needs no column. */
+    fun thumbnailFile(clipFile: File): File = File(clipFile.absolutePath + ".jpg")
+
+    private fun writeThumbnail(clipFile: File): File? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(clipFile.absolutePath)
+            val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: return null
+            val scaled = scaleToWidth(frame, THUMBNAIL_WIDTH)
+            val out = thumbnailFile(clipFile)
+            FileOutputStream(out).use { scaled.compress(Bitmap.CompressFormat.JPEG, THUMBNAIL_QUALITY, it) }
+            if (scaled !== frame) scaled.recycle()
+            frame.recycle()
+            out
+        } catch (e: Exception) {
+            Log.w(TAG, "could not write clip thumbnail", e)
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun scaleToWidth(bitmap: Bitmap, width: Int): Bitmap {
+        if (bitmap.width <= width) return bitmap
+        val height = (bitmap.height.toLong() * width / bitmap.width).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(bitmap, width, height, true)
+    }
 
     /**
      * Retention is whichever of the three limits bites first, and pinned clips are exempt
@@ -94,7 +133,8 @@ class ClipStore(context: Context, private val dao: ClipDao) {
      * the normal way to get one is a clip whose muxer was killed mid-write.
      */
     private suspend fun removeOrphanFiles() {
-        val known = dao.all().mapTo(HashSet()) { it.path }
+        val known = HashSet<String>()
+        dao.all().forEach { known += it.path; known += thumbnailFile(File(it.path)).absolutePath }
         directory.listFiles()?.forEach { file ->
             if (file.absolutePath !in known) file.delete()
         }
@@ -117,7 +157,11 @@ class ClipStore(context: Context, private val dao: ClipDao) {
         }
     }
 
-    private companion object { const val TAG = "ClipStore" }
+    private companion object {
+        const val TAG = "ClipStore"
+        const val THUMBNAIL_WIDTH = 320
+        const val THUMBNAIL_QUALITY = 75
+    }
 }
 
 fun ClipEntity.toRef() = ClipRef(id, startedAtMs, sizeBytes, pinned)

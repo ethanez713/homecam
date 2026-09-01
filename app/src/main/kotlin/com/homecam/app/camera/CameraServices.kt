@@ -28,6 +28,7 @@ import com.homecam.proto.Lens
 import com.homecam.proto.LowLight
 import com.homecam.proto.ManualRecord
 import com.homecam.proto.Microphone
+import com.homecam.proto.Orientation
 import com.homecam.proto.PrivacyMask
 import com.homecam.proto.PushToTalk
 import com.homecam.proto.Resolution
@@ -37,6 +38,7 @@ import com.homecam.proto.RpcMessage
 import com.homecam.proto.RevokeViewer
 import com.homecam.proto.SessionConfig
 import com.homecam.proto.SettingsSnapshot
+import com.homecam.proto.Thumbnail
 import com.homecam.proto.TimelineQuery
 import com.homecam.proto.Torch
 import com.homecam.proto.Viewer
@@ -64,6 +66,13 @@ class CameraServices(
         registerAccess(peer)
         registerAudit(peer)
         registerMedia(peer)
+        registerCapability(peer)
+    }
+
+    private fun registerCapability(peer: RpcPeer) {
+        peer.register(RpcMessage.Service.CAPABILITY, Controls.Capability.EXCHANGE) {
+            CapabilityProvider.capabilities(graph.app).toByteString()
+        }
     }
 
     private fun registerMedia(peer: RpcPeer) {
@@ -92,6 +101,17 @@ class CameraServices(
                 detail = ask.id,
             )
             ask.toBuilder().setDeleted(true).build().toByteString()
+        }
+
+        peer.register(RpcMessage.Service.MEDIA, Controls.Media.THUMBNAIL) { request ->
+            val ask = Thumbnail.parseFrom(request.payload)
+            val file = clips().thumbnail(ask.clipId)
+                ?: throw RpcException(RpcError.Code.NOT_FOUND, "no thumbnail for ${ask.clipId}")
+            Thumbnail.newBuilder()
+                .setClipId(ask.clipId)
+                .setJpeg(ByteString.copyFrom(file.readBytes()))
+                .build()
+                .toByteString()
         }
 
         peer.register(RpcMessage.Service.MEDIA, Controls.Media.CLIP_PIN) { request ->
@@ -207,6 +227,21 @@ class CameraServices(
         peer.register(RpcMessage.Service.SESSION, Controls.Session.PUSH_TO_TALK) { request ->
             media().setPushToTalk(PushToTalk.parseFrom(request.payload).active)
             request.payload
+        }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.ORIENTATION) { request ->
+            media().setOrientation(Orientation.parseFrom(request.payload).degrees)
+            media().sessionStatus(viewerFingerprint).toByteString()
+        }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.SNAPSHOT) {
+            val snapshot = media().snapshot()
+            // A still of the room is an access to it, so it is logged like a clip view.
+            graph.audit.record(
+                AuditEvent.Kind.CLIP_VIEWED,
+                viewerFingerprint = viewerFingerprint,
+                viewerLabel = viewerLabel,
+                detail = "snapshot",
+            )
+            snapshot.toByteString()
         }
     }
 

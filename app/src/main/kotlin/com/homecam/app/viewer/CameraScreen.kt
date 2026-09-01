@@ -31,6 +31,8 @@ import com.homecam.app.viewer.ui.LiveScreen
 import com.homecam.app.viewer.ui.LiveState
 import com.homecam.app.viewer.ui.RemoteRosterScreen
 import com.homecam.core.audit.AuditChain
+import com.homecam.core.rpc.ControlGating
+import com.homecam.proto.Capabilities
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Viewer
 import kotlinx.coroutines.launch
@@ -58,6 +60,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
     }
     var session by remember(camera.fingerprint, attempt) { mutableStateOf<ViewerSession?>(null) }
     var settings by remember(camera.fingerprint, attempt) { mutableStateOf<SettingsSnapshot?>(null) }
+    var capabilities by remember(camera.fingerprint, attempt) { mutableStateOf<Capabilities?>(null) }
     var viewers by remember(camera.fingerprint, attempt) { mutableStateOf<List<Viewer>?>(null) }
     var torch by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
     var mic by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
@@ -89,6 +92,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 null,
             )
             settings = runCatching { client.link.settings() }.getOrNull()
+            capabilities = client.link.capabilities()
             opened.start()
         }.onFailure { state = LiveState.Failed(describeFailure(it)) }
     }
@@ -122,6 +126,9 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
             CameraTab.LIVE -> LiveScreen(
                 state = state,
                 controls = open?.let {
+                    // A camera that has not answered its capabilities (too old to) leaves
+                    // every control available, exactly as before this negotiation existed.
+                    val gates = capabilities?.let { caps -> ControlGating.gatesFor(caps) }
                     LiveControls(
                         torchOn = torch,
                         micOn = mic,
@@ -129,6 +136,8 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                         onTorch = { on -> torch = on; scope.launch { it.setTorch(on) } },
                         onMic = { on -> mic = on; scope.launch { it.setPushToTalk(on) } },
                         onZoom = { value -> zoom = value; scope.launch { it.setZoom(value) } },
+                        torchAvailable = gates?.torch ?: true,
+                        pushToTalkAvailable = gates?.pushToTalk ?: true,
                     )
                 },
                 onBack = onExit,
@@ -151,6 +160,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     downloadingId = downloading,
                     projectedDays = null,
                     showBoxes = settings?.boundingBoxOverlay ?: true,
+                    loadThumbnail = open?.let { s -> { id -> s.link.thumbnail(id) } },
                     onPlay = { clip ->
                         edit(scope, open) {
                             downloading = clip.id

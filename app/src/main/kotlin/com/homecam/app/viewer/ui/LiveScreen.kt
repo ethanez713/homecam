@@ -54,6 +54,9 @@ data class LiveControls(
     val onTorch: (Boolean) -> Unit,
     val onMic: (Boolean) -> Unit,
     val onZoom: (Float) -> Unit,
+    // Hidden when the camera's capabilities say it has no flash / no speaker (Phase 2).
+    val torchAvailable: Boolean = true,
+    val pushToTalkAvailable: Boolean = true,
 )
 
 @Composable
@@ -120,19 +123,23 @@ private fun LiveVideo(state: LiveState.Connected, controls: LiveControls?, onBac
                     modifier = Modifier.fillMaxWidth(0.8f),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    IconButton(onClick = { it.onTorch(!it.torchOn) }) {
-                        Icon(
-                            if (it.torchOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
-                            contentDescription = "Torch",
-                            tint = Color.White,
-                        )
+                    if (it.torchAvailable) {
+                        IconButton(onClick = { it.onTorch(!it.torchOn) }) {
+                            Icon(
+                                if (it.torchOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                                contentDescription = "Torch",
+                                tint = Color.White,
+                            )
+                        }
                     }
-                    IconButton(onClick = { it.onMic(!it.micOn) }) {
-                        Icon(
-                            if (it.micOn) Icons.Filled.Mic else Icons.Filled.MicOff,
-                            contentDescription = "Talk",
-                            tint = Color.White,
-                        )
+                    if (it.pushToTalkAvailable) {
+                        IconButton(onClick = { it.onMic(!it.micOn) }) {
+                            Icon(
+                                if (it.micOn) Icons.Filled.Mic else Icons.Filled.MicOff,
+                                contentDescription = "Talk",
+                                tint = Color.White,
+                            )
+                        }
                     }
                 }
             }

@@ -83,10 +83,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         detection = DetectionPipeline(
             context = this,
             settings = { graph.settings.current },
-            onEvent = { detections ->
+            onEvent = { detections, thumbnailJpeg ->
                 recorder.onDetection(detections, System.currentTimeMillis())
                 if (detections.isNotEmpty()) {
-                    alerts.onDetection(detections.map { it.category }, clipId = "", thumbnailJpeg = null)
+                    alerts.onDetection(detections.map { it.category }, clipId = "", thumbnailJpeg = thumbnailJpeg)
                 }
             },
         ).also { capture.addSink(it) }
@@ -270,6 +270,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             .setBitrateKbps(stats.bitrateKbps)
             .setRttMs(stats.rttMs)
             .setPacketsLost(stats.packetsLost)
+            .setOrientationDegrees(capture.orientationDegrees)
             .build()
     }
 
@@ -291,6 +292,20 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     override fun setLens(facing: com.homecam.proto.Lens.Facing) = capture.setLens(facing) ?: Unit
+
+    override fun setOrientation(degrees: Int) = capture.setOrientation(degrees)
+
+    override suspend fun snapshot(): com.homecam.proto.Snapshot {
+        val jpeg = capture.snapshotJpeg()
+            ?: throw com.homecam.core.rpc.RpcException(
+                com.homecam.proto.RpcError.Code.UNAVAILABLE, "capture is not running",
+            )
+        return com.homecam.proto.Snapshot.newBuilder()
+            .setJpeg(com.google.protobuf.ByteString.copyFrom(jpeg))
+            .setWidth(capture.format.width)
+            .setHeight(capture.format.height)
+            .build()
+    }
 
     override fun recordManually(seconds: Int, start: Boolean) {
         if (start) recorder.recordManually(seconds) else recorder.stopManual()

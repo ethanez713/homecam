@@ -6,6 +6,7 @@ import java.io.File
 import com.homecam.proto.Alias
 import com.homecam.proto.Armed
 import com.homecam.proto.AlertRegistration
+import com.homecam.proto.Capabilities
 import com.homecam.proto.AuditQuery
 import com.homecam.proto.ClipData
 import com.homecam.proto.ClipDelete
@@ -18,6 +19,7 @@ import com.homecam.proto.RevokeViewer
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.RuntimeStatus
 import com.homecam.proto.SettingsSnapshot
+import com.homecam.proto.Thumbnail
 import com.homecam.proto.ViewerList
 
 /**
@@ -28,6 +30,21 @@ class CameraLink(private val peer: RpcPeer) {
 
     suspend fun runtimeStatus(): RuntimeStatus =
         RuntimeStatus.parseFrom(peer.request(RpcMessage.Service.STATUS, Controls.Status.RUNTIME))
+
+    /**
+     * What the camera supports. Null when the camera is too old to answer — the dispatcher
+     * drops the unknown service silently, so this times out rather than erroring, and the
+     * caller then leaves every control available rather than hiding all of them.
+     */
+    suspend fun capabilities(): Capabilities? = runCatching {
+        Capabilities.parseFrom(
+            peer.request(
+                RpcMessage.Service.CAPABILITY,
+                Controls.Capability.EXCHANGE,
+                timeoutMs = CAPABILITY_TIMEOUT_MS,
+            )
+        )
+    }.getOrNull()
 
     suspend fun settings(): SettingsSnapshot =
         SettingsSnapshot.parseFrom(peer.request(RpcMessage.Service.SETTINGS, Controls.Settings.SNAPSHOT))
@@ -130,6 +147,17 @@ class CameraLink(private val peer: RpcPeer) {
         )
     )
 
+    /** The clip's pre-generated thumbnail, or null if the camera has none for it. */
+    suspend fun thumbnail(id: String): ByteArray? = runCatching {
+        Thumbnail.parseFrom(
+            peer.request(
+                RpcMessage.Service.MEDIA,
+                Controls.Media.THUMBNAIL,
+                Thumbnail.newBuilder().setClipId(id).build().toByteString(),
+            )
+        ).jpeg.toByteArray().takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
     suspend fun pinClip(id: String, pinned: Boolean) {
         peer.request(
             RpcMessage.Service.MEDIA,
@@ -181,5 +209,7 @@ class CameraLink(private val peer: RpcPeer) {
         // for weeks is thousands of rows.
         const val AUDIT_TIMEOUT_MS = 30_000L
         const val CLIP_DOWNLOAD_TIMEOUT_MS = 120_000L
+        // Short, because an old camera that cannot answer expresses that as a timeout.
+        const val CAPABILITY_TIMEOUT_MS = 5_000L
     }
 }

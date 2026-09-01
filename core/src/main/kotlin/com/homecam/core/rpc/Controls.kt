@@ -15,6 +15,11 @@ object Controls {
         const val RESOLUTION = 8
         const val ZOOM = 9
         const val LENS = 10
+        const val SNAPSHOT = 12
+    }
+
+    object Capability {
+        const val EXCHANGE = 0
     }
 
     object Settings {
@@ -48,12 +53,21 @@ object Controls {
 
     object Audit {
         const val QUERY = 0
+
+        // Not a request handler: the camera PUSHes this as a NOTIFICATION when an audited
+        // event happens, so a connected viewer sees the log grow live. There is nothing to
+        // register a responder for, and the audit-completeness sweep expects it absent.
         const val EVENT = 1
     }
 
     object Access {
         const val VIEWER_LIST = 0
         const val REVOKE_VIEWER = 1
+
+        // Deliberately has no over-the-wire handler: pairing mode is armed on the camera's
+        // own screen and this id is camera-UI-local (the PairingMode message even carries
+        // the raw invite). Answering it to a remote caller would let a paired viewer put
+        // the camera into pairing mode, which must stay a physical-access action (§2.2).
         const val PAIRING_MODE = 2
         const val ALERT_REGISTRATION = 3
     }
