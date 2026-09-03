@@ -32,6 +32,7 @@ class BootReceiver : BroadcastReceiver() {
 
         when (RoleStore(context).role) {
             Role.CAMERA -> resume(context, "Camera is not running") {
+                CameraService.startReason = "boot"
                 CameraService.start(context)
             }
 

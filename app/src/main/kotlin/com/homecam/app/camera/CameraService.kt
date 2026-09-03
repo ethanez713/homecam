@@ -78,6 +78,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         super.onCreate()
         graph = AppGraph.get(this)
         node = graph.cameraNode
+        graph.diagnostics.start(startReason)
+        startReason = "restart"
         createChannel()
         startForegroundWithNotification(idleNotification())
 
@@ -113,9 +115,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         audioDetection = AudioDetectionPipeline(
             context = this,
             settings = { graph.settings.current },
-            onEvent = { category ->
+            onEvent = { category, levelDb ->
                 recorder.onSoundEvent(category, System.currentTimeMillis())
                 alerts.onDetection(listOf(category), clipId = "", thumbnailJpeg = null)
+                graph.diagnostics.soundEvent(category, levelDb)
             },
         ).also { it.sync() }
         ClipPruneWorker.schedule(this)
@@ -133,6 +136,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     override fun onDestroy() {
         running.value = false
+        graph.diagnostics.stop("destroy")
         graph.scope.launch { endLive(Bye.Reason.CAMERA_DISABLED, "camera stopped") }
         mdns?.stop()
         siren.stop()
@@ -203,12 +207,27 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     /** Closes a clip once nothing has been detected for its tail duration. */
     private fun startClipRollover() {
         lifecycleScope.launch {
+            var ticks = 0
             while (true) {
                 kotlinx.coroutines.delay(ROLLOVER_TICK_MS)
                 recorder.tick()
                 statusFromPipeline()
                 maintainResponses()
+                if (ticks % HEARTBEAT_EVERY_TICKS == 0) emitHeartbeat()
+                ticks++
             }
+        }
+    }
+
+    /** A periodic health line so a soak failure can be correlated with the state at the time. */
+    private fun emitHeartbeat() {
+        graph.scope.launch {
+            val clipBytes = graph.database.clips().all().sumOf { it.sizeBytes }
+            graph.diagnostics.heartbeat(
+                status = server?.statusProvider?.snapshot(clipBytes) ?: return@launch,
+                recording = recorder.recording,
+                mode = graph.settings.current.recordingMode.name,
+            )
         }
     }
 
@@ -375,6 +394,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     override fun setSiren(on: Boolean, seconds: Int) {
+        graph.diagnostics.siren(on, seconds)
         if (on) {
             siren.start(seconds.takeIf { it > 0 } ?: 30)
             recordResponseAction("siren", alert = true)
@@ -497,6 +517,11 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         private const val REMINDER_NOTIFICATION_ID = 2
         private const val AUTO_SPOTLIGHT_MS = 20_000L
         private const val SHUTDOWN_GRACE_MS = 1_000
+        // ROLLOVER_TICK_MS is 2s, so 150 ticks ≈ a heartbeat every 5 minutes.
+        private const val HEARTBEAT_EVERY_TICKS = 150
+
+        /** Set by [BootReceiver] before a post-boot start, so the diagnostics log says how it came up. */
+        @Volatile var startReason: String = "manual"
 
         private val running = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = running.asStateFlow()

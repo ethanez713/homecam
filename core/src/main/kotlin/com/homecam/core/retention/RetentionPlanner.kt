@@ -26,7 +26,13 @@ data class PrunePlan(
     val remainingBytes: Long,
     /** True when pinned clips alone are within 10% of the size ceiling (§5). */
     val pinnedNearCeiling: Boolean,
-)
+    /** Device free space once this plan's deletions are applied, and the floor it must clear. */
+    val freeBytesAfter: Long = 0,
+    val minFreeBytes: Long = 0,
+) {
+    /** The GATE-C invariant: after pruning, free space is at or above the configured floor. */
+    val freeFloorHeld: Boolean get() = freeBytesAfter >= minFreeBytes
+}
 
 /**
  * Retention is whichever of the three limits bites first (§5). **Pinned clips are exempt
@@ -69,6 +75,8 @@ object RetentionPlanner {
             pinnedBytes = pinnedBytes,
             remainingBytes = total,
             pinnedNearCeiling = pinnedNearCeiling(clips, limits),
+            freeBytesAfter = free,
+            minFreeBytes = limits.minFreeBytes,
         )
     }
 

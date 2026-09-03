@@ -54,7 +54,14 @@ class Alerts(private val graph: AppGraph) {
                 .filter { if (sessionAlert) it.sessionAlerts else it.detectionAlerts }
             if (recipients.isEmpty()) return@launch
             val payload = build()
-            recipients.forEach { publisher.publish(it, payload) }
+            val delivered = recipients.count { publisher.publish(it, payload) }
+            // The camera's half of GATE-F: whether it managed to post the alert at all. The
+            // viewer arriving while locked (Doze) is checked on the receiving side.
+            graph.diagnostics.alert(
+                kind = if (sessionAlert) "session" else "detection",
+                recipients = recipients.size,
+                delivered = delivered,
+            )
         }
     }
 }

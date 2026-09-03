@@ -20,7 +20,7 @@ import java.time.ZoneId
 class AudioDetectionPipeline(
     context: Context,
     private val settings: () -> SettingsSnapshot,
-    private val onEvent: (category: String) -> Unit,
+    private val onEvent: (category: String, levelDb: Float) -> Unit,
 ) {
     private val classifier = YamnetClassifier.create(context)
     private val windowSamples = classifier?.windowSamples ?: SECOND_SAMPLES
@@ -70,7 +70,7 @@ class AudioDetectionPipeline(
         }
         if (!gate.accept(levelDb, nowMs)) return
 
-        onEvent(categorise(waveform, snapshot))
+        onEvent(categorise(waveform, snapshot), levelDb)
     }
 
     private fun categorise(waveform: FloatArray, snapshot: SettingsSnapshot): String {

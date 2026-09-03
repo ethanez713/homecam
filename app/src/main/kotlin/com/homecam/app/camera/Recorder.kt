@@ -34,6 +34,7 @@ class Recorder(
     @Volatile private var manualUntilMs = 0L
     @Volatile private var detectionUntilMs = 0L
     @Volatile private var pendingManualClipId: String? = null
+    @Volatile private var prevSegmentEndMs = 0L
 
     /** Fired when a manual clip closes, so the requester can be told its id (Phase 4). */
     var onManualResult: ((ClipRecorder.Written) -> Unit)? = null
@@ -45,6 +46,10 @@ class Recorder(
         recorder.onClipWritten = { written ->
             val labels = labelsInClip.toList()
             labelsInClip.clear()
+            // The gap since the previous segment ended: near-zero under continuous recording,
+            // and the first thing to check if the soak shows a hole in the record (GATE-C).
+            val gapMs = if (prevSegmentEndMs == 0L) 0L else written.startedAtMs - prevSegmentEndMs
+            prevSegmentEndMs = written.startedAtMs + written.durationMs
             if (written.id == pendingManualClipId) {
                 pendingManualClipId = null
                 onManualResult?.invoke(written)
@@ -52,7 +57,8 @@ class Recorder(
             graph.scope.launch {
                 val entity = clips.index(written, labels)
                 Log.i(TAG, "clip ${entity.id} ${entity.durationMs}ms ${entity.sizeBytes}B")
-                clips.prune(graph.settings.current.retention)
+                graph.diagnostics.segment(entity.id, entity.durationMs, entity.sizeBytes, gapMs)
+                graph.diagnostics.prune(clips.prune(graph.settings.current.retention))
                 if (shouldKeepRecording()) beginClip()
             }
         }
