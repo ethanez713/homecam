@@ -48,6 +48,10 @@ class DetectionPipeline(
     @Volatile var framesPerSecond: Float = 0f
         private set
 
+    /** Mean luma of the last graded frame (0..255), so a response can tell dark from day. */
+    @Volatile var averageLuma: Float = 255f
+        private set
+
     override fun onFrame(frame: VideoFrame) {
         val now = System.currentTimeMillis()
         if (now - lastGridAtMs < GRID_INTERVAL_MS) return
@@ -61,7 +65,9 @@ class DetectionPipeline(
 
         val i420 = frame.buffer.toI420() ?: return
         try {
-            if (!gate.accept(lumaGrid(i420), now)) return
+            val grid = lumaGrid(i420)
+            averageLuma = grid.average().toFloat()
+            if (!gate.accept(grid, now)) return
             if (now - lastDetectAtMs < DETECT_INTERVAL_MS) return
             if (!busy.compareAndSet(false, true)) return
             lastDetectAtMs = now

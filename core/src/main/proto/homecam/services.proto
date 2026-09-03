@@ -30,6 +30,11 @@ message Resolution { uint32 width = 1; uint32 height = 2; uint32 fps = 3; }
 message Zoom { float ratio = 1; }
 message Lens { enum Facing { BACK = 0; FRONT = 1; } Facing facing = 1; }
 
+// Response actions (Phase 8). The siren plays through the camera phone's own speaker and
+// stops itself after [seconds]; the spotlight is the torch used deliberately as a light.
+message Siren { bool on = 1; uint32 seconds = 2; }
+message Spotlight { bool on = 1; }
+
 // A single still, served straight from the live capture without opening a media session —
 // reading a frame must not cost an H.264 encode (Phase 1). Dimensions are the capture
 // format's, so a viewer can lay boxes over it without guessing.
@@ -47,9 +52,16 @@ message SettingsSnapshot {
   DetectionZone detection_zone = 18;
   PrivacyMask privacy_mask = 19;
   bool bounding_box_overlay = 22;
+  DetectionReminder detection_reminder = 23;
+  bool auto_spotlight = 26;
   RetentionPolicy retention = 32;
   RecordingMode recording_mode = 33;
 }
+
+// Periodically reminds the owner the camera is armed and detecting, so a camera quietly
+// recording an occupied house is not a surprise (§2.7). A privacy control, not a nag.
+message DetectionReminder { bool enabled = 1; uint32 interval_minutes = 2; }
+message AutoSpotlight { bool enabled = 1; }
 
 // What the camera keeps, distinct from whether it is armed (that is whether it watches).
 // DETECTION is field default 0 so a fresh install keeps clips around detections, which is
@@ -195,6 +207,7 @@ message AuditEvent {
     CAMERA_STARTED = 13;
     CAMERA_STOPPED = 14;
     DETECTION = 15;
+    RESPONSE_ACTION = 16;
   }
   uint64 seq = 1;
   int64 at_ms = 2;

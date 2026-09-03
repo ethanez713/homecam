@@ -58,10 +58,18 @@ class CapabilityTruthfulnessTest {
     }
 
     @Test
+    fun theSirenIsAlwaysAvailableAndTheSpotlightFollowsTheFlash() {
+        val capabilities = CapabilityProvider.capabilities(context)
+        assertTrue("every phone has a speaker", capabilities.siren)
+        assertEquals(
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH),
+            capabilities.spotlight,
+        )
+    }
+
+    @Test
     fun featuresThisBuildLacksAreReportedFalse() {
         val capabilities = CapabilityProvider.capabilities(context)
-        assertFalse(capabilities.siren)
-        assertFalse(capabilities.spotlight)
         assertFalse(capabilities.soundDetection)
         assertFalse(capabilities.audioOut)
     }

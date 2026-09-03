@@ -205,6 +205,40 @@ class CameraLink(private val peer: RpcPeer) {
         )
     }
 
+    suspend fun setSiren(on: Boolean, seconds: Int = 30) {
+        peer.request(
+            RpcMessage.Service.SESSION,
+            Controls.Session.SIREN,
+            com.homecam.proto.Siren.newBuilder().setOn(on).setSeconds(seconds).build().toByteString(),
+        )
+    }
+
+    suspend fun setSpotlight(on: Boolean) {
+        peer.request(
+            RpcMessage.Service.SESSION,
+            Controls.Session.SPOTLIGHT,
+            com.homecam.proto.Spotlight.newBuilder().setOn(on).build().toByteString(),
+        )
+    }
+
+    suspend fun setAutoSpotlight(enabled: Boolean): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.AUTO_SPOTLIGHT,
+            com.homecam.proto.AutoSpotlight.newBuilder().setEnabled(enabled).build().toByteString(),
+        )
+    )
+
+    suspend fun setDetectionReminder(enabled: Boolean, intervalMinutes: Int): SettingsSnapshot =
+        SettingsSnapshot.parseFrom(
+            peer.request(
+                RpcMessage.Service.SETTINGS,
+                Controls.Settings.DETECTION_REMINDER,
+                com.homecam.proto.DetectionReminder.newBuilder()
+                    .setEnabled(enabled).setIntervalMinutes(intervalMinutes).build().toByteString(),
+            )
+        )
+
     suspend fun audit(sinceMs: Long = 0, limit: Int = 200): AuditQuery = AuditQuery.parseFrom(
         peer.request(
             RpcMessage.Service.AUDIT,

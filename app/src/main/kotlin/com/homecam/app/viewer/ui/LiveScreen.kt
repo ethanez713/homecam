@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,6 +58,10 @@ data class LiveControls(
     // Hidden when the camera's capabilities say it has no flash / no speaker (Phase 2).
     val torchAvailable: Boolean = true,
     val pushToTalkAvailable: Boolean = true,
+    // The siren is a deliberate action, kept apart from the ordinary controls (Phase 8).
+    val sirenAvailable: Boolean = false,
+    val sirenOn: Boolean = false,
+    val onSiren: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -141,6 +146,16 @@ private fun LiveVideo(state: LiveState.Connected, controls: LiveControls?, onBac
                             )
                         }
                     }
+                }
+                if (it.sirenAvailable) {
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { it.onSiren(!it.sirenOn) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                    ) { Text(if (it.sirenOn) "Stop siren" else "Sound siren") }
                 }
             }
             Spacer(Modifier.height(8.dp))

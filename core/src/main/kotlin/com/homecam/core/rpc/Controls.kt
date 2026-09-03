@@ -16,6 +16,8 @@ object Controls {
         const val MANUAL_RECORD_RESULT = 3
         const val TORCH = 4
         const val ORIENTATION = 5
+        const val SIREN = 6
+        const val SPOTLIGHT = 7
         const val RESOLUTION = 8
         const val ZOOM = 9
         const val LENS = 10
@@ -37,6 +39,8 @@ object Controls {
         const val DETECTION_ZONE = 18
         const val PRIVACY_MASK = 19
         const val BOUNDING_BOX_OVERLAY = 22
+        const val DETECTION_REMINDER = 23
+        const val AUTO_SPOTLIGHT = 26
         const val RETENTION = 32
         const val RECORDING_MODE = 33
     }

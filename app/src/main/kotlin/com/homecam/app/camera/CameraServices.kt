@@ -12,6 +12,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import com.homecam.proto.AlertRegistration
 import com.homecam.proto.Alias
+import com.homecam.proto.AutoSpotlight
 import com.homecam.proto.Armed
 import com.homecam.proto.AuditQuery
 import com.homecam.proto.AuditEvent
@@ -22,6 +23,7 @@ import com.homecam.proto.ClipList
 import com.homecam.proto.ClipPin
 import com.homecam.proto.DateList
 import com.homecam.proto.DetectionMode
+import com.homecam.proto.DetectionReminder
 import com.homecam.proto.DetectionSchedule
 import com.homecam.proto.DetectionZone
 import com.homecam.proto.Lens
@@ -38,6 +40,8 @@ import com.homecam.proto.RpcError
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.RevokeViewer
 import com.homecam.proto.SessionConfig
+import com.homecam.proto.Siren
+import com.homecam.proto.Spotlight
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Thumbnail
 import com.homecam.proto.TimelineQuery
@@ -233,6 +237,15 @@ class CameraServices(
             media().setOrientation(Orientation.parseFrom(request.payload).degrees)
             media().sessionStatus(viewerFingerprint).toByteString()
         }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.SIREN) { request ->
+            val ask = Siren.parseFrom(request.payload)
+            media().setSiren(ask.on, ask.seconds)
+            request.payload
+        }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.SPOTLIGHT) { request ->
+            media().setSpotlight(Spotlight.parseFrom(request.payload).on)
+            request.payload
+        }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.SNAPSHOT) {
             val snapshot = media().snapshot()
             // A still of the room is an access to it, so it is logged like a clip view.
@@ -274,6 +287,12 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.RETENTION) { setRetention(RetentionPolicy.parseFrom(it)) }
         settingSetter(peer, Controls.Settings.RECORDING_MODE) {
             setRecordingMode(RecordingModeSetting.parseFrom(it).mode)
+        }
+        settingSetter(peer, Controls.Settings.AUTO_SPOTLIGHT) {
+            setAutoSpotlight(AutoSpotlight.parseFrom(it).enabled)
+        }
+        settingSetter(peer, Controls.Settings.DETECTION_REMINDER) {
+            setDetectionReminder(DetectionReminder.parseFrom(it))
         }
     }
 
@@ -385,6 +404,8 @@ class CameraServices(
         Controls.Settings.BOUNDING_BOX_OVERLAY -> "bounding boxes"
         Controls.Settings.RETENTION -> "retention"
         Controls.Settings.RECORDING_MODE -> "recording mode"
+        Controls.Settings.AUTO_SPOTLIGHT -> "auto spotlight"
+        Controls.Settings.DETECTION_REMINDER -> "detection reminder"
         else -> throw RpcException(RpcError.Code.UNIMPLEMENTED, "unknown setting $control")
     }
 

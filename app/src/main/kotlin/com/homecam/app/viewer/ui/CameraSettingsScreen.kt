@@ -38,6 +38,11 @@ fun CameraSettingsScreen(
     onRecordingMode: (RecordingMode) -> Unit,
     projectedDays: Double?,
     onDetectionMode: (person: Boolean, vehicle: Boolean, pet: Boolean, packages: Boolean) -> Unit,
+    autoSpotlightSupported: Boolean,
+    autoSpotlight: Boolean,
+    onAutoSpotlight: (Boolean) -> Unit,
+    reminderEnabled: Boolean,
+    onDetectionReminder: (Boolean) -> Unit,
     alertsEnabled: Boolean,
     onAlerts: (Boolean) -> Unit,
     remoteAddress: String,
@@ -94,6 +99,23 @@ fun CameraSettingsScreen(
         Toggle("Packages", null, mode.getPackage()) {
             onDetectionMode(mode.person, mode.vehicle, mode.pet, it)
         }
+
+        Spacer(Modifier.height(16.dp))
+        Text("Respond", style = MaterialTheme.typography.titleMedium)
+        if (autoSpotlightSupported) {
+            Toggle(
+                "Auto spotlight",
+                "Turn on the camera's light when something is seen in the dark",
+                autoSpotlight,
+                onAutoSpotlight,
+            )
+        }
+        Toggle(
+            "Armed reminder",
+            "Periodically remind you the camera is armed and detecting",
+            reminderEnabled,
+            onDetectionReminder,
+        )
 
         Spacer(Modifier.height(16.dp))
         Text("Alerts", style = MaterialTheme.typography.titleMedium)

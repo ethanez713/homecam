@@ -68,6 +68,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
     var viewers by remember(camera.fingerprint, attempt) { mutableStateOf<List<Viewer>?>(null) }
     var torch by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
     var mic by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
+    var siren by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
     var zoom by remember(camera.fingerprint, attempt) { mutableFloatStateOf(0f) }
     val alertKeys = remember { AlertKeys(context) }
     var alertsOn by remember { mutableStateOf(AlertPreferences.enabled(context)) }
@@ -154,6 +155,9 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                         onZoom = { value -> zoom = value; scope.launch { it.setZoom(value) } },
                         torchAvailable = gates?.torch ?: true,
                         pushToTalkAvailable = gates?.pushToTalk ?: true,
+                        sirenAvailable = gates?.siren ?: false,
+                        sirenOn = siren,
+                        onSiren = { on -> siren = on; scope.launch { it.link.setSiren(on) } },
                     )
                 },
                 onBack = onExit,
@@ -207,6 +211,15 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     edit(scope, open) { settings = it.link.setRecordingMode(mode) }
                 },
                 projectedDays = projectedDays,
+                autoSpotlightSupported = capabilities?.spotlight ?: true,
+                autoSpotlight = settings?.autoSpotlight ?: false,
+                onAutoSpotlight = { on ->
+                    edit(scope, open) { settings = it.link.setAutoSpotlight(on) }
+                },
+                reminderEnabled = settings?.detectionReminder?.enabled ?: false,
+                onDetectionReminder = { on ->
+                    edit(scope, open) { settings = it.link.setDetectionReminder(on, 60) }
+                },
                 onDetectionMode = { person, vehicle, pet, packages ->
                     edit(scope, open) {
                         settings = it.link.setDetectionMode(person, vehicle, pet, packages)

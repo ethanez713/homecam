@@ -24,6 +24,8 @@ interface MediaController {
     fun setLens(facing: Lens.Facing)
     fun setOrientation(degrees: Int)
     fun recordManually(seconds: Int, start: Boolean)
+    fun setSiren(on: Boolean, seconds: Int)
+    fun setSpotlight(on: Boolean)
 
     /** A still off the live capture. Throws UNAVAILABLE when capture is not running. */
     suspend fun snapshot(): Snapshot

@@ -54,6 +54,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private lateinit var recorder: Recorder
     private lateinit var detection: DetectionPipeline
     private lateinit var alerts: Alerts
+    private val siren by lazy { Siren(this) }
+    @Volatile private var spotlightOffAtMs = 0L
+    @Volatile private var autoSpotlightOn = false
+    @Volatile private var lastReminderMs = 0L
 
     /**
      * At most one media session at a time, and the newest wins. A camera that answers
@@ -91,6 +95,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 recorder.onDetection(detections, System.currentTimeMillis())
                 if (detections.isNotEmpty()) {
                     alerts.onDetection(detections.map { it.category }, clipId = "", thumbnailJpeg = thumbnailJpeg)
+                    maybeAutoSpotlight()
                 }
             },
         ).also { capture.addSink(it) }
@@ -119,6 +124,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         running.value = false
         graph.scope.launch { endLive(Bye.Reason.CAMERA_DISABLED, "camera stopped") }
         mdns?.stop()
+        siren.stop()
         capture.removeSink(detection)
         detection.close()
         recorder.stop()
@@ -189,6 +195,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 kotlinx.coroutines.delay(ROLLOVER_TICK_MS)
                 recorder.tick()
                 statusFromPipeline()
+                maintainResponses()
             }
         }
     }
@@ -346,6 +353,68 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         if (start) recorder.recordManually(seconds) else recorder.stopManual()
     }
 
+    override fun setSiren(on: Boolean, seconds: Int) {
+        if (on) {
+            siren.start(seconds.takeIf { it > 0 } ?: 30)
+            recordResponseAction("siren", alert = true)
+        } else {
+            siren.stop()
+        }
+    }
+
+    /** The spotlight is the torch used deliberately as a light; manual use is audited but not alerted. */
+    override fun setSpotlight(on: Boolean) {
+        capture.setTorch(on)
+        autoSpotlightOn = false
+        recordResponseAction(if (on) "spotlight on" else "spotlight off")
+    }
+
+    private fun maybeAutoSpotlight() {
+        val settings = graph.settings.current
+        val dark = detection.averageLuma < com.homecam.core.response.ResponsePolicy.DARK_LUMA_THRESHOLD
+        if (!com.homecam.core.response.ResponsePolicy.autoSpotlightEngages(settings.autoSpotlight, hasFlash(), dark)) return
+        if (!autoSpotlightOn) {
+            capture.setTorch(true)
+            autoSpotlightOn = true
+            recordResponseAction("spotlight (auto)")
+        }
+        spotlightOffAtMs = System.currentTimeMillis() + AUTO_SPOTLIGHT_MS
+    }
+
+    /** Turns the automatic spotlight off once its window lapses, and fires due reminders. */
+    private fun maintainResponses() {
+        val now = System.currentTimeMillis()
+        if (autoSpotlightOn && now > spotlightOffAtMs) {
+            capture.setTorch(false)
+            autoSpotlightOn = false
+        }
+        val settings = graph.settings.current
+        val reminder = settings.detectionReminder
+        if (com.homecam.core.response.ResponsePolicy.reminderDue(
+                reminder.enabled, settings.armed, reminder.intervalMinutes, lastReminderMs, now,
+            )
+        ) {
+            lastReminderMs = now
+            showDetectionReminder()
+        }
+    }
+
+    private fun showDetectionReminder() {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(
+            REMINDER_NOTIFICATION_ID,
+            notification(graph.settings.current.alias, "Armed and detecting — this camera is watching."),
+        )
+    }
+
+    private fun recordResponseAction(detail: String, alert: Boolean = false) {
+        graph.scope.launch { graph.audit.record(AuditEvent.Kind.RESPONSE_ACTION, detail = detail) }
+        if (alert) alerts.onResponseAction(detail)
+    }
+
+    private fun hasFlash(): Boolean =
+        packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FLASH)
+
     /**
      * A mask edited while somebody is watching has to take effect on that stream, not the
      * next one — the whole point is that the pixels never leave.
@@ -404,6 +473,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         private const val ROLLOVER_TICK_MS = 2_000L
         private const val STATS_TIMEOUT_MS = 2_000L
         private const val NOTIFICATION_ID = 1
+        private const val REMINDER_NOTIFICATION_ID = 2
+        private const val AUTO_SPOTLIGHT_MS = 20_000L
         private const val SHUTDOWN_GRACE_MS = 1_000
 
         private val running = MutableStateFlow(false)

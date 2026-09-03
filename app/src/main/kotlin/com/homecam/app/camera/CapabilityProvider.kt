@@ -35,11 +35,14 @@ object CapabilityProvider {
         val pm = context.packageManager
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
         val facings = lensFacings(cameraManager)
+        val hasFlash = pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH)
         return Capabilities.newBuilder()
             .setProtocolVersion(Protocol.VERSION)
-            .setTorch(pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH))
-            .setSiren(false)
-            .setSpotlight(false)
+            .setTorch(hasFlash)
+            // Phase 8: the siren is the phone's own speaker (always present); the spotlight
+            // is the torch, so it needs a flash unit.
+            .setSiren(true)
+            .setSpotlight(hasFlash)
             .setMultiLens(
                 CameraCharacteristics.LENS_FACING_FRONT in facings &&
                     CameraCharacteristics.LENS_FACING_BACK in facings

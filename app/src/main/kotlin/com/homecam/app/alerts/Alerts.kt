@@ -36,6 +36,13 @@ class Alerts(private val graph: AppGraph) {
         }
     }
 
+    /** A response action fired (Phase 8), so the alert says what happened, not just what was seen. */
+    fun onResponseAction(action: String) {
+        send(sessionAlert = false) {
+            base().addLabels(action).build()
+        }
+    }
+
     private fun base(): AlertPayload.Builder = AlertPayload.newBuilder()
         .setAtMs(System.currentTimeMillis())
         .setCameraAlias(graph.settings.current.alias)
