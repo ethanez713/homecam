@@ -93,6 +93,8 @@ class AlertSubscriber : LifecycleService() {
         if (message.optString("event") != "message") return
         val body = message.optString("message").takeIf { it.isNotBlank() } ?: return
 
+        logDeliveryDelay(message)
+
         val sealed = runCatching { Base64.decode(body, Base64.DEFAULT) }.getOrNull()
         val opened = sealed?.let { AlertCrypto.open(keys.privateKey, keys.publicKeySpki, it) }
         if (opened == null) {
@@ -108,6 +110,18 @@ class AlertSubscriber : LifecycleService() {
             body = payload.labelsList.joinToString(", ").ifBlank { "Something happened" },
             thumbnail = payload.thumbnailJpeg.takeIf { !it.isEmpty }?.toByteArray(),
         )
+    }
+
+    /**
+     * How long after the push server had the message this phone actually surfaced it —
+     * the Doze delay GATE-F point 2 is looking for. The server's own `time` is the
+     * reference so the two phones' clocks need not agree.
+     */
+    private fun logDeliveryDelay(message: JSONObject) {
+        val serverTimeMs = message.optLong("time", 0) * 1000
+        if (serverTimeMs > 0) {
+            Log.i(TAG, "alert surfaced ${System.currentTimeMillis() - serverTimeMs}ms after the server had it")
+        }
     }
 
     private fun notify(title: String, body: String, thumbnail: ByteArray? = null) {
