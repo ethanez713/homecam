@@ -60,6 +60,7 @@ object Controls {
         const val DATE_LIST = 5
         const val TIMELINE = 6
         const val CLIP_PIN = 7
+        const val TIMELINE_EVENT_COUNT = 8
     }
 
     object Audit {

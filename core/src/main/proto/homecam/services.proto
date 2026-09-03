@@ -197,6 +197,16 @@ message TimelineQuery {
 
 message ClipPin { string id = 1; bool pinned = 2; }
 
+// A density strip for the timeline (Phase 10): how many events fall in each time bucket of
+// a range, so the viewer can show which hours had activity without downloading every event.
+message TimelineCount {
+  int64 since_ms = 1;
+  int64 until_ms = 2;
+  int64 bucket_ms = 3;
+  message Bucket { int64 at_ms = 1; uint32 count = 2; }
+  repeated Bucket buckets = 4;
+}
+
 // ------------------------------------------------------------------ AUDIT (5)
 
 message AuditEvent {

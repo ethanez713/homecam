@@ -168,11 +168,29 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 var clips by remember(open) { mutableStateOf<List<com.homecam.proto.Clip>?>(null) }
                 var playing by remember(open) { mutableStateOf<java.io.File?>(null) }
                 var downloading by remember(open) { mutableStateOf<String?>(null) }
+                var buckets by remember(open) {
+                    mutableStateOf<List<com.homecam.proto.TimelineCount.Bucket>>(emptyList())
+                }
 
                 suspend fun refresh() {
                     clips = open?.let { runCatching { it.link.clips().clipsList }.getOrNull() }
                 }
-                LaunchedEffect(open) { refresh() }
+                LaunchedEffect(open) {
+                    refresh()
+                    buckets = open?.let {
+                        val since = System.currentTimeMillis() - 7L * 24 * 3600 * 1000
+                        runCatching { it.link.timelineCounts(since).bucketsList }.getOrNull()
+                    }.orEmpty()
+                }
+
+                val nearCeiling = clips?.let { list ->
+                    settings?.let { s ->
+                        RetentionPlanner.pinnedNearCeiling(
+                            list.map { ClipRef(it.id, it.startedAtMs, it.sizeBytes, it.pinned) },
+                            s.retention.toRetentionLimits(),
+                        )
+                    }
+                } ?: false
 
                 ClipsScreen(
                     clips = clips,
@@ -181,6 +199,17 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     projectedDays = projectedDays,
                     showBoxes = settings?.boundingBoxOverlay ?: true,
                     loadThumbnail = open?.let { s -> { id -> s.link.thumbnail(id) } },
+                    buckets = buckets,
+                    pinnedNearCeiling = nearCeiling,
+                    onExport = { clip ->
+                        edit(scope, open) {
+                            downloading = clip.id
+                            val file = java.io.File(context.cacheDir, "clips/${clip.id}.mp4")
+                            runCatching { if (!file.exists()) it.link.downloadClip(clip.id, file) }
+                            com.homecam.app.viewer.ClipExport.toGallery(context, file, "homecam-${clip.id}.mp4")
+                            downloading = null
+                        }
+                    },
                     onPlay = { clip ->
                         edit(scope, open) {
                             downloading = clip.id

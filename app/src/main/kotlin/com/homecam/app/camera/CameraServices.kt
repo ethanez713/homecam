@@ -7,6 +7,7 @@ import com.homecam.app.data.toProto
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcException
 import com.homecam.core.rpc.RpcPeer
+import com.homecam.core.media.TimelineBuckets
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -46,6 +47,7 @@ import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.SoundDetection
 import com.homecam.proto.SoundRecognition
 import com.homecam.proto.Thumbnail
+import com.homecam.proto.TimelineCount
 import com.homecam.proto.TimelineQuery
 import com.homecam.proto.Torch
 import com.homecam.proto.Viewer
@@ -157,6 +159,29 @@ class CameraServices(
                                         .build()
                                 }
                         }
+                )
+                .build()
+                .toByteString()
+        }
+
+        peer.register(RpcMessage.Service.MEDIA, Controls.Media.TIMELINE_EVENT_COUNT) { request ->
+            val query = TimelineCount.parseFrom(request.payload)
+            val until = query.untilMs.takeIf { it > 0 } ?: System.currentTimeMillis()
+            // The same (clip × label) events TIMELINE returns, bucketed by local hour, so the
+            // density strip and the event list can never disagree.
+            val eventTimes = graph.database.clips().between(query.sinceMs, until, MAX_CLIP_ROWS)
+                .flatMap { clip ->
+                    clip.labels.split(",").filter { it.isNotBlank() }.ifEmpty { listOf("motion") }
+                        .map { clip.startedAtMs }
+                }
+            TimelineCount.newBuilder()
+                .setSinceMs(query.sinceMs)
+                .setUntilMs(until)
+                .setBucketMs(3_600_000L)
+                .addAllBuckets(
+                    TimelineBuckets.hourly(eventTimes, ZoneId.systemDefault()).map {
+                        TimelineCount.Bucket.newBuilder().setAtMs(it.atMs).setCount(it.count).build()
+                    }
                 )
                 .build()
                 .toByteString()

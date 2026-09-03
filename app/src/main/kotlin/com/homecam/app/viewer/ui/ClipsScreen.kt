@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,6 +26,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,7 +62,9 @@ import androidx.compose.ui.unit.dp
 import com.homecam.app.ui.formatBytes
 import com.homecam.app.ui.formatDuration
 import com.homecam.app.ui.formatStamp
+import com.homecam.core.media.ClipFilter
 import com.homecam.proto.Clip
+import com.homecam.proto.TimelineCount
 import java.io.File
 
 @Composable
@@ -73,6 +79,9 @@ fun ClipsScreen(
     showBoxes: Boolean,
     onClosePlayer: () -> Unit,
     loadThumbnail: (suspend (String) -> ByteArray?)? = null,
+    buckets: List<TimelineCount.Bucket> = emptyList(),
+    pinnedNearCeiling: Boolean = false,
+    onExport: (Clip) -> Unit = {},
 ) {
     if (playing != null) {
         Player(playing, showBoxes, onClosePlayer)
@@ -88,6 +97,16 @@ fun ClipsScreen(
         return
     }
 
+    var activeLabel by remember(clips) { mutableStateOf<String?>(null) }
+    var activeHourMs by remember(clips) { mutableStateOf<Long?>(null) }
+    val labels = remember(clips) { clips.flatMap { it.labelsList }.distinct().sorted() }
+    val shown = clips
+        .let { if (activeLabel != null) ClipFilter.withLabel(it, activeLabel!!) else it }
+        .let { list ->
+            val hour = activeHourMs
+            if (hour == null) list else list.filter { it.startedAtMs in hour until hour + HOUR_MS }
+        }
+
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Clips", style = MaterialTheme.typography.headlineSmall)
         projectedDays?.let {
@@ -98,6 +117,13 @@ fun ClipsScreen(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+        if (pinnedNearCeiling) {
+            Text(
+                "Pinned clips are near the size limit — new recordings will be pushed out sooner.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         Spacer(Modifier.height(12.dp))
 
         if (clips.isEmpty()) {
@@ -105,8 +131,25 @@ fun ClipsScreen(
             return@Column
         }
 
+        if (buckets.isNotEmpty()) {
+            DensityStrip(buckets, activeHourMs) { at -> activeHourMs = if (activeHourMs == at) null else at }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (labels.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                labels.forEach { label ->
+                    FilterChip(
+                        selected = activeLabel == label,
+                        onClick = { activeLabel = if (activeLabel == label) null else label },
+                        label = { Text(label) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(clips, key = { it.id }) { clip ->
+            items(shown, key = { it.id }) { clip ->
                 Card(Modifier.fillMaxWidth()) {
                     Row(
                         Modifier.fillMaxWidth().padding(12.dp),
@@ -138,6 +181,7 @@ fun ClipsScreen(
                         } else {
                             TextButton(onClick = { onPlay(clip) }) { Text("Play") }
                         }
+                        TextButton(onClick = { onExport(clip) }) { Text("Save") }
                         TextButton(onClick = { onDelete(clip) }) { Text("Delete") }
                     }
                 }
@@ -145,6 +189,38 @@ fun ClipsScreen(
         }
     }
 }
+
+/** Hourly activity density; a tapped bar filters the list to that hour. */
+@Composable
+private fun DensityStrip(
+    buckets: List<TimelineCount.Bucket>,
+    activeHourMs: Long?,
+    onSelect: (Long) -> Unit,
+) {
+    val max = (buckets.maxOfOrNull { it.count } ?: 1).coerceAtLeast(1)
+    Row(
+        Modifier.fillMaxWidth().height(48.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        buckets.forEach { bucket ->
+            val selected = bucket.atMs == activeHourMs
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(bucket.count.toFloat() / max)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                    )
+                    .clickable { onSelect(bucket.atMs) },
+            )
+        }
+    }
+}
+
+private const val HOUR_MS = 3_600_000L
 
 @Composable
 private fun ClipThumbnail(clipId: String, load: suspend (String) -> ByteArray?) {

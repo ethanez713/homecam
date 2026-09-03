@@ -168,6 +168,16 @@ class CameraLink(private val peer: RpcPeer) {
         ).jpeg.toByteArray().takeIf { it.isNotEmpty() }
     }.getOrNull()
 
+    suspend fun timelineCounts(sinceMs: Long, untilMs: Long = 0): com.homecam.proto.TimelineCount =
+        com.homecam.proto.TimelineCount.parseFrom(
+            peer.request(
+                RpcMessage.Service.MEDIA,
+                Controls.Media.TIMELINE_EVENT_COUNT,
+                com.homecam.proto.TimelineCount.newBuilder()
+                    .setSinceMs(sinceMs).setUntilMs(untilMs).build().toByteString(),
+            )
+        )
+
     suspend fun pinClip(id: String, pinned: Boolean) {
         peer.request(
             RpcMessage.Service.MEDIA,

@@ -68,9 +68,14 @@ object RetentionPlanner {
             delete = doomed.toList(),
             pinnedBytes = pinnedBytes,
             remainingBytes = total,
-            pinnedNearCeiling = pinnedBytes > limits.maxSizeBytes * 9 / 10,
+            pinnedNearCeiling = pinnedNearCeiling(clips, limits),
         )
     }
+
+    /** True when pinned clips alone are within 10% of the size ceiling (§5) — the point at
+     * which pinning one more thing starts pushing history out. */
+    fun pinnedNearCeiling(clips: List<ClipRef>, limits: RetentionLimits): Boolean =
+        clips.filter { it.pinned }.sumOf { it.sizeBytes } > limits.maxSizeBytes * 9 / 10
 
     /**
      * "≈ 9 days at current rate", which is the number worth showing — far more useful
