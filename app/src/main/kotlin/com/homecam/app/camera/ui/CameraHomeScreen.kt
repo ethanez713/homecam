@@ -43,6 +43,7 @@ fun CameraHomeScreen(
     onPair: () -> Unit,
     onLog: () -> Unit,
     onNetwork: () -> Unit,
+    onSwitchRole: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         if (liveViewerLabel != null) {
@@ -110,6 +111,9 @@ fun CameraHomeScreen(
             }
             OutlinedButton(onClick = onNetwork, modifier = Modifier.fillMaxWidth()) {
                 Text("Network activity")
+            }
+            TextButton(onClick = onSwitchRole, modifier = Modifier.fillMaxWidth()) {
+                Text("Use this phone as a viewer")
             }
         }
 

@@ -27,12 +27,12 @@ import kotlinx.coroutines.launch
 private enum class CameraScreen { HOME, ROSTER, PAIRING, LOG, NETWORK }
 
 @Composable
-fun CameraRoot() {
+fun CameraRoot(onSwitchRole: () -> Unit = {}) {
     PermissionGate(
         permissions = cameraRolePermissions(),
         rationale = "This phone is the camera. It needs the camera to see, the microphone " +
             "for two-way audio, and notifications so it can tell you when someone connects.",
-    ) { CameraContent() }
+    ) { CameraContent(onSwitchRole) }
 }
 
 private fun cameraRolePermissions(): List<String> = buildList {
@@ -44,7 +44,7 @@ private fun cameraRolePermissions(): List<String> = buildList {
 }
 
 @Composable
-private fun CameraContent() {
+private fun CameraContent(onSwitchRole: () -> Unit) {
     val context = LocalContext.current
     val graph = remember { AppGraph.get(context) }
     val node = remember { graph.cameraNode }
@@ -87,6 +87,7 @@ private fun CameraContent() {
             onPair = { screen = CameraScreen.PAIRING },
             onLog = { screen = CameraScreen.LOG },
             onNetwork = { screen = CameraScreen.NETWORK },
+            onSwitchRole = onSwitchRole,
         )
 
         CameraScreen.ROSTER -> RosterScreen(

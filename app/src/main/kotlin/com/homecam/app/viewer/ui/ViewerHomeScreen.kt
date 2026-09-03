@@ -31,6 +31,7 @@ fun ViewerHomeScreen(
     onForget: (String) -> Unit,
     onLog: () -> Unit,
     onNetwork: () -> Unit,
+    onSwitchRole: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("Cameras", style = MaterialTheme.typography.headlineMedium)
@@ -77,5 +78,6 @@ fun ViewerHomeScreen(
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = onLog, modifier = Modifier.fillMaxWidth()) { Text("Access log") }
         TextButton(onClick = onNetwork, modifier = Modifier.fillMaxWidth()) { Text("Network activity") }
+        TextButton(onClick = onSwitchRole, modifier = Modifier.fillMaxWidth()) { Text("Use this phone as a camera") }
     }
 }

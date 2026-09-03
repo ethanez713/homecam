@@ -3,8 +3,9 @@ package com.homecam.app
 import android.content.Context
 
 /**
- * One APK carries both roles; which one this install is gets chosen at first launch and
- * then stays put — an old phone taped above the door is not going to change its mind.
+ * One APK carries both roles; which one this install is gets chosen at first launch. It
+ * usually stays put — an old phone taped above the door rarely changes its mind — but it
+ * is changeable from either home screen, so a phone can be repurposed without a reinstall.
  */
 enum class Role { CAMERA, VIEWER }
 

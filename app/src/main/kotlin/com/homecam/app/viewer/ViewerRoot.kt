@@ -34,7 +34,7 @@ private sealed interface ViewerScreen {
 }
 
 @Composable
-fun ViewerRoot() {
+fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
     val context = LocalContext.current
     val graph = remember { AppGraph.get(context) }
     val node = remember { graph.viewerNode }
@@ -51,6 +51,7 @@ fun ViewerRoot() {
             onForget = { scope.launch { node.forget(it) } },
             onLog = { screen = ViewerScreen.Log },
             onNetwork = { screen = ViewerScreen.Network },
+            onSwitchRole = onSwitchRole,
         )
 
         ViewerScreen.Scan -> ScanScreen { invite -> screen = ViewerScreen.Pairing(invite) }
