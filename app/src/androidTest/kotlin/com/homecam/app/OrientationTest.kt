@@ -1,9 +1,12 @@
 package com.homecam.app
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.homecam.app.media.PrivacyMaskProcessor
+import com.homecam.app.media.WebRtc
 import com.homecam.proto.PrivacyMask
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.webrtc.JavaI420Buffer
@@ -17,6 +20,13 @@ import org.webrtc.VideoFrame
  */
 @RunWith(AndroidJUnit4::class)
 class OrientationTest {
+
+    // JavaI420Buffer.allocate is JNI; the native library is loaded as a side effect of
+    // building the process-wide factory, exactly as the app does at startup.
+    @Before
+    fun loadNative() {
+        WebRtc.factory(InstrumentationRegistry.getInstrumentation().targetContext)
+    }
 
     private fun frame(rotation: Int): VideoFrame =
         VideoFrame(JavaI420Buffer.allocate(16, 16), rotation, 0L)

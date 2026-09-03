@@ -1,17 +1,18 @@
 package com.homecam.app
 
 import android.graphics.BitmapFactory
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.homecam.app.media.ContinuousCapture
+import com.homecam.app.media.WebRtc
 import com.homecam.app.media.YuvJpeg
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.webrtc.JavaI420Buffer
@@ -26,6 +27,11 @@ import org.webrtc.JavaI420Buffer
 class SnapshotTest {
 
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Before
+    fun loadNative() {
+        WebRtc.factory(context)
+    }
 
     @Test
     fun snapshotJpegDecodesToTheBufferDimensions() {
@@ -43,8 +49,10 @@ class SnapshotTest {
 
     @Test
     fun aStoppedCaptureYieldsNoFrameRatherThanABlankOne() {
+        // Never started, so the lifecycle stays at its default INITIALIZED and snapshotJpeg
+        // short-circuits to null before any capture is bound — no main-thread work needed.
         val owner = object : LifecycleOwner {
-            override val lifecycle = LifecycleRegistry(this).apply { currentState = Lifecycle.State.CREATED }
+            override val lifecycle = LifecycleRegistry(this)
         }
         val capture = ContinuousCapture(context, owner)
         runBlocking { assertNull(capture.snapshotJpeg()) }
