@@ -43,6 +43,8 @@ import com.homecam.proto.SessionConfig
 import com.homecam.proto.Siren
 import com.homecam.proto.Spotlight
 import com.homecam.proto.SettingsSnapshot
+import com.homecam.proto.SoundDetection
+import com.homecam.proto.SoundRecognition
 import com.homecam.proto.Thumbnail
 import com.homecam.proto.TimelineQuery
 import com.homecam.proto.Torch
@@ -294,6 +296,12 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.DETECTION_REMINDER) {
             setDetectionReminder(DetectionReminder.parseFrom(it))
         }
+        settingSetter(peer, Controls.Settings.SOUND_DETECTION) {
+            setSoundDetection(SoundDetection.parseFrom(it))
+        }
+        settingSetter(peer, Controls.Settings.SOUND_RECOGNITION) {
+            setSoundRecognition(SoundRecognition.parseFrom(it))
+        }
     }
 
     /**
@@ -406,6 +414,8 @@ class CameraServices(
         Controls.Settings.RECORDING_MODE -> "recording mode"
         Controls.Settings.AUTO_SPOTLIGHT -> "auto spotlight"
         Controls.Settings.DETECTION_REMINDER -> "detection reminder"
+        Controls.Settings.SOUND_DETECTION -> "sound detection"
+        Controls.Settings.SOUND_RECOGNITION -> "sound recognition"
         else -> throw RpcException(RpcError.Code.UNIMPLEMENTED, "unknown setting $control")
     }
 

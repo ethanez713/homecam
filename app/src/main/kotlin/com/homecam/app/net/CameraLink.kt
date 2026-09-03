@@ -229,6 +229,24 @@ class CameraLink(private val peer: RpcPeer) {
         )
     )
 
+    suspend fun setSoundDetection(enabled: Boolean, thresholdDb: Float = 0f): SettingsSnapshot =
+        SettingsSnapshot.parseFrom(
+            peer.request(
+                RpcMessage.Service.SETTINGS,
+                Controls.Settings.SOUND_DETECTION,
+                com.homecam.proto.SoundDetection.newBuilder()
+                    .setEnabled(enabled).setThresholdDb(thresholdDb).build().toByteString(),
+            )
+        )
+
+    suspend fun setSoundRecognition(classes: List<String>): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.SOUND_RECOGNITION,
+            com.homecam.proto.SoundRecognition.newBuilder().addAllClasses(classes).build().toByteString(),
+        )
+    )
+
     suspend fun setDetectionReminder(enabled: Boolean, intervalMinutes: Int): SettingsSnapshot =
         SettingsSnapshot.parseFrom(
             peer.request(

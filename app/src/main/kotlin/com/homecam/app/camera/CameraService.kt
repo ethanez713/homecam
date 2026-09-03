@@ -18,6 +18,7 @@ import com.homecam.app.net.Signaling
 import com.homecam.app.net.SignalingServer
 import com.homecam.app.alerts.Alerts
 import com.homecam.app.data.ClipStore
+import com.homecam.app.detect.AudioDetectionPipeline
 import com.homecam.app.detect.DetectionPipeline
 import com.homecam.app.media.CameraMediaSession
 import com.homecam.app.media.ContinuousCapture
@@ -53,6 +54,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private lateinit var capture: ContinuousCapture
     private lateinit var recorder: Recorder
     private lateinit var detection: DetectionPipeline
+    private lateinit var audioDetection: AudioDetectionPipeline
     private lateinit var alerts: Alerts
     private val siren by lazy { Siren(this) }
     @Volatile private var spotlightOffAtMs = 0L
@@ -108,9 +110,18 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             it.start()
         }
         alerts = Alerts(graph)
+        audioDetection = AudioDetectionPipeline(
+            context = this,
+            settings = { graph.settings.current },
+            onEvent = { category ->
+                recorder.onSoundEvent(category, System.currentTimeMillis())
+                alerts.onDetection(listOf(category), clipId = "", thumbnailJpeg = null)
+            },
+        ).also { it.sync() }
         ClipPruneWorker.schedule(this)
         observeArming()
         observeRecordingMode()
+        observeSoundSettings()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
         running.value = true
     }
@@ -125,6 +136,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         graph.scope.launch { endLive(Bye.Reason.CAMERA_DISABLED, "camera stopped") }
         mdns?.stop()
         siren.stop()
+        audioDetection.close()
         capture.removeSink(detection)
         detection.close()
         recorder.stop()
@@ -221,6 +233,15 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             graph.settings.settings.map { it.recordingMode }.distinctUntilChanged().collect {
                 recorder.setMode(it)
             }
+        }
+    }
+
+    private fun observeSoundSettings() {
+        lifecycleScope.launch {
+            graph.settings.settings
+                .map { it.microphone to it.soundDetection.enabled }
+                .distinctUntilChanged()
+                .collect { audioDetection.sync() }
         }
     }
 

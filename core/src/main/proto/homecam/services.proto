@@ -53,10 +53,20 @@ message SettingsSnapshot {
   PrivacyMask privacy_mask = 19;
   bool bounding_box_overlay = 22;
   DetectionReminder detection_reminder = 23;
+  SoundDetection sound_detection = 24;
+  SoundRecognition sound_recognition = 25;
   bool auto_spotlight = 26;
   RetentionPolicy retention = 32;
   RecordingMode recording_mode = 33;
 }
+
+// The decibel half of sound detection (Phase 6): a loud noise above [threshold_db] fires,
+// no model required. Independent of the vision pipeline, as it is in Alfred.
+message SoundDetection { bool enabled = 1; float threshold_db = 2; }
+
+// Which recognised sound classes count, when the classifier is enabled. Empty means the
+// decibel trigger only. Class names are the small user-facing set from models/README.md.
+message SoundRecognition { repeated string classes = 1; }
 
 // Periodically reminds the owner the camera is armed and detecting, so a camera quietly
 // recording an occupied house is not a surprise (§2.7). A privacy control, not a nag.

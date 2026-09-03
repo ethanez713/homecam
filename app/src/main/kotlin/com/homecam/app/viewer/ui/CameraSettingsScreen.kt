@@ -2,6 +2,7 @@ package com.homecam.app.viewer.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -43,6 +45,10 @@ fun CameraSettingsScreen(
     onAutoSpotlight: (Boolean) -> Unit,
     reminderEnabled: Boolean,
     onDetectionReminder: (Boolean) -> Unit,
+    soundDetectionEnabled: Boolean,
+    onSoundDetection: (Boolean) -> Unit,
+    soundClasses: Set<String>,
+    onSoundClass: (String, Boolean) -> Unit,
     alertsEnabled: Boolean,
     onAlerts: (Boolean) -> Unit,
     remoteAddress: String,
@@ -98,6 +104,26 @@ fun CameraSettingsScreen(
         }
         Toggle("Packages", null, mode.getPackage()) {
             onDetectionMode(mode.person, mode.vehicle, mode.pet, it)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text("Hear", style = MaterialTheme.typography.titleMedium)
+        Toggle(
+            "Sound detection",
+            "Record on a loud noise, using the camera's microphone (respects the mic switch)",
+            soundDetectionEnabled,
+            onSoundDetection,
+        )
+        if (soundDetectionEnabled) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.homecam.core.sound.SoundClasses.ALL.forEach { soundClass ->
+                    FilterChip(
+                        selected = soundClass in soundClasses,
+                        onClick = { onSoundClass(soundClass, soundClass !in soundClasses) },
+                        label = { Text(soundClass) },
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.height(16.dp))

@@ -40,6 +40,8 @@ object Controls {
         const val PRIVACY_MASK = 19
         const val BOUNDING_BOX_OVERLAY = 22
         const val DETECTION_REMINDER = 23
+        const val SOUND_DETECTION = 24
+        const val SOUND_RECOGNITION = 25
         const val AUTO_SPOTLIGHT = 26
         const val RETENTION = 32
         const val RECORDING_MODE = 33

@@ -220,6 +220,18 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 onDetectionReminder = { on ->
                     edit(scope, open) { settings = it.link.setDetectionReminder(on, 60) }
                 },
+                soundDetectionEnabled = settings?.soundDetection?.enabled ?: false,
+                onSoundDetection = { on ->
+                    edit(scope, open) { settings = it.link.setSoundDetection(on) }
+                },
+                soundClasses = settings?.soundRecognition?.classesList?.toSet() ?: emptySet(),
+                onSoundClass = { soundClass, on ->
+                    edit(scope, open) {
+                        val next = (settings?.soundRecognition?.classesList ?: emptyList()).toMutableSet()
+                        if (on) next.add(soundClass) else next.remove(soundClass)
+                        settings = it.link.setSoundRecognition(next.toList())
+                    }
+                },
                 onDetectionMode = { person, vehicle, pet, packages ->
                     edit(scope, open) {
                         settings = it.link.setDetectionMode(person, vehicle, pet, packages)

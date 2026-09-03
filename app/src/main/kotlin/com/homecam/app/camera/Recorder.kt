@@ -115,6 +115,20 @@ class Recorder(
         }
     }
 
+    /**
+     * A sound event triggers a clip the same way a vision detection does (Phase 6.5), but
+     * carries no bounding box — only a label, so the viewer can tell why the clip exists.
+     */
+    fun onSoundEvent(category: String, nowMs: Long) {
+        if (mode == RecordingMode.OFF) return
+        detectionUntilMs = nowMs + DETECTION_TAIL_MS
+        labelsInClip += category
+        beginClip()
+        graph.scope.launch {
+            graph.audit.record(AuditEvent.Kind.DETECTION, detail = "sound: $category")
+        }
+    }
+
     private fun frameOf(detections: List<DetectionPipeline.LabelledDetection>, nowMs: Long) =
         DetectionFrame.newBuilder()
             .setAtMs(nowMs)
