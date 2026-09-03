@@ -10,6 +10,10 @@ object Controls {
         const val CONFIG = 0
         const val PUSH_TO_TALK = 1
         const val MANUAL_RECORD = 2
+
+        // NOTIFICATION only: the camera pushes it to the requester when a manual clip
+        // closes. No responder is registered, so the completeness sweep expects it absent.
+        const val MANUAL_RECORD_RESULT = 3
         const val TORCH = 4
         const val ORIENTATION = 5
         const val RESOLUTION = 8
@@ -34,6 +38,7 @@ object Controls {
         const val PRIVACY_MASK = 19
         const val BOUNDING_BOX_OVERLAY = 22
         const val RETENTION = 32
+        const val RECORDING_MODE = 33
     }
 
     object Status {

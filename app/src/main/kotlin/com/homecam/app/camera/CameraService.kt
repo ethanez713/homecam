@@ -21,11 +21,13 @@ import com.homecam.app.data.ClipStore
 import com.homecam.app.detect.DetectionPipeline
 import com.homecam.app.media.CameraMediaSession
 import com.homecam.app.media.ContinuousCapture
+import com.homecam.core.rpc.Controls
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
 import com.homecam.proto.Sdp
 import com.homecam.proto.SessionConfig
+import com.homecam.proto.RpcMessage
 import com.homecam.proto.SessionStatus
 import com.homecam.proto.SignalMessage
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,6 +81,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         recorder = Recorder(graph, capture, ClipStore(this, graph.database.clips())).also {
             it.start()
             it.setArmed(graph.settings.current.armed)
+            it.setMode(graph.settings.current.recordingMode)
+            it.onManualResult = ::onManualRecordResult
         }
         detection = DetectionPipeline(
             context = this,
@@ -101,6 +105,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         alerts = Alerts(graph)
         ClipPruneWorker.schedule(this)
         observeArming()
+        observeRecordingMode()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
         running.value = true
     }
@@ -201,6 +206,36 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             graph.settings.settings.map { it.armed }.distinctUntilChanged().collect {
                 recorder.setArmed(it)
             }
+        }
+    }
+
+    private fun observeRecordingMode() {
+        lifecycleScope.launch {
+            graph.settings.settings.map { it.recordingMode }.distinctUntilChanged().collect {
+                recorder.setMode(it)
+            }
+        }
+    }
+
+    /**
+     * A manual clip closed. Tell the viewer watching live — the usual requester — its id,
+     * so it need not poll the list. If nobody is live the id is simply found in the list.
+     */
+    private fun onManualRecordResult(written: com.homecam.app.media.ClipRecorder.Written) {
+        val peer = live?.peer ?: return
+        graph.scope.launch {
+            runCatching {
+                peer.rpc.notify(
+                    RpcMessage.Service.SESSION,
+                    Controls.Session.MANUAL_RECORD_RESULT,
+                    com.homecam.proto.ManualRecordResult.newBuilder()
+                        .setClipId(written.id)
+                        .setStartedAtMs(written.startedAtMs)
+                        .setDurationMs(written.durationMs)
+                        .build()
+                        .toByteString(),
+                )
+            }.onFailure { Log.w(TAG, "manual-record result not delivered", it) }
         }
     }
 

@@ -15,6 +15,8 @@ import com.homecam.proto.ClipPin
 import com.homecam.proto.ManualRecord
 import com.homecam.proto.DetectionMode
 import com.homecam.proto.Microphone
+import com.homecam.proto.RecordingMode
+import com.homecam.proto.RecordingModeSetting
 import com.homecam.proto.RevokeViewer
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.RuntimeStatus
@@ -62,6 +64,14 @@ class CameraLink(private val peer: RpcPeer) {
             RpcMessage.Service.SETTINGS,
             Controls.Settings.ALIAS,
             Alias.newBuilder().setAlias(alias).build().toByteString(),
+        )
+    )
+
+    suspend fun setRecordingMode(mode: RecordingMode): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.RECORDING_MODE,
+            RecordingModeSetting.newBuilder().setMode(mode).build().toByteString(),
         )
     )
 

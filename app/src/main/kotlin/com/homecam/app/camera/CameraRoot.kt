@@ -17,8 +17,11 @@ import com.homecam.app.camera.ui.PairingScreen
 import com.homecam.app.camera.ui.RosterScreen
 import com.homecam.app.ui.NetworkActivityScreen
 import com.homecam.app.ui.PermissionGate
+import com.homecam.app.data.toRetentionLimits
 import com.homecam.app.ui.cameraEgress
 import com.homecam.core.audit.AuditChain
+import com.homecam.core.retention.ClipRef
+import com.homecam.core.retention.RetentionPlanner
 import kotlinx.coroutines.launch
 
 private enum class CameraScreen { HOME, ROSTER, PAIRING, LOG, NETWORK }
@@ -56,6 +59,15 @@ private fun CameraContent() {
     val pairingPhrase by node.pairingPhrase.collectAsState()
     val serviceRunning by CameraService.isRunning.collectAsState()
     val liveViewer by CameraService.liveViewerLabel.collectAsState()
+    val projectedDays by produceState<Double?>(null, settings.recordingMode, settings.retention) {
+        value = runCatching {
+            val refs = graph.database.clips().all()
+                .map { ClipRef(it.id, it.startedAtMs, it.sizeBytes, it.pinned) }
+            RetentionPlanner.projectedRetentionDays(
+                refs, settings.retention.toRetentionLimits(), System.currentTimeMillis(),
+            )
+        }.getOrNull()
+    }
 
     LaunchedEffect(Unit) { CameraService.start(context) }
 
@@ -67,7 +79,10 @@ private fun CameraContent() {
             serving = serviceRunning,
             armed = settings.armed,
             hardwareBacked = graph.identity.hardwareBacked,
+            recordingMode = settings.recordingMode,
+            projectedDays = projectedDays,
             onArmedChange = { armed -> scope.launch { graph.settings.update { setArmed(armed) } } },
+            onRecordingMode = { mode -> scope.launch { graph.settings.update { setRecordingMode(mode) } } },
             onManage = { screen = CameraScreen.ROSTER },
             onPair = { screen = CameraScreen.PAIRING },
             onLog = { screen = CameraScreen.LOG },

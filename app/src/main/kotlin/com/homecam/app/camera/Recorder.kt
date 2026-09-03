@@ -9,6 +9,7 @@ import com.homecam.app.media.WebRtc
 import com.homecam.app.detect.DetectionPipeline
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.DetectionFrame
+import com.homecam.proto.RecordingMode
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -29,8 +30,13 @@ class Recorder(
     private val recorder = ClipRecorder(clips.directory)
 
     @Volatile private var armed = false
+    @Volatile private var mode = RecordingMode.DETECTION
     @Volatile private var manualUntilMs = 0L
     @Volatile private var detectionUntilMs = 0L
+    @Volatile private var pendingManualClipId: String? = null
+
+    /** Fired when a manual clip closes, so the requester can be told its id (Phase 4). */
+    var onManualResult: ((ClipRecorder.Written) -> Unit)? = null
 
     /** Labels seen during the clip currently open, so the index says what is in it. */
     private val labelsInClip = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -39,6 +45,10 @@ class Recorder(
         recorder.onClipWritten = { written ->
             val labels = labelsInClip.toList()
             labelsInClip.clear()
+            if (written.id == pendingManualClipId) {
+                pendingManualClipId = null
+                onManualResult?.invoke(written)
+            }
             graph.scope.launch {
                 val entity = clips.index(written, labels)
                 Log.i(TAG, "clip ${entity.id} ${entity.durationMs}ms ${entity.sizeBytes}B")
@@ -60,12 +70,23 @@ class Recorder(
 
     fun setArmed(armed: Boolean) {
         this.armed = armed
-        if (!armed && manualUntilMs <= System.currentTimeMillis()) endClip()
+        if (!shouldKeepRecording()) endClip()
     }
 
-    /** Called on a timer so a clip closes once its detection tail has run out. */
+    /** In CONTINUOUS the recorder keeps a muxer open regardless of arming or detection. */
+    fun setMode(mode: RecordingMode) {
+        this.mode = mode
+        if (!shouldKeepRecording()) endClip()
+    }
+
+    /**
+     * Called on a timer so a clip closes once its detection tail has run out — and, in
+     * CONTINUOUS, so recording starts (and resumes after a segment rollover) even with
+     * nothing detected and nobody watching.
+     */
     fun tick() {
         if (recorder.recording && !shouldKeepRecording()) endClip()
+        else if (!recorder.recording && shouldKeepRecording()) beginClip()
     }
 
     /**
@@ -73,6 +94,10 @@ class Recorder(
      * walking past should be one clip, not thirty.
      */
     fun onDetection(detections: List<DetectionPipeline.LabelledDetection>, nowMs: Long) {
+        // OFF keeps nothing, so a detection is not recorded — the alert path is separate
+        // and still fires. In CONTINUOUS beginClip is a no-op on the already-open segment,
+        // and the detection is labelled and written into it just the same.
+        if (mode == RecordingMode.OFF) return
         detectionUntilMs = nowMs + DETECTION_TAIL_MS
         detections.forEach { labelsInClip += it.category }
         beginClip()
@@ -111,6 +136,9 @@ class Recorder(
     fun recordManually(seconds: Int) {
         manualUntilMs = System.currentTimeMillis() + seconds.coerceIn(5, 300) * 1000L
         beginClip()
+        // The open clip — freshly begun, or the continuous segment already running — is
+        // the one whose id the requester is told about when it closes.
+        pendingManualClipId = recorder.currentClipId
         graph.scope.launch {
             graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, detail = "manual record ${seconds}s")
         }
@@ -124,13 +152,20 @@ class Recorder(
     val recording: Boolean get() = recorder.recording
 
     /**
-     * While armed the camera records on *detection*, not continuously. Continuous
-     * recording would fill the retention budget with an empty hallway and push out the
-     * minute that mattered.
+     * Why DETECTION is the default rather than CONTINUOUS: recording on detection keeps the
+     * retention budget spent on the minutes something happened, instead of filling it with
+     * an empty hallway that pushes out the minute that mattered. CONTINUOUS exists for when
+     * a gap-free record is worth that cost, and retention is what makes it survivable — but
+     * it is a choice the user makes, not the default. A manual request overrides the mode.
      */
     private fun shouldKeepRecording(): Boolean {
         val now = System.currentTimeMillis()
-        return manualUntilMs > now || (armed && detectionUntilMs > now)
+        return when {
+            manualUntilMs > now -> true
+            mode == RecordingMode.CONTINUOUS -> true
+            mode == RecordingMode.DETECTION -> armed && detectionUntilMs > now
+            else -> false
+        }
     }
 
     private fun beginClip() {

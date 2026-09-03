@@ -32,6 +32,7 @@ import com.homecam.proto.Orientation
 import com.homecam.proto.PrivacyMask
 import com.homecam.proto.PushToTalk
 import com.homecam.proto.Resolution
+import com.homecam.proto.RecordingModeSetting
 import com.homecam.proto.RetentionPolicy
 import com.homecam.proto.RpcError
 import com.homecam.proto.RpcMessage
@@ -271,6 +272,9 @@ class CameraServices(
             setBoundingBoxOverlay(BoundingBoxOverlay.parseFrom(it).enabled)
         }
         settingSetter(peer, Controls.Settings.RETENTION) { setRetention(RetentionPolicy.parseFrom(it)) }
+        settingSetter(peer, Controls.Settings.RECORDING_MODE) {
+            setRecordingMode(RecordingModeSetting.parseFrom(it).mode)
+        }
     }
 
     /**
@@ -380,6 +384,7 @@ class CameraServices(
         Controls.Settings.PRIVACY_MASK -> "privacy mask"
         Controls.Settings.BOUNDING_BOX_OVERLAY -> "bounding boxes"
         Controls.Settings.RETENTION -> "retention"
+        Controls.Settings.RECORDING_MODE -> "recording mode"
         else -> throw RpcException(RpcError.Code.UNIMPLEMENTED, "unknown setting $control")
     }
 

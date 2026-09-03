@@ -37,6 +37,10 @@ class ViewerSession(
     private val _ended = MutableStateFlow<Pair<Bye.Reason, String>?>(null)
     val ended: StateFlow<Pair<Bye.Reason, String>?> = _ended.asStateFlow()
 
+    private val _manualRecordResult = MutableStateFlow<com.homecam.proto.ManualRecordResult?>(null)
+    /** The id of the last manual clip the camera reported closed, pushed not polled. */
+    val manualRecordResult: StateFlow<com.homecam.proto.ManualRecordResult?> = _manualRecordResult.asStateFlow()
+
     private val media = ViewerMediaSession(
         context = context,
         transport = object : ViewerMediaSession.Transport {
@@ -56,6 +60,10 @@ class ViewerSession(
     )
 
     init {
+        client.rpc.register(RpcMessage.Service.SESSION, Controls.Session.MANUAL_RECORD_RESULT) { request ->
+            _manualRecordResult.value = com.homecam.proto.ManualRecordResult.parseFrom(request.payload)
+            null
+        }
         client.listener = object : SignalingClient.Listener {
             override fun onAuthenticated(verificationPhrase: String) = Unit
             override fun onPresence(presence: Presence) { _presence.value = presence }

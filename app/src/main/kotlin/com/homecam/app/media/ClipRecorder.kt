@@ -103,6 +103,8 @@ class ClipRecorder(
 
     val recording: Boolean get() = synchronized(lock) { muxer != null }
 
+    val currentClipId: String? get() = synchronized(lock) { currentId }
+
     fun start(eglContext: EglBase.Context) {
         synchronized(lock) {
             if (encoder != null) return

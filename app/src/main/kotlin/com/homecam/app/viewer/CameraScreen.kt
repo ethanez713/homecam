@@ -30,8 +30,11 @@ import com.homecam.app.viewer.ui.LiveControls
 import com.homecam.app.viewer.ui.LiveScreen
 import com.homecam.app.viewer.ui.LiveState
 import com.homecam.app.viewer.ui.RemoteRosterScreen
+import com.homecam.app.data.toRetentionLimits
 import com.homecam.core.audit.AuditChain
 import com.homecam.core.rpc.ControlGating
+import com.homecam.core.retention.ClipRef
+import com.homecam.core.retention.RetentionPlanner
 import com.homecam.proto.Capabilities
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Viewer
@@ -61,6 +64,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
     var session by remember(camera.fingerprint, attempt) { mutableStateOf<ViewerSession?>(null) }
     var settings by remember(camera.fingerprint, attempt) { mutableStateOf<SettingsSnapshot?>(null) }
     var capabilities by remember(camera.fingerprint, attempt) { mutableStateOf<Capabilities?>(null) }
+    var projectedDays by remember(camera.fingerprint, attempt) { mutableStateOf<Double?>(null) }
     var viewers by remember(camera.fingerprint, attempt) { mutableStateOf<List<Viewer>?>(null) }
     var torch by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
     var mic by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
@@ -107,6 +111,18 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
             state = ended?.let { LiveState.Failed(describeBye(it.first, it.second)) }
                 ?: connected.copy(presence = presence, video = video)
         }
+    }
+
+    // Recomputed when the mode changes, since that is what alters the recording rate and so
+    // how far back the camera can remember (§5); a stale estimate is worse than none.
+    LaunchedEffect(open, settings?.recordingMode, settings?.retention) {
+        val current = settings
+        projectedDays = if (open == null || current == null) null else runCatching {
+            val refs = open.link.clips(limit = 1000).clipsList.map {
+                ClipRef(it.id, it.startedAtMs, it.sizeBytes, it.pinned)
+            }
+            RetentionPlanner.projectedRetentionDays(refs, current.retention.toRetentionLimits(), System.currentTimeMillis())
+        }.getOrNull()
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -158,7 +174,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     clips = clips,
                     playing = playing,
                     downloadingId = downloading,
-                    projectedDays = null,
+                    projectedDays = projectedDays,
                     showBoxes = settings?.boundingBoxOverlay ?: true,
                     loadThumbnail = open?.let { s -> { id -> s.link.thumbnail(id) } },
                     onPlay = { clip ->
@@ -187,6 +203,10 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 onMicrophone = { on ->
                     edit(scope, open) { settings = it.link.setMicrophone(on) }
                 },
+                onRecordingMode = { mode ->
+                    edit(scope, open) { settings = it.link.setRecordingMode(mode) }
+                },
+                projectedDays = projectedDays,
                 onDetectionMode = { person, vehicle, pet, packages ->
                     edit(scope, open) {
                         settings = it.link.setDetectionMode(person, vehicle, pet, packages)

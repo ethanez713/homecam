@@ -25,6 +25,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.homecam.app.ui.RecordingModeControl
+import com.homecam.proto.RecordingMode
 import com.homecam.proto.SettingsSnapshot
 
 @Composable
@@ -33,6 +35,8 @@ fun CameraSettingsScreen(
     onArmed: (Boolean) -> Unit,
     onAlias: (String) -> Unit,
     onMicrophone: (Boolean) -> Unit,
+    onRecordingMode: (RecordingMode) -> Unit,
+    projectedDays: Double?,
     onDetectionMode: (person: Boolean, vehicle: Boolean, pet: Boolean, packages: Boolean) -> Unit,
     alertsEnabled: Boolean,
     onAlerts: (Boolean) -> Unit,
@@ -69,8 +73,11 @@ fun CameraSettingsScreen(
         }
 
         Spacer(Modifier.height(8.dp))
-        Toggle("Armed", "Record when something is detected", settings.armed, onArmed)
+        Toggle("Armed", "Watch for events and send alerts", settings.armed, onArmed)
         Toggle("Microphone", "Send the camera's audio", settings.microphone, onMicrophone)
+
+        Spacer(Modifier.height(16.dp))
+        RecordingModeControl(settings.recordingMode, projectedDays, onRecordingMode)
 
         Spacer(Modifier.height(16.dp))
         Text("Detect", style = MaterialTheme.typography.titleMedium)

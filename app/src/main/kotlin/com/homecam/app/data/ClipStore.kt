@@ -100,11 +100,7 @@ class ClipStore(context: Context, private val dao: ClipDao) {
      * the limit that matters most — free space — can be crossed by one long clip.
      */
     suspend fun prune(policy: RetentionPolicy): PrunePlan = pruneLock.withLock {
-        val limits = RetentionLimits(
-            maxAgeDays = policy.maxAgeDays.takeIf { it > 0 } ?: 14,
-            maxSizeGb = policy.maxSizeGb.takeIf { it > 0 } ?: 32,
-            minFreeSpaceGb = policy.minFreeSpaceGb.takeIf { it > 0 } ?: 8,
-        )
+        val limits = policy.toRetentionLimits()
         val clips = dao.all().map { it.toRef() }
         val plan = RetentionPlanner.plan(
             clips = clips,
@@ -120,11 +116,7 @@ class ClipStore(context: Context, private val dao: ClipDao) {
     suspend fun projectedRetentionDays(policy: RetentionPolicy): Double? =
         RetentionPlanner.projectedRetentionDays(
             dao.all().map { it.toRef() },
-            RetentionLimits(
-                maxAgeDays = policy.maxAgeDays.takeIf { it > 0 } ?: 14,
-                maxSizeGb = policy.maxSizeGb.takeIf { it > 0 } ?: 32,
-                minFreeSpaceGb = policy.minFreeSpaceGb.takeIf { it > 0 } ?: 8,
-            ),
+            policy.toRetentionLimits(),
             System.currentTimeMillis(),
         )
 
@@ -165,6 +157,13 @@ class ClipStore(context: Context, private val dao: ClipDao) {
 }
 
 fun ClipEntity.toRef() = ClipRef(id, startedAtMs, sizeBytes, pinned)
+
+/** The wire policy's defaults, applied once — mirrors what [RetentionPlanner] is given. */
+fun RetentionPolicy.toRetentionLimits() = RetentionLimits(
+    maxAgeDays = maxAgeDays.takeIf { it > 0 } ?: 14,
+    maxSizeGb = maxSizeGb.takeIf { it > 0 } ?: 32,
+    minFreeSpaceGb = minFreeSpaceGb.takeIf { it > 0 } ?: 8,
+)
 
 fun ClipEntity.toProto(): Clip = Clip.newBuilder()
     .setId(id)

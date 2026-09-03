@@ -19,6 +19,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.homecam.app.ui.RecordingModeControl
+import com.homecam.proto.RecordingMode
 
 /**
  * §2.6 puts the access count above the fold, and §2.7 puts a live indicator on the camera
@@ -33,7 +35,10 @@ fun CameraHomeScreen(
     serving: Boolean,
     armed: Boolean,
     hardwareBacked: Boolean,
+    recordingMode: RecordingMode,
+    projectedDays: Double?,
     onArmedChange: (Boolean) -> Unit,
+    onRecordingMode: (RecordingMode) -> Unit,
     onManage: () -> Unit,
     onPair: () -> Unit,
     onLog: () -> Unit,
@@ -80,11 +85,18 @@ fun CameraHomeScreen(
                 Column(Modifier.weight(1f)) {
                     Text("Armed", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        if (armed) "Recording on detection" else "Watching only, not recording",
+                        if (armed) "Watching for events" else "Not watching",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 Switch(checked = armed, onCheckedChange = onArmedChange)
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                RecordingModeControl(recordingMode, projectedDays, onRecordingMode)
             }
         }
 
