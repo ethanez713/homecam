@@ -97,7 +97,9 @@ class DeviceIdentity private constructor(
                 KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
             )
                 .setAlgorithmParameterSpec(ECGenParameterSpec(IdentityKey.CURVE))
-                .setDigests(KeyProperties.DIGEST_SHA256)
+                // NONE because Conscrypt signs the TLS handshake as a pre-hashed digest
+                // through the key handle; without it every connection to the camera fails.
+                .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256)
                 // No user-authentication requirement: the camera has to be able to answer
                 // a paired viewer while the phone sits locked above the front door.
                 .setCertificateSubject(X500Principal("CN=homecam"))
