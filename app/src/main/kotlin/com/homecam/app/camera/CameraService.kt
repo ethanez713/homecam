@@ -135,7 +135,6 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         observeSoundSettings()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
         running.value = true
-        instance = this
         watchFrames()
     }
 
@@ -143,14 +142,18 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_RESUME_CAPTURE) {
             val done = whenResumed.also { whenResumed = null }
-            if (watchdog.isBlind) resumeCapture(done ?: {})
-            else done?.invoke()
+            if (watchdog.isBlind) {
+                resumeCapture(done ?: {})
+            } else {
+                // startForegroundService still obliges a startForeground call.
+                startForegroundWithNotification(currentForegroundNotification())
+                done?.invoke()
+            }
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        if (instance === this) instance = null
         running.value = false
         blind.value = false
         cancelCameraPausedNotification()
@@ -683,8 +686,6 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         private val blind = MutableStateFlow(false)
         val isBlind: StateFlow<Boolean> = blind.asStateFlow()
 
-        @Volatile private var instance: CameraService? = null
-
         /** Invoked once the service has entered the foreground, so the calling window can close. */
         @Volatile private var whenResumed: (() -> Unit)? = null
 
@@ -701,11 +702,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
          * caller that is itself the visible window can stay up until then.
          */
         fun resume(context: Context, done: () -> Unit = {}) {
-            val running = instance
-            if (running != null) {
-                running.resumeCapture(done)
-                return
-            }
+            // Always through startForegroundService, even when the service is already up:
+            // that call, made while the caller is visible, is what Android re-evaluates
+            // camera access on — a repeat startForeground from inside the service is not.
             whenResumed = done
             runCatching { launch(context, ACTION_RESUME_CAPTURE) }
                 .onFailure { error ->
