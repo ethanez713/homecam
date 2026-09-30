@@ -677,8 +677,12 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         // ROLLOVER_TICK_MS is 2s, so 150 ticks ≈ a heartbeat every 5 minutes.
         private const val HEARTBEAT_EVERY_TICKS = 150
 
-        /** Set by [BootReceiver] before a post-boot start, so the diagnostics log says how it came up. */
-        @Volatile var startReason: String = "manual"
+        /**
+         * Set by whoever asks for the start, so the diagnostics log says how it came up. A
+         * new process that nobody in it asked for is Android restarting the sticky service
+         * after killing it — the event GATE-C point 4 looks for.
+         */
+        @Volatile var startReason: String = "system"
 
         private val running = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = running.asStateFlow()

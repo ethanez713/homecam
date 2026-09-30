@@ -85,7 +85,10 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
         }.getOrNull()
     }
 
-    LaunchedEffect(Unit) { CameraService.start(context) }
+    LaunchedEffect(Unit) {
+        if (!CameraService.isRunning.value) CameraService.startReason = "manual"
+        CameraService.start(context)
+    }
 
     when (screen) {
         CameraScreen.HOME -> CameraHomeScreen(
