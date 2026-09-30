@@ -83,7 +83,10 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         )
     }
 
-    DisposableEffect(session) { onDispose { session?.close() } }
+    // Captured, not read from state inside onDispose: when session changes from null to the
+    // new connection, the old effect's disposal would otherwise close the new one.
+    val sessionToClose = session
+    DisposableEffect(sessionToClose) { onDispose { sessionToClose?.close() } }
 
     LaunchedEffect(camera.fingerprint, attempt) {
         runCatching {
