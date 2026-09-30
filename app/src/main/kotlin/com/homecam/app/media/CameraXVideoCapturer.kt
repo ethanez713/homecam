@@ -206,5 +206,8 @@ class CameraXVideoCapturer(
             CameraState.ERROR_DO_NOT_DISTURB_MODE_ENABLED -> "DO_NOT_DISTURB_MODE_ENABLED"
             else -> "UNKNOWN"
         }
+
+        fun isHeldByAnotherApp(code: Int?): Boolean =
+            code == CameraState.ERROR_CAMERA_IN_USE || code == CameraState.ERROR_MAX_CAMERAS_IN_USE
     }
 }

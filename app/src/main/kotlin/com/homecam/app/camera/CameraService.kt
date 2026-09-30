@@ -287,7 +287,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         blind.value = true
         val code = capture.lastCameraErrorCode
         graph.diagnostics.cameraBlind(code, code?.let(CameraXVideoCapturer::errorName))
-        if (Settings.canDrawOverlays(this)) {
+        // A window would win the camera back from an app the owner opened on purpose, so
+        // that case gets only the notification.
+        if (Settings.canDrawOverlays(this) && !CameraXVideoCapturer.isHeldByAnotherApp(code)) {
             val opened = runCatching { startActivity(ResumeCameraActivity.intent(this)) }
                 .onFailure { Log.w(TAG, "could not open the resume activity", it) }
                 .isSuccess
