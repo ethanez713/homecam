@@ -5,6 +5,7 @@ import android.util.Size
 import android.view.Surface
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceRequest
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -13,6 +14,8 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import org.webrtc.CapturerObserver
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
@@ -44,6 +47,20 @@ class CameraXVideoCapturer(
     private var preview: Preview? = null
     private var surface: Surface? = null
     private var camera: Camera? = null
+    private var stateSource: LiveData<CameraState>? = null
+
+    /** Latest [CameraState] error from the bound camera. Cleared once it is open again. */
+    @Volatile var lastErrorCode: Int? = null
+        private set
+
+    private val stateObserver = Observer<CameraState> { state ->
+        val code = state.error?.code
+        if (code != null) {
+            lastErrorCode = code
+        } else if (state.type == CameraState.Type.OPEN) {
+            lastErrorCode = null
+        }
+    }
 
     override fun initialize(
         surfaceTextureHelper: SurfaceTextureHelper,
@@ -108,12 +125,26 @@ class CameraXVideoCapturer(
 
             preview = useCase
             cameraProvider.unbindAll()
-            camera = cameraProvider.bindToLifecycle(
+            val bound = cameraProvider.bindToLifecycle(
                 lifecycleOwner,
                 selector,
                 useCase,
             )
+            camera = bound
+            watchCameraState(bound)
         }, main)
+    }
+
+    private fun watchCameraState(bound: Camera) {
+        unwatchCameraState()
+        val source = bound.cameraInfo.cameraState
+        stateSource = source
+        source.observe(lifecycleOwner, stateObserver)
+    }
+
+    private fun unwatchCameraState() {
+        stateSource?.removeObserver(stateObserver)
+        stateSource = null
     }
 
     fun setLensFacing(front: Boolean) {
@@ -140,6 +171,7 @@ class CameraXVideoCapturer(
     }
 
     override fun stopCapture() {
+        unwatchCameraState()
         ContextCompat.getMainExecutor(context).execute {
             preview?.let { provider?.unbind(it) }
             preview = null
@@ -162,4 +194,17 @@ class CameraXVideoCapturer(
     }
 
     override fun isScreencast(): Boolean = false
+
+    companion object {
+        fun errorName(code: Int): String = when (code) {
+            CameraState.ERROR_MAX_CAMERAS_IN_USE -> "MAX_CAMERAS_IN_USE"
+            CameraState.ERROR_CAMERA_IN_USE -> "CAMERA_IN_USE"
+            CameraState.ERROR_OTHER_RECOVERABLE_ERROR -> "OTHER_RECOVERABLE_ERROR"
+            CameraState.ERROR_STREAM_CONFIG -> "STREAM_CONFIG"
+            CameraState.ERROR_CAMERA_DISABLED -> "CAMERA_DISABLED"
+            CameraState.ERROR_CAMERA_FATAL_ERROR -> "CAMERA_FATAL_ERROR"
+            CameraState.ERROR_DO_NOT_DISTURB_MODE_ENABLED -> "DO_NOT_DISTURB_MODE_ENABLED"
+            else -> "UNKNOWN"
+        }
+    }
 }

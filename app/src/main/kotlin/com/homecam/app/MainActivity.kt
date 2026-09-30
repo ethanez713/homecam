@@ -45,4 +45,13 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Opening the app is a visible window, which is what the camera needs after a
+        // background start. Restarting when frames are already flowing would drop them.
+        if (RoleStore(this).role == Role.CAMERA && CameraService.isBlind.value) {
+            CameraService.resume(this)
+        }
+    }
 }

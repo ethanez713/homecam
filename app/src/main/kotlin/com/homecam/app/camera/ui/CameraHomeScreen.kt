@@ -44,6 +44,8 @@ fun CameraHomeScreen(
     onLog: () -> Unit,
     onNetwork: () -> Unit,
     onSwitchRole: () -> Unit = {},
+    canDrawOverlays: Boolean = true,
+    onAllowOverlay: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         if (liveViewerLabel != null) {
@@ -98,6 +100,23 @@ fun CameraHomeScreen(
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 RecordingModeControl(recordingMode, projectedDays, onRecordingMode)
+            }
+        }
+
+        if (!canDrawOverlays) {
+            Spacer(Modifier.height(16.dp))
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text("Resume after a restart", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Android will not let the camera run after a restart until something is on screen. " +
+                            "Allowing display over other apps lets it recover by itself.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = onAllowOverlay, modifier = Modifier.align(Alignment.End)) {
+                        Text("Allow automatic resume")
+                    }
+                }
             }
         }
 

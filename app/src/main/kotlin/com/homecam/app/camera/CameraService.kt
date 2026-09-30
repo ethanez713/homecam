@@ -9,8 +9,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import com.homecam.app.AppGraph
+import com.homecam.app.BootReceiver
 import com.homecam.app.MainActivity
 import com.homecam.app.R
 import com.homecam.app.net.MdnsAdvertiser
@@ -21,7 +24,9 @@ import com.homecam.app.data.ClipStore
 import com.homecam.app.detect.AudioDetectionPipeline
 import com.homecam.app.detect.DetectionPipeline
 import com.homecam.app.media.CameraMediaSession
+import com.homecam.app.media.CameraXVideoCapturer
 import com.homecam.app.media.ContinuousCapture
+import com.homecam.core.media.CaptureWatchdog
 import com.homecam.core.rpc.Controls
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.Bye
@@ -31,6 +36,7 @@ import com.homecam.proto.SessionConfig
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.SessionStatus
 import com.homecam.proto.SignalMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -60,6 +66,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     @Volatile private var spotlightOffAtMs = 0L
     @Volatile private var autoSpotlightOn = false
     @Volatile private var lastReminderMs = 0L
+    private val watchdog = CaptureWatchdog()
+    private var lastResumeAtMs: Long? = null
 
     /**
      * At most one media session at a time, and the newest wins. A camera that answers
@@ -127,15 +135,25 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         observeSoundSettings()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
         running.value = true
+        instance = this
+        watchFrames()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        if (intent?.action == ACTION_RESUME_CAPTURE) {
+            val done = whenResumed.also { whenResumed = null }
+            if (watchdog.isBlind) resumeCapture(done ?: {})
+            else done?.invoke()
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        if (instance === this) instance = null
         running.value = false
+        blind.value = false
+        cancelCameraPausedNotification()
         graph.diagnostics.stop("destroy")
         graph.scope.launch { endLive(Bye.Reason.CAMERA_DISABLED, "camera stopped") }
         mdns?.stop()
@@ -201,7 +219,14 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             "Camera",
             NotificationManager.IMPORTANCE_LOW,
         ).apply { description = "Shows whether the camera is running and who is watching" }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val paused = NotificationChannel(
+            PAUSED_CHANNEL_ID,
+            "Camera paused",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply { description = "Shown when the camera has stopped producing frames" }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
+        manager.createNotificationChannel(paused)
     }
 
     /** Closes a clip once nothing has been detected for its tail duration. */
@@ -213,6 +238,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 recorder.tick()
                 statusFromPipeline()
                 maintainResponses()
+                // Blindness is fifteen seconds without a frame, so the rollover tick
+                // already wakes often enough to notice it.
+                watchFrames()
                 if (ticks % HEARTBEAT_EVERY_TICKS == 0) emitHeartbeat()
                 ticks++
             }
@@ -233,6 +261,128 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     private fun statusFromPipeline() {
         server?.statusProvider?.detectorFps = detection.framesPerSecond
+    }
+
+    private fun watchFrames() {
+        val observation = watchdog.observe(
+            CaptureWatchdog.Sample(
+                nowMs = SystemClock.elapsedRealtime(),
+                running = capture.running,
+                frameCount = capture.frameCount,
+            ),
+        )
+        server?.statusProvider?.captureFps = observation.framesPerSecond
+        when (observation.signal) {
+            CaptureWatchdog.Signal.BECAME_BLIND -> onCaptureBlind()
+            CaptureWatchdog.Signal.ESCALATE -> showCameraPausedNotification()
+            CaptureWatchdog.Signal.RECOVERED -> onCaptureRecovered()
+            null -> Unit
+        }
+    }
+
+    private fun onCaptureBlind() {
+        blind.value = true
+        val code = capture.lastCameraErrorCode
+        graph.diagnostics.cameraBlind(code, code?.let(CameraXVideoCapturer::errorName))
+        if (Settings.canDrawOverlays(this)) {
+            val opened = runCatching { startActivity(ResumeCameraActivity.intent(this)) }
+                .onFailure { Log.w(TAG, "could not open the resume activity", it) }
+                .isSuccess
+            if (opened) {
+                watchdog.noteRecoveryAttempt(SystemClock.elapsedRealtime())
+                return
+            }
+        }
+        showCameraPausedNotification()
+    }
+
+    private fun onCaptureRecovered() {
+        blind.value = false
+        cancelCameraPausedNotification()
+        graph.diagnostics.cameraRecovered()
+    }
+
+    /**
+     * Re-enters the foreground while a window is up, which is what makes Android
+     * re-evaluate while-in-use camera access, then restarts capture. The mask processor
+     * — and every sink on it — survives the restart; only the capturer is new.
+     *
+     * The resume activity and the home screen both ask, and the second ask arrives
+     * before a frame from the first restart can exist, so a second one inside
+     * [RESUME_COOLDOWN_MS] is ignored.
+     */
+    private fun resumeCapture(done: () -> Unit) {
+        if (!::capture.isInitialized || !watchdog.isBlind) {
+            done()
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        val last = lastResumeAtMs
+        if (last != null && now - last < RESUME_COOLDOWN_MS) {
+            done()
+            return
+        }
+        lastResumeAtMs = now
+        val entered = runCatching { startForegroundWithNotification(currentForegroundNotification()) }
+        if (entered.isFailure) {
+            Log.w(TAG, "could not re-enter the foreground to resume capture", entered.exceptionOrNull())
+            showCameraPausedNotification()
+            done()
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                endLive(Bye.Reason.CAMERA_DISABLED, "restarting capture")
+                capture.stop()
+                capture.start(mask = graph.settings.current.privacyMask)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "capture did not resume", e)
+                graph.diagnostics.error("resume_capture", e.message)
+                showCameraPausedNotification()
+            } finally {
+                done()
+            }
+        }
+    }
+
+    private fun currentForegroundNotification(): Notification {
+        val viewer = liveViewer.value
+        return if (viewer == null) idleNotification()
+        else notification(graph.settings.current.alias, "● LIVE — $viewer is watching")
+    }
+
+    private fun showCameraPausedNotification() {
+        getSystemService(NotificationManager::class.java)
+            .notify(PAUSED_NOTIFICATION_ID, cameraPausedNotification())
+    }
+
+    private fun cancelCameraPausedNotification() {
+        getSystemService(NotificationManager::class.java).cancel(PAUSED_NOTIFICATION_ID)
+    }
+
+    private fun cameraPausedNotification(): Notification {
+        val open = PendingIntent.getActivity(
+            this,
+            PAUSED_NOTIFICATION_ID,
+            ResumeCameraActivity.intent(this),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, PAUSED_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this).setPriority(Notification.PRIORITY_HIGH)
+        }
+        return builder
+            .setContentTitle("Camera paused — tap to resume")
+            .setContentText("The camera stopped producing frames.")
+            .setSmallIcon(R.drawable.ic_stat_camera)
+            .setContentIntent(open)
+            .setCategory(Notification.CATEGORY_ERROR)
+            .setOngoing(true)
+            .build()
     }
 
     /**
@@ -515,8 +665,12 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         private const val STATS_TIMEOUT_MS = 2_000L
         private const val NOTIFICATION_ID = 1
         private const val REMINDER_NOTIFICATION_ID = 2
+        private const val PAUSED_NOTIFICATION_ID = 4
+        private const val PAUSED_CHANNEL_ID = "homecam.camera.paused"
         private const val AUTO_SPOTLIGHT_MS = 20_000L
         private const val SHUTDOWN_GRACE_MS = 1_000
+        private const val RESUME_COOLDOWN_MS = 3_000L
+        private const val ACTION_RESUME_CAPTURE = "com.homecam.app.camera.RESUME_CAPTURE"
         // ROLLOVER_TICK_MS is 2s, so 150 ticks ≈ a heartbeat every 5 minutes.
         private const val HEARTBEAT_EVERY_TICKS = 150
 
@@ -526,13 +680,45 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         private val running = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = running.asStateFlow()
 
+        private val blind = MutableStateFlow(false)
+        val isBlind: StateFlow<Boolean> = blind.asStateFlow()
+
+        @Volatile private var instance: CameraService? = null
+
+        /** Invoked once the service has entered the foreground, so the calling window can close. */
+        @Volatile private var whenResumed: (() -> Unit)? = null
+
         private val liveViewer = MutableStateFlow<String?>(null)
 
         /** §2.7: the camera device says on its own screen when somebody is watching. */
         val liveViewerLabel: StateFlow<String?> = liveViewer.asStateFlow()
 
-        fun start(context: Context) {
+        fun start(context: Context) = launch(context, action = null)
+
+        /**
+         * Asks a running service to re-enter the foreground and restart capture, or
+         * starts it when it is not running. [done] runs after that has happened, so a
+         * caller that is itself the visible window can stay up until then.
+         */
+        fun resume(context: Context, done: () -> Unit = {}) {
+            val running = instance
+            if (running != null) {
+                running.resumeCapture(done)
+                return
+            }
+            whenResumed = done
+            runCatching { launch(context, ACTION_RESUME_CAPTURE) }
+                .onFailure { error ->
+                    Log.w(TAG, "could not start the camera service", error)
+                    whenResumed = null
+                    done()
+                    BootReceiver.warnStopped(context, "Camera is not running")
+                }
+        }
+
+        private fun launch(context: Context, action: String?) {
             val intent = Intent(context, CameraService::class.java)
+            if (action != null) intent.action = action
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {

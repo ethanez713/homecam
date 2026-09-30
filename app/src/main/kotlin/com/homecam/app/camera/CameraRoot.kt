@@ -1,6 +1,10 @@
 package com.homecam.app.camera
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -10,6 +14,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.homecam.app.AppGraph
 import com.homecam.app.camera.ui.AuditScreen
 import com.homecam.app.camera.ui.CameraHomeScreen
@@ -59,6 +66,15 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
     val pairingPhrase by node.pairingPhrase.collectAsState()
     val serviceRunning by CameraService.isRunning.collectAsState()
     val liveViewer by CameraService.liveViewerLabel.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var canDrawOverlays by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) canDrawOverlays = Settings.canDrawOverlays(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val projectedDays by produceState<Double?>(null, settings.recordingMode, settings.retention) {
         value = runCatching {
             val refs = graph.database.clips().all()
@@ -88,6 +104,17 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
             onLog = { screen = CameraScreen.LOG },
             onNetwork = { screen = CameraScreen.NETWORK },
             onSwitchRole = onSwitchRole,
+            canDrawOverlays = canDrawOverlays,
+            onAllowOverlay = {
+                runCatching {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}"),
+                        ),
+                    )
+                }
+            },
         )
 
         CameraScreen.ROSTER -> RosterScreen(

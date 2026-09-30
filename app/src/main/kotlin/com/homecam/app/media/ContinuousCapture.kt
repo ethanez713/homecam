@@ -13,6 +13,7 @@ import org.webrtc.VideoSink
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
 
 /**
@@ -30,6 +31,7 @@ class ContinuousCapture(
     private val factory = WebRtc.factory(context)
     private val maskProcessor = PrivacyMaskProcessor()
     private val trackCounter = AtomicInteger(0)
+    private val deliveredFrames = AtomicLong()
 
     private var helper: SurfaceTextureHelper? = null
     private var capturer: CameraXVideoCapturer? = null
@@ -40,6 +42,11 @@ class ContinuousCapture(
 
     val running: Boolean get() = source != null
 
+    /** Every frame passes here, so a stall is the camera itself and not one consumer. */
+    val frameCount: Long get() = deliveredFrames.get()
+
+    val lastCameraErrorCode: Int? get() = capturer?.lastErrorCode
+
     fun start(format: Format = this.format, mask: PrivacyMask = PrivacyMask.getDefaultInstance()) {
         if (running) return
         this.format = format
@@ -49,7 +56,15 @@ class ContinuousCapture(
         val videoSource = factory.createVideoSource(false)
 
         val videoCapturer = CameraXVideoCapturer(context, lifecycleOwner)
-        videoCapturer.initialize(textureHelper, context, maskedObserver(videoSource, maskProcessor))
+        val downstream = maskedObserver(videoSource, maskProcessor)
+        videoCapturer.initialize(textureHelper, context, object : CapturerObserver {
+            override fun onCapturerStarted(success: Boolean) = downstream.onCapturerStarted(success)
+            override fun onCapturerStopped() = downstream.onCapturerStopped()
+            override fun onFrameCaptured(frame: VideoFrame) {
+                deliveredFrames.incrementAndGet()
+                downstream.onFrameCaptured(frame)
+            }
+        })
         videoCapturer.startCapture(format.width, format.height, format.framerate)
 
         helper = textureHelper

@@ -94,6 +94,14 @@ class CameraDiagnostics(context: Context) {
         put("message", message ?: "")
     }
 
+    /** [errorCode] is the last CameraX camera-state error, when the camera has reported one. */
+    fun cameraBlind(errorCode: Int?, errorName: String?) = event("camera_blind") {
+        if (errorCode != null) put("camera_error", errorCode)
+        if (errorName != null) put("camera_error_name", errorName)
+    }
+
+    fun cameraRecovered() = event("camera_recovered") {}
+
     private inline fun event(type: String, build: JSONObject.() -> Unit) {
         val line = JSONObject()
             .put("ts", System.currentTimeMillis())
