@@ -35,7 +35,7 @@ class ContinuousCapture(
     private var capturer: CameraXVideoCapturer? = null
     private var source: VideoSource? = null
 
-    @Volatile var format: Format = Format(1280, 720, 24)
+    @Volatile var format: Format = Format(1920, 1080, 30)
         private set
 
     val running: Boolean get() = source != null

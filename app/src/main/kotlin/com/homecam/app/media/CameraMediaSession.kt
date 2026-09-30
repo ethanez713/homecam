@@ -10,7 +10,10 @@ import com.homecam.proto.Sdp
 import org.webrtc.AudioTrack
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
+import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
+import org.webrtc.RtpCapabilities
+import org.webrtc.RtpParameters
 import org.webrtc.SessionDescription
 import org.webrtc.VideoTrack
 import java.util.UUID
@@ -71,8 +74,27 @@ class CameraMediaSession(
      * own, so a second viewer costs a track and not a second camera bind.
      */
     private fun addVideo() {
-        videoTrack = capture.newTrack()?.also { connection?.addTrack(it, listOf(STREAM_ID)) }
+        val connection = connection ?: return
+        val track = capture.newTrack() ?: return
+        videoTrack = track
+        val sender = connection.addTrack(track, listOf(STREAM_ID))
+        connection.transceivers.firstOrNull { it.sender.id() == sender.id() }
+            ?.setCodecPreferences(hardwareH264First())
+        sender.parameters = sender.parameters.apply {
+            // Detail is what a camera feed is for; a jerkier picture you can read beats a
+            // smooth one you cannot.
+            degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+        }
+        // libwebrtc starts every call at 300 kbps and ramps over tens of seconds, which on a
+        // LAN means the first half-minute of every live view is 360p for no reason.
+        connection.setBitrate(MIN_BITRATE_BPS, START_BITRATE_BPS, MAX_BITRATE_BPS)
     }
+
+    /** Without this the offer leads with VP8, which the hardware encodes far worse (D6). */
+    private fun hardwareH264First(): List<RtpCapabilities.CodecCapability> =
+        factory.getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO).codecs
+            .sortedBy { if (it.name.equals("H264", ignoreCase = true)) 0 else 1 }
+            .also { codecs -> Log.i(TAG, "video codec preference: ${codecs.joinToString { it.name }}") }
 
     private fun addAudio() {
         val source = factory.createAudioSource(MediaConstraints())
@@ -225,5 +247,8 @@ class CameraMediaSession(
         const val TAG = "CameraMediaSession"
         const val STREAM_ID = "homecam"
         const val AUDIO_TRACK_ID = "homecam-audio"
+        const val MIN_BITRATE_BPS = 300_000
+        const val START_BITRATE_BPS = 2_500_000
+        const val MAX_BITRATE_BPS = 8_000_000
     }
 }

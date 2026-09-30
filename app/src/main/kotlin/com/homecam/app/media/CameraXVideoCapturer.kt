@@ -7,6 +7,7 @@ import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceRequest
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -35,7 +36,7 @@ class CameraXVideoCapturer(
 ) : VideoCapturer {
 
     private var lensFacing = initialLensFacing
-    private var format = Triple(1280, 720, 24)
+    private var format = Triple(1920, 1080, 30)
 
     private var helper: SurfaceTextureHelper? = null
     private var observer: CapturerObserver? = null
@@ -71,6 +72,9 @@ class CameraXVideoCapturer(
             val useCase = Preview.Builder()
                 .setResolutionSelector(
                     ResolutionSelector.Builder()
+                        // CameraX defaults to 4:3; the texture it fills is sized 16:9, so a
+                        // 4:3 stream arrives squashed.
+                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
                         .setResolutionStrategy(
                             ResolutionStrategy(
                                 Size(width, height),

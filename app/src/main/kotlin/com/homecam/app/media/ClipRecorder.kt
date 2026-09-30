@@ -54,10 +54,10 @@ class ClipRecorder(
 ) : VideoSink {
 
     data class Config(
-        val width: Int = 1280,
-        val height: Int = 720,
-        val framerate: Int = 24,
-        val bitrate: Int = 3_000_000,
+        val width: Int = 1920,
+        val height: Int = 1080,
+        val framerate: Int = 30,
+        val bitrate: Int = 6_000_000,
         val keyframeIntervalSeconds: Int = 2,
         /** For H.264. HEVC is given [HEVC_BITRATE_RATIO] of it for the same quality. */
         val preRollMs: Long = 6_000,
