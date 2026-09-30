@@ -1,5 +1,6 @@
 package com.homecam.app.viewer
 
+import android.util.Log
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.PrimaryTabRow
@@ -39,6 +40,8 @@ import com.homecam.proto.Capabilities
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Viewer
 import kotlinx.coroutines.launch
+
+private const val TAG = "CameraScreen"
 
 private enum class CameraTab(val label: String) {
     LIVE("Live"), CLIPS("Clips"), SETTINGS("Settings"), ACCESS("Access"), LOG("Log")
@@ -99,7 +102,10 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
             settings = runCatching { client.link.settings() }.getOrNull()
             capabilities = client.link.capabilities()
             opened.start()
-        }.onFailure { state = LiveState.Failed(describeFailure(it)) }
+        }.onFailure {
+            Log.w(TAG, "live session to ${camera.alias} failed at ${state::class.simpleName}", it)
+            state = LiveState.Failed(describeFailure(it))
+        }
     }
 
     val open = session
@@ -109,6 +115,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         val ended by open.ended.collectAsState()
         LaunchedEffect(video, presence, ended) {
             val connected = state as? LiveState.Connected ?: return@LaunchedEffect
+            ended?.let { Log.w(TAG, "live session to ${camera.alias} ended: $it") }
             state = ended?.let { LiveState.Failed(describeBye(it.first, it.second)) }
                 ?: connected.copy(presence = presence, video = video)
         }
