@@ -21,6 +21,10 @@ different keys with a signed statement linking them.
 
 Nothing above the `IdentityKey` / `IdentitySigner` interfaces knows the algorithm.
 
+The key permits `DIGEST_NONE` as well as SHA-256. Conscrypt signs the TLS handshake as a
+pre-hashed digest through the key handle, and a key restricted to SHA-256 refuses that
+operation — every connection to the camera fails. Do not narrow it.
+
 ## D2 — Verification phrase is a character code, not words
 
 §2.3 calls for "a short verification phrase" shown on both devices during pairing. It is
@@ -237,8 +241,35 @@ third-party push service to keep it for us, and it carries no timeout.
 `CameraService` was only ever started from a composable, so after a power cut the camera
 stayed down until somebody opened the app.
 
-The receiver now restarts whichever role the install is, and survives an app update too.
-Newer Android versions refuse some foreground-service starts from `BOOT_COMPLETED`, and
-when the system refuses there is nothing the receiver can do about it — so it posts an
-ongoing "not running, tap to resume" notification instead. Stopping is survivable;
-stopping silently is not, which is the same argument §2.7 makes about the audit log.
+The receiver restarts whichever role the install is, after a reboot or an app update.
+When the system refuses a start there is nothing the receiver can do about it, so it posts
+an ongoing "not running, tap to resume" notification instead. Stopping is survivable;
+stopping silently is not, which is the same argument §2.7 makes about the audit log. The
+camera role has a further problem, and a further route, in D13.
+
+## D13 — A blind camera is detected by its frames, and reopened by a visible window
+
+A camera foreground service started from the background — by the boot receiver, after an
+app update, or by Android restarting the sticky service after killing it — may keep
+running while Android denies it the camera. Nothing fails: CameraX reports
+`ERROR_CAMERA_DISABLED` once and gives up, the service is up, and no frame ever arrives.
+From Android 15 a `camera` service cannot be started from `BOOT_COMPLETED` at all.
+
+Only a start made while the app has a visible window is granted the camera, so recovery
+is a window. `ResumeCameraActivity` is transparent, shows over the lock screen, asks the
+service to re-enter the foreground and restart capture, and closes. The trigger is the
+frame count rather than any error callback, because silence is the only symptom common to
+every way the camera can be lost: fifteen seconds without a frame while capture runs.
+
+The window is not opened when CameraX reports the camera in use by another app. Coming to
+the front would take the camera back from an app the phone's owner opened on purpose;
+that case gets only the notification, and CameraX reopens by itself when the other app
+lets go.
+
+**`SYSTEM_ALERT_WINDOW` is requested for this and nothing else.** It lets the app open an
+activity from the background; it does not grant a service the camera, and nothing in the
+app draws an overlay. It is optional and granted by the user from the camera's home
+screen. Without it, or when the window brings no frames within fifteen seconds, the
+service posts a "Camera paused — tap to resume" notification, whose tap opens the same
+window. Either way the loss is logged (`camera_blind` / `camera_recovered`) and said on the
+camera phone; it is never silent.
