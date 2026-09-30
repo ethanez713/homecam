@@ -24,7 +24,7 @@ fun RolePickerScreen(onPick: (Role) -> Unit) {
         Text("What is this phone?", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            "This choice sticks. Reinstall to change it.",
+            "You can switch later from the home screen.",
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(32.dp))
