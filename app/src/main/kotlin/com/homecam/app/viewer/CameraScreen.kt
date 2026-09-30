@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -18,7 +19,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.sp
 import com.homecam.app.AppGraph
 import com.homecam.app.alerts.AlertKeys
 import com.homecam.app.alerts.AlertPreferences
@@ -143,7 +146,8 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     Tab(
                         selected = tab == entry,
                         onClick = { tab = entry },
-                        text = { Text(entry.label) },
+                        // Five tabs at a large system font size leave no room to wrap.
+                        text = { Text(entry.label, maxLines = 1, autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = LocalTextStyle.current.fontSize)) },
                     )
                 }
             }

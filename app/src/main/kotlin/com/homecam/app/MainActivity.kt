@@ -11,6 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import com.homecam.app.camera.CameraRoot
 import com.homecam.app.camera.CameraService
 import com.homecam.app.ui.RolePickerScreen
@@ -25,7 +26,7 @@ class MainActivity : ComponentActivity() {
         val roles = RoleStore(this)
         setContent {
             HomecamTheme {
-                Surface(Modifier.fillMaxSize()) {
+                Surface(Modifier.fillMaxSize().safeDrawingPadding()) {
                     var role by remember { mutableStateOf(roles.role) }
                     // Leaving the camera role stops its foreground service; both stores
                     // (this phone's identity, its pairings) survive the switch, so a
