@@ -70,6 +70,7 @@ class DetectionPipeline(
             if (!gate.accept(grid, now)) return
             if (now - lastDetectAtMs < DETECT_INTERVAL_MS) return
             if (!busy.compareAndSet(false, true)) return
+            val previousDetectAtMs = lastDetectAtMs
             lastDetectAtMs = now
 
             val bitmap = toBitmap(i420)
@@ -79,7 +80,7 @@ class DetectionPipeline(
                 DetectionPolicy.accepts(snapshot.detectionMode, snapshot.detectionZone, detection)
                     ?.let { LabelledDetection(it, detection) }
             }
-            framesPerSecond = 1000f / (now - lastDetectAtMs).coerceAtLeast(1)
+            if (previousDetectAtMs > 0) framesPerSecond = 1000f / (now - previousDetectAtMs).coerceAtLeast(1)
             if (accepted.isNotEmpty()) {
                 onEvent(accepted, boundedJpeg(bitmap, AlertLimits.MAX_THUMBNAIL_BYTES))
             } else if (snapshot.detectionMode.motionOnly) {
