@@ -280,16 +280,23 @@ class ClipRecorder(
             } catch (e: IllegalStateException) {
                 return
             }
+            // An orientation flip or stop() releases the codec from another thread, under
+            // the lock. Holding it for each dequeued buffer means that never lands between
+            // getOutputBuffer and releaseOutputBuffer, and a codec released since the dequeue
+            // has nothing more to give — its samples must not reach the next clip.
             when {
-                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED ->
-                    synchronized(lock) { formatForMuxer = codec.outputFormat }
+                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> synchronized(lock) {
+                    if (encoder !== codec) return
+                    formatForMuxer = codec.outputFormat
+                }
 
-                index >= 0 -> {
+                index >= 0 -> synchronized(lock) {
+                    if (encoder !== codec) return
                     val buffer = codec.getOutputBuffer(index)
                     if (buffer != null && info.size > 0 &&
                         info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
                     ) {
-                        handleSample(buffer, info)
+                        handleSampleLocked(buffer, info)
                     }
                     codec.releaseOutputBuffer(index, false)
                 }
@@ -297,7 +304,7 @@ class ClipRecorder(
         }
     }
 
-    private fun handleSample(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
+    private fun handleSampleLocked(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
         val bytes = ByteArray(info.size)
         buffer.position(info.offset)
         buffer.get(bytes)
@@ -308,20 +315,18 @@ class ClipRecorder(
             keyframe = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0,
         )
 
-        synchronized(lock) {
-            val output = muxer
-            if (output != null) {
-                writeSample(output, sample)
-                if (lastSampleUs - firstSampleUs > config.maxClipMs * 1000) endClipLocked()
-                return
-            }
-            preRoll.addLast(sample)
-            while (preRoll.size > 1 &&
-                preRoll.last().presentationTimeUs - preRoll.first().presentationTimeUs >
-                config.preRollMs * 1000
-            ) {
-                preRoll.removeFirst()
-            }
+        val output = muxer
+        if (output != null) {
+            writeSample(output, sample)
+            if (lastSampleUs - firstSampleUs > config.maxClipMs * 1000) endClipLocked()
+            return
+        }
+        preRoll.addLast(sample)
+        while (preRoll.size > 1 &&
+            preRoll.last().presentationTimeUs - preRoll.first().presentationTimeUs >
+            config.preRollMs * 1000
+        ) {
+            preRoll.removeFirst()
         }
     }
 
