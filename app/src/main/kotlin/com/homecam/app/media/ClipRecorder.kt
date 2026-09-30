@@ -105,33 +105,73 @@ class ClipRecorder(
 
     val currentClipId: String? get() = synchronized(lock) { currentId }
 
+    private var eglContext: EglBase.Context? = null
+    private var encodingPortrait = false
+
     fun start(eglContext: EglBase.Context) {
         synchronized(lock) {
             if (encoder != null) return
-            val format = MediaFormat.createVideoFormat(mime, config.width, config.height).apply {
-                setInteger(
-                    MediaFormat.KEY_COLOR_FORMAT,
-                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface,
-                )
-                setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
-                setInteger(MediaFormat.KEY_FRAME_RATE, config.framerate)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, config.keyframeIntervalSeconds)
-            }
-            val codec = MediaCodec.createEncoderByType(mime)
-            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            val surface = codec.createInputSurface()
-            codec.start()
-            encoder = codec
-
-            renderer = EglRenderer("homecam-recorder").apply {
-                init(eglContext, EglBase.CONFIG_RECORDABLE, org.webrtc.GlRectDrawer())
-                createEglSurface(surface)
-            }
-            Thread(::drain, "homecam-encoder-drain").apply { isDaemon = true }.start()
+            this.eglContext = eglContext
+            startEncoderLocked(portrait = false)
         }
     }
 
+    private fun startEncoderLocked(portrait: Boolean) {
+        val context = eglContext ?: return
+        val (long, short) = maxOf(config.width, config.height) to minOf(config.width, config.height)
+        val format = MediaFormat.createVideoFormat(
+            mime, if (portrait) short else long, if (portrait) long else short,
+        ).apply {
+            setInteger(
+                MediaFormat.KEY_COLOR_FORMAT,
+                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface,
+            )
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, config.framerate)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, config.keyframeIntervalSeconds)
+        }
+        val codec = MediaCodec.createEncoderByType(mime)
+        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        val surface = codec.createInputSurface()
+        codec.start()
+        encoder = codec
+        encodingPortrait = portrait
+
+        renderer = EglRenderer("homecam-recorder").apply {
+            init(context, EglBase.CONFIG_RECORDABLE, org.webrtc.GlRectDrawer())
+            createEglSurface(surface)
+        }
+        Thread({ drain(codec) }, "homecam-encoder-drain").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * The renderer fills the encoder's surface edge to edge, so a portrait frame drawn into
+     * a landscape encoder comes out squashed. The encoder follows the frame instead —
+     * which also covers a viewer rotating the camera mid-run.
+     */
+    private fun matchOrientation(frame: VideoFrame) {
+        val portrait = frame.rotatedHeight > frame.rotatedWidth
+        if (portrait == encodingPortrait) return
+        synchronized(lock) {
+            if (encoder == null || portrait == encodingPortrait) return
+            endClipLocked()
+            releaseEncoderLocked()
+            preRoll.clear()
+            formatForMuxer = null
+            startEncoderLocked(portrait)
+        }
+    }
+
+    private fun releaseEncoderLocked() {
+        runCatching { renderer?.release() }
+        runCatching { encoder?.stop() }
+        runCatching { encoder?.release() }
+        renderer = null
+        encoder = null
+    }
+
     override fun onFrame(frame: VideoFrame) {
+        matchOrientation(frame)
         renderer?.onFrame(frame)
     }
 
@@ -226,19 +266,15 @@ class ClipRecorder(
     fun stop() {
         endClip()
         synchronized(lock) {
-            runCatching { renderer?.release() }
-            runCatching { encoder?.stop() }
-            runCatching { encoder?.release() }
-            renderer = null
-            encoder = null
+            releaseEncoderLocked()
             preRoll.clear()
         }
     }
 
-    private fun drain() {
+    private fun drain(codec: MediaCodec) {
         val info = MediaCodec.BufferInfo()
         while (true) {
-            val codec = synchronized(lock) { encoder } ?: return
+            if (synchronized(lock) { encoder } !== codec) return
             val index = try {
                 codec.dequeueOutputBuffer(info, DRAIN_TIMEOUT_US)
             } catch (e: IllegalStateException) {

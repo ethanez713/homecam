@@ -59,7 +59,6 @@ class CameraXVideoCapturer(
         val helper = helper ?: return
         val observer = observer ?: return
 
-        helper.setTextureSize(width, height)
         helper.startListening { frame -> observer.onFrameCaptured(frame) }
         observer.onCapturerStarted(true)
 
@@ -85,7 +84,23 @@ class CameraXVideoCapturer(
                 )
                 .build()
 
+            val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+            val sensorRotation = selector.filter(cameraProvider.availableCameraInfos)
+                .firstOrNull()?.sensorRotationDegrees ?: 0
+
             useCase.setSurfaceProvider(main) { request: SurfaceRequest ->
+                // The camera writes sensor-oriented buffers, but the SurfaceTexture transform
+                // already turns them upright for the phone's natural orientation — so the
+                // frame WebRTC sees must carry the rotated size, while the buffer the camera
+                // fills keeps the sensor's. setTextureSize sets both, synchronously, so the
+                // buffer size is put back straight after.
+                val size = request.resolution
+                val quarterTurn = sensorRotation % 180 != 0
+                helper.setTextureSize(
+                    if (quarterTurn) size.height else size.width,
+                    if (quarterTurn) size.width else size.height,
+                )
+                helper.surfaceTexture.setDefaultBufferSize(size.width, size.height)
                 val target = Surface(helper.surfaceTexture)
                 surface = target
                 request.provideSurface(target, main) { it.surface.release() }
@@ -95,7 +110,7 @@ class CameraXVideoCapturer(
             cameraProvider.unbindAll()
             camera = cameraProvider.bindToLifecycle(
                 lifecycleOwner,
-                CameraSelector.Builder().requireLensFacing(lensFacing).build(),
+                selector,
                 useCase,
             )
         }, main)

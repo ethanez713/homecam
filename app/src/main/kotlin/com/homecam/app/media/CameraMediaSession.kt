@@ -84,6 +84,9 @@ class CameraMediaSession(
             // Detail is what a camera feed is for; a jerkier picture you can read beats a
             // smooth one you cannot.
             degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+            // Without a per-encoding cap libwebrtc holds anything above 540p to 2.5 Mbps,
+            // whatever setBitrate allows — thin for 1080p.
+            encodings.forEach { it.maxBitrateBps = MAX_BITRATE_BPS }
         }
         // libwebrtc starts every call at 300 kbps and ramps over tens of seconds, which on a
         // LAN means the first half-minute of every live view is 360p for no reason.
