@@ -6,6 +6,7 @@ import com.homecam.proto.Lens
 import com.homecam.proto.PrivacyMask
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
+import org.webrtc.CapturerObserver
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoFrame
 import org.webrtc.VideoSink
@@ -46,10 +47,9 @@ class ContinuousCapture(
 
         val textureHelper = SurfaceTextureHelper.create("homecam-capture", WebRtc.eglBase.eglBaseContext)
         val videoSource = factory.createVideoSource(false)
-        videoSource.setVideoProcessor(maskProcessor)
 
         val videoCapturer = CameraXVideoCapturer(context, lifecycleOwner)
-        videoCapturer.initialize(textureHelper, context, videoSource.capturerObserver)
+        videoCapturer.initialize(textureHelper, context, maskedObserver(videoSource, maskProcessor))
         videoCapturer.startCapture(format.width, format.height, format.framerate)
 
         helper = textureHelper
@@ -124,8 +124,25 @@ class ContinuousCapture(
         helper = null
     }
 
-    private companion object {
-        const val SNAPSHOT_QUALITY = 85
-        const val SNAPSHOT_TIMEOUT_MS = 2_000L
+    companion object {
+        private const val SNAPSHOT_QUALITY = 85
+        private const val SNAPSHOT_TIMEOUT_MS = 2_000L
+
+        /**
+         * Puts [mask] in front of [source] rather than installing it with
+         * `VideoSource.setVideoProcessor`: the source asks its native adapter whether a
+         * frame is wanted *before* calling a processor, and the adapter says no whenever
+         * no live track is being consumed — which would starve the recorder and detector
+         * every time nobody is watching.
+         */
+        fun maskedObserver(source: VideoSource, mask: PrivacyMaskProcessor): CapturerObserver {
+            val downstream = source.capturerObserver
+            mask.setSink { downstream.onFrameCaptured(it) }
+            return object : CapturerObserver {
+                override fun onCapturerStarted(success: Boolean) = downstream.onCapturerStarted(success)
+                override fun onCapturerStopped() = downstream.onCapturerStopped()
+                override fun onFrameCaptured(frame: VideoFrame) = mask.onFrameCaptured(frame)
+            }
+        }
     }
 }
