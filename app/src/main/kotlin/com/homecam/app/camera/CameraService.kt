@@ -44,6 +44,8 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Keeps the camera alive across days: the signaling server, the mDNS advertisement and
@@ -158,14 +160,17 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         blind.value = false
         cancelCameraPausedNotification()
         graph.diagnostics.stop("destroy")
-        graph.scope.launch { endLive(Bye.Reason.CAMERA_DISABLED, "camera stopped") }
+        // Before the server stops, or the viewer only ever sees the socket drop.
+        runBlocking {
+            withTimeoutOrNull(SHUTDOWN_GRACE_MS.toLong()) { endLive(Bye.Reason.CAMERA_DISABLED, "camera stopped") }
+        }
         mdns?.stop()
         siren.stop()
         audioDetection.close()
         capture.removeSink(detection)
+        capture.stop()
         detection.close()
         recorder.stop()
-        capture.stop()
         runCatching { server?.stop(SHUTDOWN_GRACE_MS) }
             .onFailure { Log.w(TAG, "signaling server did not stop cleanly", it) }
         graph.scope.launch { graph.audit.record(AuditEvent.Kind.CAMERA_STOPPED) }
@@ -650,10 +655,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 sourceIp = ending.peer.sourceIp,
                 detail = detail,
             )
-            ending.peer.sendBye(reason, detail)
-        } else if (reason == Bye.Reason.SESSION_REPLACED) {
-            ending.peer.sendBye(reason, detail)
         }
+        // Whenever the camera rather than the viewer ended it, the viewer is told why.
+        if (reason != Bye.Reason.HANGUP) ending.peer.sendBye(reason, detail)
         graph.audit.record(
             AuditEvent.Kind.SESSION_CLOSED,
             viewerFingerprint = ending.peer.viewer?.shortFingerprint.orEmpty(),

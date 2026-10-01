@@ -116,6 +116,7 @@ internal fun describeBye(reason: com.homecam.proto.Bye.Reason, detail: String): 
     com.homecam.proto.Bye.Reason.CAMERA_BUSY -> "The camera is busy."
     com.homecam.proto.Bye.Reason.NO_FRAME -> "The camera connected but never sent a frame."
     com.homecam.proto.Bye.Reason.HANGUP -> "The session ended."
+    com.homecam.proto.Bye.Reason.CAMERA_DISABLED -> "The camera stopped (${detail.ifBlank { "no reason given" }})."
     else -> detail.ifBlank { reason.name }
 }
 
