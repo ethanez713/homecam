@@ -177,8 +177,19 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         super.onDestroy()
     }
 
+    /**
+     * Both types, or Android silences the microphone whenever the app is not on screen:
+     * sound detection hears zeros and a viewer hears nothing. Whether the microphone is
+     * actually opened is still the owner's setting.
+     */
     private fun startForegroundWithNotification(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
         } else {
             startForeground(NOTIFICATION_ID, notification)
