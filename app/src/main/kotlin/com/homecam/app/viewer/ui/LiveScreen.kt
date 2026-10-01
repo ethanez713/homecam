@@ -82,7 +82,7 @@ fun LiveScreen(
         verticalArrangement = Arrangement.Center,
     ) {
         when (state) {
-            is LiveState.Locating -> Waiting("Finding ${state.alias} on this network…")
+            is LiveState.Locating -> Waiting("Finding ${state.alias}…")
             is LiveState.Connecting -> Waiting("Connecting to ${state.host}:${state.port}")
 
             is LiveState.Connected -> {

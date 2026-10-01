@@ -93,8 +93,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
 
     LaunchedEffect(camera.fingerprint, attempt) {
         runCatching {
-            val address = node.locate(camera)
-                ?: error("${camera.alias} is not answering on this network.")
+            val address = node.locate(camera) ?: error(notAnswering(camera))
             state = LiveState.Connecting(address.host, address.port)
             val client = node.connect(camera)
             val opened = ViewerSession(context, client)
@@ -345,3 +344,17 @@ private fun edit(
     val open = session ?: return
     scope.launch { runCatching { block(open) } }
 }
+
+/**
+ * Off the home network the remote address is the only way to the camera, and the Settings
+ * tab that holds it only exists once connected — so the message says where to set it and
+ * when that is possible.
+ */
+private fun notAnswering(camera: CameraEntity): String =
+    if (camera.remoteHost.isBlank()) {
+        "${camera.alias} is not answering on this network, and it has no remote address. " +
+            "To watch from anywhere else, connect once at home and set its Tailscale name " +
+            "under Settings → Remote access."
+    } else {
+        "${camera.alias} is not answering on this network or at ${camera.remoteHost}."
+    }
