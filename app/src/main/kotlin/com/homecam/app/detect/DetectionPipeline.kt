@@ -39,6 +39,8 @@ class DetectionPipeline(
     private val detector = ObjectDetector.create(context)
     private val gate = MotionGate()
     private val busy = AtomicBoolean(false)
+    private val inference = Any()
+    @Volatile private var closed = false
 
     private var lastDetectAtMs = 0L
     private var lastGridAtMs = 0L
@@ -74,7 +76,9 @@ class DetectionPipeline(
             lastDetectAtMs = now
 
             val bitmap = toBitmap(i420)
-            val detections = detector?.detect(bitmap).orEmpty()
+            val detections = synchronized(inference) {
+                if (closed) null else detector?.detect(bitmap).orEmpty()
+            } ?: run { bitmap.recycle(); return }
 
             val accepted = detections.mapNotNull { detection ->
                 DetectionPolicy.accepts(snapshot.detectionMode, snapshot.detectionZone, detection)
@@ -95,7 +99,14 @@ class DetectionPipeline(
         }
     }
 
-    fun close() = detector?.close()
+    /**
+     * Inference runs on the capture thread and close() on the main thread; closing the
+     * interpreter under a running inference is a native use-after-free, so close waits.
+     */
+    fun close() = synchronized(inference) {
+        closed = true
+        detector?.close()
+    }
 
     private fun withinSchedule(snapshot: SettingsSnapshot, nowMs: Long): Boolean {
         val local = Instant.ofEpochMilli(nowMs).atZone(ZoneId.systemDefault())

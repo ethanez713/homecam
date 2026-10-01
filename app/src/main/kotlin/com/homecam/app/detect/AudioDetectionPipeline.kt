@@ -25,6 +25,8 @@ class AudioDetectionPipeline(
     private val classifier = YamnetClassifier.create(context)
     private val windowSamples = classifier?.windowSamples ?: SECOND_SAMPLES
 
+    private val inference = Any()
+    @Volatile private var closed = false
     @Volatile private var gate = SoundGate(DEFAULT_THRESHOLD_DB)
     @Volatile private var gateThreshold = DEFAULT_THRESHOLD_DB
 
@@ -48,9 +50,13 @@ class AudioDetectionPipeline(
         }
     }
 
+    /** The tap thread may be mid-classification; see [DetectionPipeline.close]. */
     fun close() {
         tap.stop()
-        classifier?.close()
+        synchronized(inference) {
+            closed = true
+            classifier?.close()
+        }
     }
 
     private fun onWindow(waveform: FloatArray, levelDb: Float, nowMs: Long) {
@@ -76,7 +82,8 @@ class AudioDetectionPipeline(
     private fun categorise(waveform: FloatArray, snapshot: SettingsSnapshot): String {
         val selected = snapshot.soundRecognition.classesList
         if (selected.isEmpty()) return GENERIC
-        val event = classifier?.classify(waveform) ?: return GENERIC
+        val event = synchronized(inference) { if (closed) null else classifier?.classify(waveform) }
+            ?: return GENERIC
         return if (event.category in selected) event.category else GENERIC
     }
 
