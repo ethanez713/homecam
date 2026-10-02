@@ -7,6 +7,9 @@ import com.homecam.app.media.ClipRecorder
 import com.homecam.app.media.ContinuousCapture
 import com.homecam.app.media.WebRtc
 import com.homecam.app.detect.DetectionPipeline
+import com.homecam.core.health.Cap
+import com.homecam.core.health.HealthProtocol
+import com.homecam.core.health.RecordingGate
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.DetectionFrame
 import com.homecam.proto.RecordingMode
@@ -31,6 +34,7 @@ class Recorder(
 
     @Volatile private var armed = false
     @Volatile private var mode = RecordingMode.DETECTION
+    @Volatile private var cap = Cap.NONE
     @Volatile private var manualUntilMs = 0L
     @Volatile private var detectionUntilMs = 0L
     @Volatile private var pendingManualClipId: String? = null
@@ -87,6 +91,19 @@ class Recorder(
     }
 
     /**
+     * Protection holds recording down without touching the setting: the camera that paused
+     * itself at 3 a.m. must come back as the mode the user chose once the cause is gone, with
+     * nobody there to re-enable it. Resuming is the next [tick] seeing the cap lifted.
+     */
+    fun setCap(cap: Cap) {
+        this.cap = cap
+        if (cap == Cap.NO_RECORDING) manualUntilMs = 0
+        if (!shouldKeepRecording()) endClip()
+    }
+
+    val manualRecordingRefused: Boolean get() = cap == Cap.NO_RECORDING
+
+    /**
      * Called on a timer so a clip closes once its detection tail has run out — and, in
      * CONTINUOUS, so recording starts (and resumes after a segment rollover) even with
      * nothing detected and nobody watching.
@@ -104,7 +121,7 @@ class Recorder(
         // OFF keeps nothing, so a detection is not recorded — the alert path is separate
         // and still fires. In CONTINUOUS beginClip is a no-op on the already-open segment,
         // and the detection is labelled and written into it just the same.
-        if (mode == RecordingMode.OFF) return
+        if (effectiveMode == RecordingMode.OFF) return
         detectionUntilMs = nowMs + DETECTION_TAIL_MS
         detections.forEach { labelsInClip += it.category }
         beginClip()
@@ -127,7 +144,7 @@ class Recorder(
      * carries no bounding box — only a label, so the viewer can tell why the clip exists.
      */
     fun onSoundEvent(category: String, nowMs: Long) {
-        if (mode == RecordingMode.OFF) return
+        if (effectiveMode == RecordingMode.OFF) return
         detectionUntilMs = nowMs + DETECTION_TAIL_MS
         labelsInClip += category
         beginClip()
@@ -155,6 +172,7 @@ class Recorder(
 
     /** A viewer asking for a clip right now, independent of arming. */
     fun recordManually(seconds: Int) {
+        if (manualRecordingRefused) return
         manualUntilMs = System.currentTimeMillis() + seconds.coerceIn(5, 300) * 1000L
         beginClip()
         // The open clip — freshly begun, or the continuous segment already running — is
@@ -183,15 +201,11 @@ class Recorder(
      * a gap-free record is worth that cost, and retention is what makes it survivable — but
      * it is a choice the user makes, not the default. A manual request overrides the mode.
      */
-    private fun shouldKeepRecording(): Boolean {
-        val now = System.currentTimeMillis()
-        return when {
-            manualUntilMs > now -> true
-            mode == RecordingMode.CONTINUOUS -> true
-            mode == RecordingMode.DETECTION -> armed && detectionUntilMs > now
-            else -> false
-        }
-    }
+    private fun shouldKeepRecording(): Boolean = RecordingGate.shouldKeepRecording(
+        mode, cap, armed, System.currentTimeMillis(), manualUntilMs, detectionUntilMs,
+    )
+
+    private val effectiveMode: RecordingMode get() = HealthProtocol.effectiveMode(mode, cap)
 
     private fun beginClip() {
         if (recorder.recording) return

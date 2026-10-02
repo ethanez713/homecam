@@ -15,6 +15,14 @@ object HealthProtocol {
         Cap.NO_RECORDING -> RecordingMode.OFF
     }
 
+    /** The cause as a clause that reads after "because" or "paused:"; the viewer shows it verbatim. */
+    fun describeCause(reason: Axis?): String = when (reason) {
+        Axis.THERMAL -> "the phone is too hot"
+        Axis.BATTERY -> "the battery is low or draining"
+        Axis.STORAGE -> "the phone is nearly out of storage"
+        null -> "the camera is protecting itself"
+    }
+
     /** A snapshot that never had the setting written reads as the defaults, not as everything off. */
     fun configOf(settings: SettingsSnapshot): HealthConfig {
         if (!settings.hasHardwareProtection()) return HealthConfig()

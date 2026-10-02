@@ -298,6 +298,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         Axis.entries.filter { previous.level(it) != current.level(it) }.forEach {
             graph.diagnostics.healthState(it, previous.level(it), current.level(it), reading, current)
         }
+        if (previous.cap != current.cap) recorder.setCap(current.cap)
         if (previous.cap != current.cap || previous.capReason != current.capReason) {
             val requested = graph.settings.current.recordingMode
             graph.diagnostics.recordingCap(current, requested, HealthProtocol.effectiveMode(requested, current.cap))
@@ -610,6 +611,12 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     override fun recordManually(seconds: Int, start: Boolean) {
+        if (start && recorder.manualRecordingRefused) {
+            throw com.homecam.core.rpc.RpcException(
+                com.homecam.proto.RpcError.Code.UNAVAILABLE,
+                "Recording is paused: ${HealthProtocol.describeCause(hardware.state.capReason)}",
+            )
+        }
         if (start) recorder.recordManually(seconds) else recorder.stopManual()
     }
 

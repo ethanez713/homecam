@@ -61,6 +61,13 @@ class HealthProtocolTest {
     }
 
     @Test
+    fun `every cause reads as a clause`() {
+        assertEquals("the phone is too hot", HealthProtocol.describeCause(Axis.THERMAL))
+        assertEquals("the battery is low or draining", HealthProtocol.describeCause(Axis.BATTERY))
+        assertEquals("the phone is nearly out of storage", HealthProtocol.describeCause(Axis.STORAGE))
+    }
+
+    @Test
     fun `an older camera's status reads as healthy and unprotected`() {
         val parsed = RuntimeStatus.parseFrom(RuntimeStatus.newBuilder().setBatteryPercent(50f).build().toByteArray())
         assertEquals(RuntimeStatus.Cap.CAP_NONE, parsed.cap)
