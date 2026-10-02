@@ -45,6 +45,8 @@ interface CameraDao {
     suspend fun touch(fingerprint: String, host: String, port: Int, atMs: Long)
     @Query("UPDATE cameras SET remoteHost = :host, remotePort = :port WHERE fingerprint = :fingerprint")
     suspend fun setRemote(fingerprint: String, host: String, port: Int)
+    @Query("UPDATE cameras SET lastArmed = :armed, lastRecordingMode = :mode WHERE fingerprint = :fingerprint")
+    suspend fun setLastState(fingerprint: String, armed: Int, mode: String)
 }
 
 @Dao

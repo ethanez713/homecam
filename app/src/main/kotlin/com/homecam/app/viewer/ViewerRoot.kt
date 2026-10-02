@@ -29,13 +29,13 @@ private sealed interface ViewerScreen {
     data object Home : ViewerScreen
     data object Scan : ViewerScreen
     data class Pairing(val invite: PairingInvite) : ViewerScreen
-    data class Live(val camera: CameraEntity) : ViewerScreen
+    data class Live(val camera: CameraEntity, val atMs: Long? = null) : ViewerScreen
     data object Log : ViewerScreen
     data object Network : ViewerScreen
 }
 
 @Composable
-fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
+fun ViewerRoot(onSwitchRole: () -> Unit = {}, openRequest: OpenRequest? = null, onOpened: () -> Unit = {}) {
     val context = LocalContext.current
     val graph = remember { AppGraph.get(context) }
     val node = remember { graph.viewerNode }
@@ -56,6 +56,15 @@ fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
     }
 
     BackHandler(enabled = screen != ViewerScreen.Home && screen !is ViewerScreen.Live) { screen = ViewerScreen.Home }
+
+    // An alert was tapped: go to the camera it came from, at the moment it was about.
+    LaunchedEffect(openRequest, cameras) {
+        val request = openRequest ?: return@LaunchedEffect
+        val camera = cameras.firstOrNull { it.fingerprint == request.cameraFingerprint } ?: return@LaunchedEffect
+        openedOnLaunch = true
+        screen = ViewerScreen.Live(camera, request.atMs)
+        onOpened()
+    }
 
     when (val current = screen) {
         ViewerScreen.Home -> ViewerHomeScreen(
@@ -106,6 +115,7 @@ fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
             node = node,
             camera = current.camera,
             onExit = { screen = ViewerScreen.Home },
+            openAtMs = current.atMs,
         )
 
         ViewerScreen.Network -> NetworkActivityScreen(
@@ -125,6 +135,9 @@ fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
         }
     }
 }
+
+/** What a tapped alert asks for: a camera, and for a detection the moment it happened. */
+data class OpenRequest(val cameraFingerprint: String, val atMs: Long?)
 
 private const val KEY_STARRED = "starred_camera"
 

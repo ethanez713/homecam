@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ViewerEntity::class, CameraEntity::class, AuditEntity::class, ClipEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class HomecamDatabase : RoomDatabase() {
@@ -36,6 +36,13 @@ abstract class HomecamDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cameras ADD COLUMN lastArmed INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE cameras ADD COLUMN lastRecordingMode TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         @Volatile private var instance: HomecamDatabase? = null
 
         fun get(context: Context): HomecamDatabase = instance ?: synchronized(this) {
@@ -43,7 +50,7 @@ abstract class HomecamDatabase : RoomDatabase() {
                 context.applicationContext,
                 HomecamDatabase::class.java,
                 "homecam.db",
-            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
         }
     }
 }

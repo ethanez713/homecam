@@ -26,7 +26,10 @@ import com.homecam.app.R
 import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.EmptyState
 import com.homecam.app.ui.kit.Gutter
+import androidx.compose.foundation.clickable
+import com.homecam.app.ui.kit.ListRow
 import com.homecam.app.ui.kit.Rule
+import com.homecam.app.ui.kit.Sheet
 import com.homecam.app.ui.kit.Tag
 import com.homecam.app.ui.kit.Tone
 import com.homecam.app.ui.kit.TopBar
@@ -46,6 +49,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun AuditScreen(events: List<AuditEvent>, verification: AuditChain.Verification?, onBack: (() -> Unit)? = null) {
     var filter by remember { mutableStateOf(AuditFilter.ALL) }
+    var opened by remember { mutableStateOf<AuditEvent?>(null) }
 
     Column(Modifier.fillMaxSize()) {
         if (onBack != null) TopBar("Access log", onBack = onBack)
@@ -67,14 +71,34 @@ fun AuditScreen(events: List<AuditEvent>, verification: AuditChain.Verification?
                 shown.groupBy { dayOf(it.atMs) }.forEach { (day, thatDay) ->
                     stickyHeader(key = "day-$day") { DayHeader(day, thatDay.size) }
                     items(thatDay, key = { it.seq }) { event ->
-                        EventRow(event)
+                        EventRow(event) { opened = event }
                         Rule()
                     }
                 }
             }
         }
     }
+
+    opened?.let { event ->
+        Sheet(onDismiss = { opened = null }) {
+            Text(describe(event), style = Ethan.type.title2, color = Ethan.colors.textHeading)
+            Spacer(Modifier.height(8.dp))
+            listOf(
+                "When" to stamp.format(Instant.ofEpochMilli(event.atMs).atZone(ZoneId.systemDefault())),
+                "Device" to event.viewerLabel,
+                "Fingerprint" to event.viewerFingerprint,
+                "From" to event.sourceIp,
+                "Detail" to event.detail,
+                "Entry" to "${event.seq}",
+            ).filter { it.second.isNotBlank() }.forEachIndexed { index, (name, value) ->
+                if (index > 0) Rule()
+                ListRow(name, meta = value, metaMono = true)
+            }
+        }
+    }
 }
+
+private val stamp = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
 private fun dayOf(atMs: Long): LocalDate = Instant.ofEpochMilli(atMs).atZone(ZoneId.systemDefault()).toLocalDate()
 
@@ -145,8 +169,8 @@ private fun ChainBanner(verification: AuditChain.Verification?) {
 }
 
 @Composable
-private fun EventRow(event: AuditEvent) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+private fun EventRow(event: AuditEvent, onOpen: () -> Unit) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 7.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(describe(event), style = Ethan.type.bodyStrong, color = Ethan.colors.textHeading, modifier = Modifier.weight(1f), maxLines = 1)
             Text(

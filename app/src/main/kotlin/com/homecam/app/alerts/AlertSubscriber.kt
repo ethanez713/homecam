@@ -105,9 +105,13 @@ class AlertSubscriber : LifecycleService() {
         }
 
         val payload = runCatching { AlertPayload.parseFrom(opened) }.getOrNull() ?: return
+        val isSession = payload.labelsList.firstOrNull() == SESSION_LABEL
         notify(
             title = payload.cameraAlias.ifBlank { "homecam" },
             body = describe(payload.labelsList),
+            camera = payload.cameraFingerprint,
+            // A detection opens on the recording of it; a session opens on the live view.
+            atMs = payload.atMs.takeIf { !isSession } ?: 0,
             thumbnail = payload.thumbnailJpeg.takeIf { !it.isEmpty }?.toByteArray(),
         )
     }
@@ -130,9 +134,14 @@ class AlertSubscriber : LifecycleService() {
         }
     }
 
-    private fun notify(title: String, body: String, thumbnail: ByteArray? = null) {
+    private fun notify(title: String, body: String, thumbnail: ByteArray? = null, camera: String = "", atMs: Long = 0) {
+        val id = System.currentTimeMillis().toInt()
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
+            // Each alert keeps its own extras, so the request code has to differ too.
+            this, id,
+            Intent(this, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_CAMERA, camera)
+                .putExtra(MainActivity.EXTRA_AT_MS, atMs),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -153,7 +162,7 @@ class AlertSubscriber : LifecycleService() {
         }
 
         getSystemService(NotificationManager::class.java)
-            .notify(System.currentTimeMillis().toInt(), builder.build())
+            .notify(id, builder.build())
     }
 
     private fun statusNotification(): Notification {

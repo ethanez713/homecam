@@ -28,9 +28,13 @@ import com.homecam.app.ui.PermissionGate
 import com.homecam.app.data.toRetentionLimits
 import com.homecam.app.ui.cameraEgress
 import com.homecam.core.audit.AuditChain
+import com.homecam.proto.AuditEvent
 import com.homecam.core.retention.ClipRef
 import com.homecam.core.retention.RetentionPlanner
 import kotlinx.coroutines.launch
+
+// Who changed a setting, where the change was made on the camera's own screen.
+private const val ON_THIS_CAMERA = "On the camera"
 
 private enum class CameraScreen { HOME, ROSTER, PAIRING, LOG, NETWORK }
 
@@ -106,8 +110,18 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
             hardwareBacked = graph.identity.hardwareBacked,
             recordingMode = settings.recordingMode,
             projectedDays = projectedDays,
-            onArmedChange = { armed -> scope.launch { graph.settings.update { setArmed(armed) } } },
-            onRecordingMode = { mode -> scope.launch { graph.settings.update { setRecordingMode(mode) } } },
+            onArmedChange = { armed ->
+                scope.launch {
+                    graph.settings.update { setArmed(armed) }
+                    graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = if (armed) "armed" else "disarmed")
+                }
+            },
+            onRecordingMode = { mode ->
+                scope.launch {
+                    graph.settings.update { setRecordingMode(mode) }
+                    graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = "recording ${mode.name.lowercase()}")
+                }
+            },
             onManage = { screen = CameraScreen.ROSTER },
             onPair = { screen = CameraScreen.PAIRING },
             onLog = { screen = CameraScreen.LOG },

@@ -82,6 +82,10 @@ class ViewerNode(private val graph: AppGraph) {
     suspend fun setRemoteAddress(fingerprint: String, host: String, port: Int) =
         cameras.setRemote(fingerprint, host.trim(), port)
 
+    /** Kept so the camera list can say what each camera was doing without connecting to it. */
+    suspend fun rememberState(fingerprint: String, armed: Boolean, recordingMode: String) =
+        cameras.setLastState(fingerprint, if (armed) 1 else 0, recordingMode)
+
     suspend fun seen(fingerprint: String, host: String, port: Int) =
         cameras.touch(fingerprint, host, port, System.currentTimeMillis())
 

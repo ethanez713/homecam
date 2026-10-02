@@ -98,15 +98,21 @@ private fun CameraCard(camera: CameraEntity, starred: Boolean, canStar: Boolean,
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(camera.alias, style = Ethan.type.title2, color = Ethan.colors.textHeading, maxLines = 1)
-                    if (starred) {
+                    if (camera.lastArmed >= 0) {
                         Spacer(Modifier.width(8.dp))
-                        Badge("Opens first", Tone.ACCENT)
+                        Badge(
+                            if (camera.lastArmed == 1) "Armed" else "Disarmed",
+                            if (camera.lastArmed == 1) Tone.SUCCESS else Tone.WARNING,
+                            dot = true,
+                        )
                     }
                 }
                 Text(camera.fingerprint, style = Ethan.type.monoSmall, color = Ethan.colors.textMuted, maxLines = 1)
                 Text(
-                    "Seen ${formatAgo(camera.lastSeenMs)} · " +
-                        if (camera.remoteHost.isBlank()) "home network only" else "reachable remotely",
+                    listOfNotNull(
+                        camera.lastRecordingMode.takeIf { it.isNotBlank() }?.let { "$it recording" },
+                        "seen ${formatAgo(camera.lastSeenMs)}",
+                    ).joinToString(" · ").replaceFirstChar { it.uppercase() },
                     style = Ethan.type.caption,
                     color = Ethan.colors.textFaint,
                     maxLines = 1,

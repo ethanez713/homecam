@@ -1,6 +1,8 @@
 package com.homecam.app
 
+import android.content.Intent
 import android.os.Bundle
+import com.homecam.app.viewer.OpenRequest
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,6 +27,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val roles = RoleStore(this)
+        openRequest = requestFrom(intent)
         setContent {
             HomecamTheme {
                 // The paper runs under the system bars; only the content keeps clear of them.
@@ -41,11 +44,23 @@ class MainActivity : ComponentActivity() {
                     when (role) {
                         null -> RolePickerScreen { picked -> roles.role = picked; role = picked }
                         Role.CAMERA -> CameraRoot(onSwitchRole = switchRole)
-                        Role.VIEWER -> ViewerRoot(onSwitchRole = switchRole)
+                        Role.VIEWER -> ViewerRoot(switchRole, openRequest) { openRequest = null }
                     }
                 } }
             }
         }
+    }
+
+    private var openRequest by mutableStateOf<OpenRequest?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        requestFrom(intent)?.let { openRequest = it }
+    }
+
+    private fun requestFrom(intent: Intent?): OpenRequest? {
+        val camera = intent?.getStringExtra(EXTRA_CAMERA)?.takeIf { it.isNotBlank() } ?: return null
+        return OpenRequest(camera, intent.getLongExtra(EXTRA_AT_MS, 0).takeIf { it > 0 })
     }
 
     override fun onResume() {
@@ -55,5 +70,10 @@ class MainActivity : ComponentActivity() {
         if (RoleStore(this).role == Role.CAMERA && CameraService.isBlind.value) {
             CameraService.resume(this)
         }
+    }
+
+    companion object {
+        const val EXTRA_CAMERA = "com.homecam.app.CAMERA"
+        const val EXTRA_AT_MS = "com.homecam.app.AT_MS"
     }
 }

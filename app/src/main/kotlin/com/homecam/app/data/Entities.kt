@@ -44,6 +44,9 @@ data class CameraEntity(
     val remotePort: Int = 0,
     val pairedAtMs: Long,
     val lastSeenMs: Long,
+    /** What the camera said the last time this phone was connected: -1 unknown, 0 disarmed, 1 armed. */
+    val lastArmed: Int = -1,
+    val lastRecordingMode: String = "",
 ) {
     override fun equals(other: Any?) = other is CameraEntity && other.fingerprint == fingerprint
     override fun hashCode() = fingerprint.hashCode()
