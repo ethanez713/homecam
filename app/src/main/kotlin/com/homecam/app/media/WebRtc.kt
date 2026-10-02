@@ -18,6 +18,8 @@ object WebRtc {
 
     @Volatile private var factory: PeerConnectionFactory? = null
 
+    private const val ADAPTER_TYPE_LOOPBACK = 16
+
     /** Receives what WebRTC's recorder captures, on its audio thread, while a session runs. */
     @Volatile var capturedAudio: ((JavaAudioDeviceModule.AudioSamples) -> Unit)? = null
 
@@ -38,6 +40,16 @@ object WebRtc {
             .createAudioDeviceModule()
 
         return PeerConnectionFactory.builder()
+            .setOptions(
+                PeerConnectionFactory.Options().apply {
+                    // With Android's network monitor on, libwebrtc offers only the default
+                    // network's address and never the VPN interface's. With no STUN or TURN
+                    // by design, the tailnet address is the only path between the phones
+                    // away from home, so interfaces are enumerated natively instead.
+                    disableNetworkMonitor = true
+                    networkIgnoreMask = ADAPTER_TYPE_LOOPBACK
+                }
+            )
             .setVideoEncoderFactory(
                 // Hardware H.264 is the whole reason a 2020 phone can encode continuously;
                 // the software fallback exists so a device without it still works, badly.
