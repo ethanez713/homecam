@@ -86,7 +86,7 @@ fun CameraHomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Armed", style = MaterialTheme.typography.titleMedium)
+                    Text(if (armed) "Armed" else "Disarmed", style = MaterialTheme.typography.titleMedium)
                     Text(
                         if (armed) "Watching for events" else "Not watching",
                         style = MaterialTheme.typography.bodySmall,
