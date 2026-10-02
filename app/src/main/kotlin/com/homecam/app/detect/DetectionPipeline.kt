@@ -47,8 +47,12 @@ class DetectionPipeline(
 
     val available: Boolean get() = detector != null
 
-    @Volatile var framesPerSecond: Float = 0f
-        private set
+    @Volatile private var measuredFps = 0f
+    @Volatile private var measuredAtMs = 0L
+
+    /** Detector passes per second right now: zero once no pass has run for [FPS_STALE_MS]. */
+    val framesPerSecond: Float
+        get() = if (System.currentTimeMillis() - measuredAtMs > FPS_STALE_MS) 0f else measuredFps
 
     /** Mean luma of the last graded frame (0..255), so a response can tell dark from day. */
     @Volatile var averageLuma: Float = 255f
@@ -95,7 +99,10 @@ class DetectionPipeline(
                 DetectionPolicy.accepts(snapshot.detectionMode, snapshot.detectionZone, detection)
                     ?.let { LabelledDetection(it, detection) }
             }
-            if (previousDetectAtMs > 0) framesPerSecond = 1000f / (now - previousDetectAtMs).coerceAtLeast(1)
+            if (previousDetectAtMs > 0) {
+                measuredFps = 1000f / (now - previousDetectAtMs).coerceAtLeast(1)
+                measuredAtMs = now
+            }
             if (accepted.isNotEmpty()) {
                 onEvent(accepted, boundedJpeg(bitmap, AlertLimits.MAX_THUMBNAIL_BYTES))
             } else if (snapshot.detectionMode.motionOnly) {
@@ -219,6 +226,7 @@ class DetectionPipeline(
         const val ALERT_THUMBNAIL_MIN_QUALITY = 20
         const val GRID = 16
         const val CELL_SAMPLE_STEP = 4
+        const val FPS_STALE_MS = 5_000L
         const val GRID_INTERVAL_MS = 200L
         const val ANALYSIS_LONG_EDGE = 640
         const val DETECT_INTERVAL_MS = 400L

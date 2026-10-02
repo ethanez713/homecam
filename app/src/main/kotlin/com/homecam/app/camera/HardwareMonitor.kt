@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 class HardwareMonitor(
     private val graph: AppGraph,
     private val clips: ClipStore,
-    private val onChange: (previous: HealthState, current: HealthState) -> Unit = { _, _ -> },
+    private val onChange: (previous: HealthState, current: HealthState, reading: HealthSample) -> Unit = { _, _, _ -> },
 ) {
     private val policy = HealthPolicy()
     private val lock = Any()
@@ -94,7 +94,7 @@ class HardwareMonitor(
             state = policy.update(sample)
             before to state
         }
-        if (previous != current) onChange(previous, current)
+        if (previous != current) onChange(previous, current, sample)
     }
 
     fun configure(config: HealthConfig) {

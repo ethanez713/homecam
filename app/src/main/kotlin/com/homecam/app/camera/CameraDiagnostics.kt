@@ -2,7 +2,12 @@ package com.homecam.app.camera
 
 import android.content.Context
 import android.util.Log
+import com.homecam.core.health.Axis
+import com.homecam.core.health.HealthSample
+import com.homecam.core.health.HealthState
+import com.homecam.core.health.Level
 import com.homecam.core.retention.PrunePlan
+import com.homecam.proto.RecordingMode
 import com.homecam.proto.RuntimeStatus
 import org.json.JSONObject
 import java.io.File
@@ -24,9 +29,9 @@ import java.security.SecureRandom
  * not content, capped so it cannot grow without bound. Nothing here is read at runtime; it is
  * pulled and inspected by hand after a gate run (see docs/DECISIONS.md).
  */
-class CameraDiagnostics(context: Context) {
+class CameraDiagnostics(context: Context, directory: File = File(context.filesDir, "diagnostics")) {
 
-    private val dir = File(context.filesDir, "diagnostics").apply { mkdirs() }
+    private val dir = directory.apply { mkdirs() }
     private val file = File(dir, "camera.jsonl")
     private val rotated = File(dir, "camera.1.jsonl")
     private val lock = Any()
@@ -71,7 +76,36 @@ class CameraDiagnostics(context: Context) {
         put("detector_fps", status.detectorFps)
         put("recording", recording)
         put("mode", mode)
+        put("thermal_status", status.thermalStatus.name.removePrefix("THERMAL_").lowercase())
+        if (!status.thermalHeadroom.isNaN()) put("thermal_headroom", status.thermalHeadroom)
+        put("drain_pct_per_h", status.drainPercentPerHour)
+        put("cap", status.cap.name.removePrefix("CAP_").lowercase())
+        put("effective_mode", status.effectiveRecordingMode.name)
     }
+
+    /** One line per axis that changed level, with the reading that moved it. */
+    fun healthState(axis: Axis, from: Level, to: Level, reading: HealthSample, state: HealthState) =
+        event("health_state") {
+            put("axis", axis.name.lowercase())
+            put("from", from.name.lowercase())
+            put("to", to.name.lowercase())
+            put("battery_pct", reading.batteryPercent)
+            put("battery_temp_c", reading.batteryTempC)
+            put("charging", reading.plugged)
+            put("thermal_status", reading.thermalStatus?.name?.lowercase() ?: "unknown")
+            put("drain_pct_per_h", state.drainPercentPerHour)
+            put("free_bytes", reading.freeBytes)
+            put("floor_bytes", reading.floorBytes)
+            put("floor_held", reading.floorHeld)
+        }
+
+    fun recordingCap(state: HealthState, requested: RecordingMode, effective: RecordingMode) =
+        event("recording_cap") {
+            put("cap", state.cap.name.lowercase())
+            put("reason", state.capReason?.name?.lowercase() ?: "none")
+            put("requested_mode", requested.name)
+            put("effective_mode", effective.name)
+        }
 
     fun soundEvent(category: String, levelDb: Float) = event("sound_event") {
         put("category", category)

@@ -27,6 +27,10 @@ import com.homecam.app.media.CameraMediaSession
 import com.homecam.app.media.CameraXVideoCapturer
 import com.homecam.app.media.ContinuousCapture
 import com.homecam.app.media.WebRtc
+import com.homecam.core.health.Axis
+import com.homecam.core.health.HealthProtocol
+import com.homecam.core.health.HealthSample
+import com.homecam.core.health.HealthState
 import com.homecam.core.media.CaptureWatchdog
 import com.homecam.core.rpc.Controls
 import com.homecam.proto.AuditEvent
@@ -117,7 +121,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 }
             },
         ).also { capture.addSink(it) }
-        hardware = HardwareMonitor(graph, recorder.clips).also { it.start() }
+        hardware = HardwareMonitor(graph, recorder.clips, ::onHealthChange).also { it.start() }
         startClipRollover()
 
         server = SignalingServer(graph, node).also {
@@ -286,6 +290,16 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 recording = recorder.recording,
                 mode = graph.settings.current.recordingMode.name,
             )
+        }
+    }
+
+    private fun onHealthChange(previous: HealthState, current: HealthState, reading: HealthSample) {
+        Axis.entries.filter { previous.level(it) != current.level(it) }.forEach {
+            graph.diagnostics.healthState(it, previous.level(it), current.level(it), reading, current)
+        }
+        if (previous.cap != current.cap || previous.capReason != current.capReason) {
+            val requested = graph.settings.current.recordingMode
+            graph.diagnostics.recordingCap(current, requested, HealthProtocol.effectiveMode(requested, current.cap))
         }
     }
 
