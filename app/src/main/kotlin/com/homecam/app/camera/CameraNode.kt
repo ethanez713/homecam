@@ -4,6 +4,7 @@ import com.homecam.app.AppGraph
 import com.homecam.app.data.ViewerEntity
 import com.homecam.app.net.LocalAddress
 import com.homecam.core.crypto.IdentityKey
+import com.homecam.core.pairing.AllowlistMirror
 import com.homecam.core.pairing.CameraPairingSession
 import com.homecam.proto.AuditEvent
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,11 +26,12 @@ class CameraNode(private val graph: AppGraph) {
     /**
      * The handshake runs on a socket thread and has to answer "is this key allowed?"
      * without suspending, so the allowlist is mirrored here and kept current from the
-     * database. A revoke lands in this set before the transaction that caused it is even
+     * database. A revoke lands in the mirror before the transaction that caused it is even
      * observed by the UI, which is the right ordering for a control whose whole job is
-     * to take effect immediately.
+     * to take effect immediately; the mirror keeps a database snapshot computed before the
+     * revoke from undoing it.
      */
-    @Volatile private var allowed: Set<IdentityKey> = emptySet()
+    private val allowed = AllowlistMirror()
 
     private val _pairing = MutableStateFlow<CameraPairingSession?>(null)
     val pairing: StateFlow<CameraPairingSession?> = _pairing.asStateFlow()
@@ -54,11 +56,11 @@ class CameraNode(private val graph: AppGraph) {
         graph.scope.launch {
             viewers.observeAll()
                 .map { rows -> rows.map { IdentityKey(it.publicKey) }.toSet() }
-                .collect { allowed = it }
+                .collect { allowed.onSnapshot(it) }
         }
     }
 
-    fun isAllowed(key: IdentityKey): Boolean = key in allowed
+    fun isAllowed(key: IdentityKey): Boolean = allowed.isAllowed(key)
 
     fun activePairing(): CameraPairingSession? =
         _pairing.value?.takeIf { it.state(now()) == CameraPairingSession.State.ACTIVE }
@@ -106,7 +108,7 @@ class CameraNode(private val graph: AppGraph) {
                 lastSeenMs = now(),
             )
         )
-        allowed = allowed + viewer
+        allowed.added(viewer)
         _pairing.value = null
         _pairingPhrase.value = verificationPhrase
         graph.audit.record(
@@ -119,7 +121,7 @@ class CameraNode(private val graph: AppGraph) {
 
     suspend fun revoke(fingerprint: String) {
         val row = viewers.byFingerprint(fingerprint) ?: return
-        allowed = allowed - IdentityKey(row.publicKey)
+        allowed.revoked(IdentityKey(row.publicKey))
         viewers.delete(fingerprint)
         graph.audit.record(
             AuditEvent.Kind.VIEWER_REVOKED,
@@ -131,7 +133,7 @@ class CameraNode(private val graph: AppGraph) {
 
     suspend fun revokeAll() {
         val rows = viewers.all()
-        allowed = emptySet()
+        allowed.revokedAll()
         viewers.deleteAll()
         rows.forEach {
             graph.audit.record(
