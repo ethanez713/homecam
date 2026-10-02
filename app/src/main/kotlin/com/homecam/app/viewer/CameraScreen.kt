@@ -64,7 +64,6 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
     var tab by remember(camera.fingerprint) { mutableStateOf(CameraTab.LIVE) }
     var showingDevices by remember(camera.fingerprint) { mutableStateOf(false) }
     var showingLog by remember(camera.fingerprint) { mutableStateOf(false) }
-    var playerOpen by remember(camera.fingerprint) { mutableStateOf(false) }
     var state by remember(camera.fingerprint, attempt) {
         mutableStateOf<LiveState>(LiveState.Locating(camera.alias))
     }
@@ -187,7 +186,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         return
     }
 
-    BackHandler(enabled = !playerOpen) { if (tab == CameraTab.LIVE) onExit() else tab = CameraTab.LIVE }
+    BackHandler { if (tab == CameraTab.LIVE) onExit() else tab = CameraTab.LIVE }
 
     CameraShell(
         alias = settings?.alias ?: camera.alias,
@@ -202,7 +201,8 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         onTab = { tab = it },
         onBack = onExit,
         tabsEnabled = open != null,
-        chrome = !playerOpen && !(isLandscape() && tab == CameraTab.LIVE && (state as? LiveState.Connected)?.video != null),
+        // In landscape the picture has the screen, live or recorded.
+        chrome = !(isLandscape() && (tab == CameraTab.CLIPS || (tab == CameraTab.LIVE && (state as? LiveState.Connected)?.video != null))),
     ) {
         when (tab) {
             CameraTab.LIVE -> LiveScreen(
@@ -235,22 +235,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 var clips by remember(open) { mutableStateOf<List<com.homecam.proto.Clip>?>(null) }
                 var playing by remember(open) { mutableStateOf<java.io.File?>(null) }
                 var playingId by remember(open) { mutableStateOf<String?>(null) }
-                playerOpen = playing != null
                 var downloading by remember(open) { mutableStateOf<String?>(null) }
-                var buckets by remember(open) {
-                    mutableStateOf<List<com.homecam.proto.TimelineCount.Bucket>>(emptyList())
-                }
-
                 suspend fun refresh() {
                     clips = open?.let { runCatching { it.link.clips().clipsList }.getOrNull() }
                 }
-                LaunchedEffect(open) {
-                    refresh()
-                    buckets = open?.let {
-                        val since = System.currentTimeMillis() - 7L * 24 * 3600 * 1000
-                        runCatching { it.link.timelineCounts(since).bucketsList }.getOrNull()
-                    }.orEmpty()
-                }
+                LaunchedEffect(open) { refresh() }
 
                 val nearCeiling = clips?.let { list ->
                     settings?.let { s ->
@@ -261,41 +250,50 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     }
                 } ?: false
 
+                suspend fun fetch(session: ViewerSession, clip: com.homecam.proto.Clip): java.io.File {
+                    val file = java.io.File(context.cacheDir, "clips/${clip.id}.mp4")
+                    if (!file.exists()) session.link.downloadClip(clip.id, file)
+                    return file
+                }
+
                 ClipsScreen(
                     clips = clips,
                     playing = playing,
+                    playingId = playingId,
                     downloadingId = downloading,
                     projectedDays = projectedDays,
                     showBoxes = settings?.boundingBoxOverlay ?: true,
                     loadThumbnail = open?.let { s -> { id -> s.link.thumbnail(id) } },
-                    buckets = buckets,
                     pinnedNearCeiling = nearCeiling,
-                    onExport = { clip ->
-                        edit(scope, open) {
-                            downloading = clip.id
-                            val file = java.io.File(context.cacheDir, "clips/${clip.id}.mp4")
-                            runCatching { if (!file.exists()) it.link.downloadClip(clip.id, file) }
-                            com.homecam.app.viewer.ClipExport.toGallery(context, file, "homecam-${clip.id}.mp4")
-                            downloading = null
-                        }
-                    },
                     onPlay = { clip ->
                         edit(scope, open) {
                             downloading = clip.id
-                            val file = java.io.File(context.cacheDir, "clips/${clip.id}.mp4")
-                            runCatching { if (!file.exists()) it.link.downloadClip(clip.id, file) }
-                                .onSuccess { playing = file; playingId = clip.id }
+                            runCatching { fetch(it, clip) }.onSuccess { file -> playing = file; playingId = clip.id }
+                            downloading = null
+                        }
+                    },
+                    onExport = { chosen ->
+                        edit(scope, open) {
+                            chosen.forEach { clip ->
+                                downloading = clip.id
+                                runCatching { fetch(it, clip) }.onSuccess { file ->
+                                    com.homecam.app.viewer.ClipExport.toGallery(context, file, "homecam-${clip.id}.mp4")
+                                }
+                            }
                             downloading = null
                         }
                     },
                     onPin = { clip ->
                         edit(scope, open) { it.link.pinClip(clip.id, !clip.pinned); refresh() }
                     },
-                    onDelete = { clip ->
-                        edit(scope, open) { it.link.deleteClip(clip.id); refresh() }
+                    onDelete = { doomed ->
+                        edit(scope, open) {
+                            doomed.forEach { clip -> it.link.deleteClip(clip.id) }
+                            if (doomed.any { clip -> clip.id == playingId }) { playing = null; playingId = null }
+                            refresh()
+                        }
                     },
-                    onClosePlayer = { playing = null },
-                    playingId = playingId,
+                    onBack = onExit,
                 )
             }
 

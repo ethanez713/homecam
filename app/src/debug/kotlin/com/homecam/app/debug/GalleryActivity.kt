@@ -50,7 +50,6 @@ import com.homecam.proto.RuntimeStatus
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.SoundDetection
 import com.homecam.proto.SoundRecognition
-import com.homecam.proto.TimelineCount
 import com.homecam.proto.Viewer
 import java.io.ByteArrayOutputStream
 
@@ -107,11 +106,6 @@ private val clips = buildList {
     add(clip("y-1", 1500, 17, 7.4, "sound"))
     add(clip("y-2", 1620, 31, 9.8, "vehicle"))
     repeat(4) { add(clip("run-c-$it", 1700L + it * 2, 120, 10.2)) }
-}
-
-private val buckets = (0 until 40).map {
-    TimelineCount.Bucket.newBuilder().setAtMs(System.currentTimeMillis() - (40 - it) * 60 * MINUTE)
-        .setCount(listOf(0, 1, 0, 4, 2, 0, 0, 7, 3, 1)[it % 10]).build()
 }
 
 private fun event(seq: Long, minutesAgo: Long, kind: AuditEvent.Kind, detail: String = "", ip: String = "192.168.0.248", who: Boolean = true) =
@@ -197,14 +191,11 @@ private fun Screen(name: String) {
                 null, {},
             )
         }
-        "clips" -> Shell(CameraTab.CLIPS) {
-            ClipsScreen(clips, null, "run-a-1", 14.0, {}, {}, {}, true, {}, { thumbnail(it) }, buckets)
+        "clips" -> Shell(CameraTab.CLIPS) { Clips(null) }
+        "player" -> Shell(CameraTab.CLIPS) {
+            Clips(java.io.File(androidx.compose.ui.platform.LocalContext.current.cacheDir, "sample.mp4"))
         }
-        "player" -> ClipsScreen(
-            clips, java.io.File(androidx.compose.ui.platform.LocalContext.current.cacheDir, "sample.mp4"),
-            null, 14.0, {}, {}, {}, true, {}, playingId = "solo-1",
-        )
-        "clips_empty" -> Shell(CameraTab.CLIPS) { ClipsScreen(emptyList(), null, null, null, {}, {}, {}, true, {}) }
+        "clips_empty" -> Shell(CameraTab.CLIPS) { ClipsScreen(emptyList(), null, null, null, null, {}, {}, {}, {}, true) }
         "log" -> AuditScreen(events, AuditChain.Verification(true, 0), onBack = {})
         "log_broken" -> AuditScreen(events, AuditChain.Verification(false, 37), onBack = {})
         "settings" -> Shell(CameraTab.SETTINGS) { Settings(settings, "100.64.0.9") }
@@ -247,5 +238,15 @@ private fun CameraHome(watcher: String?) {
         hardwareBacked = true, recordingMode = RecordingMode.CONTINUOUS, projectedDays = 14.0,
         onArmedChange = {}, onRecordingMode = {}, onManage = {}, onPair = {}, onLog = {}, onNetwork = {},
         canDrawOverlays = watcher == null,
+    )
+}
+
+@Composable
+private fun Clips(file: java.io.File?) {
+    var playingId by remember { mutableStateOf(if (file != null) "run-a-0" else null) }
+    ClipsScreen(
+        clips = clips, playing = file.takeIf { playingId != null }, playingId = playingId, downloadingId = null,
+        projectedDays = 14.0, onPlay = { if (file != null) playingId = it.id }, onPin = {}, onDelete = {}, onExport = {},
+        showBoxes = true, loadThumbnail = { thumbnail(it) },
     )
 }
