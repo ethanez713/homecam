@@ -22,9 +22,15 @@ import java.io.FileOutputStream
  * encryption layer: Android's file-based encryption already covers device theft, and a
  * per-file key stored on the same phone would be security theatre.
  */
-class ClipStore(context: Context, private val dao: ClipDao) {
+class ClipStore(
+    context: Context,
+    private val dao: ClipDao,
+    val directory: File = File(context.filesDir, "clips"),
+) {
 
-    val directory: File = File(context.filesDir, "clips").apply { mkdirs() }
+    init {
+        directory.mkdirs()
+    }
 
     private val pruneLock = Mutex()
 
@@ -110,6 +116,7 @@ class ClipStore(context: Context, private val dao: ClipDao) {
         )
         plan.delete.forEach { delete(it.id) }
         removeOrphanFiles()
+        removeRowsWithoutFiles()
         lastPlan = plan
         plan
     }
@@ -133,6 +140,20 @@ class ClipStore(context: Context, private val dao: ClipDao) {
         val abandonedBefore = System.currentTimeMillis() - ORPHAN_GRACE_MS
         directory.listFiles()?.forEach { file ->
             if (file.absolutePath !in known && file.lastModified() < abandonedBefore) file.delete()
+        }
+    }
+
+    /**
+     * The mirror of [removeOrphanFiles]: a row whose file is gone or empty shows in the
+     * viewer's list as a clip that cannot play, and counts against the size ceiling for
+     * bytes that do not exist. Index runs only once a clip is closed, so a row never
+     * belongs to a file still being written.
+     */
+    private suspend fun removeRowsWithoutFiles() {
+        dao.all().filter { !File(it.path).let { file -> file.exists() && file.length() > 0 } }.forEach {
+            Log.w(TAG, "dropping clip row ${it.id}: its file is missing or empty")
+            thumbnailFile(File(it.path)).delete()
+            dao.delete(it.id)
         }
     }
 
