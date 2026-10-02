@@ -9,6 +9,8 @@ import com.homecam.app.camera.RuntimeStatusProvider
 import com.homecam.core.rpc.RpcPeer
 import com.homecam.core.crypto.IdentityKey
 import com.homecam.core.signaling.CameraHandshake
+import com.homecam.core.signaling.ConnectionLimiter
+import com.homecam.core.signaling.RejectionCoalescer
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
@@ -19,8 +21,12 @@ import com.homecam.proto.SignalMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.java_websocket.WebSocket
+import org.java_websocket.drafts.Draft_6455
+import org.java_websocket.extensions.DefaultExtension
+import org.java_websocket.protocols.Protocol
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.DefaultSSLWebSocketServerFactory
 import org.java_websocket.server.WebSocketServer
@@ -40,7 +46,13 @@ class SignalingServer(
     private val graph: AppGraph,
     private val node: CameraNode,
     port: Int = Signaling.DEFAULT_PORT,
-) : WebSocketServer(InetSocketAddress(port)) {
+) : WebSocketServer(
+    InetSocketAddress(port),
+    Runtime.getRuntime().availableProcessors(),
+    // The default draft's extension and protocol lists, which the handshake needs to match at all;
+    // only the frame limit differs.
+    listOf(Draft_6455(listOf(DefaultExtension()), listOf(Protocol("")), MAX_FRAME_BYTES)),
+) {
 
     interface Listener {
         fun onAuthenticated(session: PeerSession)
@@ -105,7 +117,7 @@ class SignalingServer(
         /** Set by the WebRTC layer at M4 once a DataChannel is open. */
         @Volatile var dataChannelSender: (suspend (RpcMessage) -> Unit)? = null
 
-        internal val inbox = Channel<SignalMessage>(Channel.UNLIMITED)
+        internal val inbox = Channel<SignalMessage>(INBOX_CAPACITY)
         internal var pump: Job? = null
 
         fun send(message: SignalMessage) {
@@ -128,6 +140,8 @@ class SignalingServer(
     }
 
     private val sessions = java.util.concurrent.ConcurrentHashMap<WebSocket, PeerSession>()
+    private val limiter = ConnectionLimiter()
+    private val rejections = RejectionCoalescer()
     private val scope: CoroutineScope get() = graph.scope
 
     init {
@@ -166,10 +180,22 @@ class SignalingServer(
             conn.close()
             return
         }
+        val address = conn.remoteSocketAddress?.address?.hostAddress ?: "unknown"
+        if (!limiter.tryAdmit(address)) {
+            noteRefusal(address, "limit", "too many connections")
+            conn.close()
+            return
+        }
         val session = PeerSession(conn)
         sessions[conn] = session
         session.pump = scope.launch {
             for (message in session.inbox) handle(session, message)
+        }
+        // A peer that never completes the handshake holds a socket, a coroutine and a TLS
+        // session for as long as connectionLostTimeout lets it; a real viewer is done in under a second.
+        scope.launch {
+            delay(PRE_AUTH_TIMEOUT_MS)
+            if (sessions[conn] === session && !session.authenticated) reject(session, Bye.Reason.AUTH_FAILED, "timeout")
         }
     }
 
@@ -185,11 +211,16 @@ class SignalingServer(
             reject(session, Bye.Reason.INCOMPATIBLE, "unparseable frame")
             return
         }
-        session.inbox.trySend(parsed)
+        if (session.inbox.trySend(parsed).isFailure) {
+            // A peer sending faster than the handler drains is not behaving like a viewer.
+            noteRefusal(session.sourceIp, "flood", "inbox full")
+            session.socket.close()
+        }
     }
 
     override fun onClose(conn: WebSocket, code: Int, reason: String?, remote: Boolean) {
         val session = sessions.remove(conn) ?: return
+        limiter.release(session.sourceIp)
         session.inbox.close()
         scope.launch { session.rpc.failAllPending("signaling channel closed") }
         session.pump?.cancel()
@@ -211,7 +242,10 @@ class SignalingServer(
     override fun onError(conn: WebSocket?, ex: Exception) {
         Log.w(TAG, "signaling error", ex)
         if (conn == null) return
-        sessions.remove(conn)?.socket?.close()
+        sessions.remove(conn)?.let {
+            limiter.release(it.sourceIp)
+            it.socket.close()
+        }
     }
 
     private suspend fun handle(session: PeerSession, message: SignalMessage) {
@@ -286,18 +320,45 @@ class SignalingServer(
         if (session.authenticated) block(session) else session.sendBye(Bye.Reason.ACCESS_DENIED)
     }
 
-    /** Every refusal is logged — §2.7 counts a rejected attempt as an access event. */
+    /**
+     * Every refusal is logged — §2.7 counts a rejected attempt as an access event — but a
+     * peer repeating the same refusal is one row and a count, so a flood cannot grow the
+     * audit table or bury the rejection that matters.
+     */
     private fun reject(session: PeerSession, reason: Bye.Reason, stage: String) {
-        scope.launch {
-            graph.audit.record(
-                AuditEvent.Kind.CONNECTION_REJECTED,
-                viewerFingerprint = session.viewer?.shortFingerprint.orEmpty(),
-                sourceIp = session.sourceIp,
-                detail = "$stage: ${reason.name}",
-            )
-        }
+        noteRefusal(session.sourceIp, stage, reason.name, session.viewer?.shortFingerprint.orEmpty())
         session.sendBye(reason, stage)
     }
 
-    private companion object { const val TAG = "SignalingServer" }
+    private fun noteRefusal(sourceIp: String, stage: String, reason: String, fingerprint: String = "") {
+        val key = "$sourceIp|$stage"
+        when (val decision = rejections.onReject(key, System.currentTimeMillis())) {
+            RejectionCoalescer.Decision.Record -> scope.launch {
+                graph.audit.record(
+                    AuditEvent.Kind.CONNECTION_REJECTED,
+                    viewerFingerprint = fingerprint,
+                    sourceIp = sourceIp,
+                    detail = "$stage: $reason",
+                )
+            }
+            is RejectionCoalescer.Decision.Suppress -> if (decision.startsWindow) scope.launch {
+                delay(rejections.windowDurationMs)
+                val count = rejections.takeSuppressed(key)
+                if (count > 0) graph.audit.record(
+                    AuditEvent.Kind.CONNECTION_REJECTED,
+                    sourceIp = sourceIp,
+                    detail = "$stage: $reason, and $count more in ${rejections.windowDurationMs / 1000}s",
+                )
+            }
+        }
+    }
+
+    private companion object {
+        const val TAG = "SignalingServer"
+
+        // The largest legitimate frame is an SDP or a 48 KB clip chunk; 256 KB leaves headroom.
+        const val MAX_FRAME_BYTES = 256 * 1024
+        const val INBOX_CAPACITY = 256
+        const val PRE_AUTH_TIMEOUT_MS = 10_000L
+    }
 }
