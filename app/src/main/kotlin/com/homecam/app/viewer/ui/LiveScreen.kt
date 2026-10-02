@@ -73,6 +73,7 @@ data class LiveControls(
     val onMic: (Boolean) -> Unit,
     val onZoom: (Float) -> Unit,
     val onRotate: () -> Unit = {},
+    val onSnapshot: () -> Unit = {},
     // Hidden when the camera's capabilities say it has no flash / no speaker (Phase 2).
     val torchAvailable: Boolean = true,
     val pushToTalkAvailable: Boolean = true,
@@ -218,6 +219,7 @@ private fun Keys(controls: LiveControls, each: Modifier) {
     var confirmSiren by remember { mutableStateOf(false) }
 
     ControlKey(R.drawable.lucide_rotate_cw, "Rotate", each, onClick = controls.onRotate)
+    ControlKey(R.drawable.lucide_camera, "Snap", each, onClick = controls.onSnapshot)
     if (controls.torchAvailable) {
         ControlKey(
             if (controls.torchOn) R.drawable.lucide_flashlight else R.drawable.lucide_flashlight_off,

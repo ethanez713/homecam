@@ -55,13 +55,16 @@ private const val TAG = "CameraScreen"
  * — waking a sleeping phone four times to read four things would be its own battery bug.
  */
 @Composable
-fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
+fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, openAtMs: Long? = null) {
     val context = LocalContext.current
     val graph = remember { AppGraph.get(context) }
     val scope = rememberCoroutineScope()
 
     var attempt by remember(camera.fingerprint) { mutableIntStateOf(0) }
-    var tab by remember(camera.fingerprint) { mutableStateOf(CameraTab.LIVE) }
+    var tab by remember(camera.fingerprint, openAtMs) { mutableStateOf(if (openAtMs != null) CameraTab.CLIPS else CameraTab.LIVE) }
+    var toast by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(toast) { if (toast != null) { kotlinx.coroutines.delay(TOAST_MS); toast = null } }
+    val say: (String) -> Unit = { toast = it }
     var showingDevices by remember(camera.fingerprint) { mutableStateOf(false) }
     var showingLog by remember(camera.fingerprint) { mutableStateOf(false) }
     var state by remember(camera.fingerprint, attempt) {
@@ -140,6 +143,10 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         }
     }
 
+    LaunchedEffect(settings?.armed, settings?.recordingMode) {
+        settings?.let { node.rememberState(camera.fingerprint, it.armed, it.recordingMode.name.lowercase().replaceFirstChar { c -> c.uppercase() }) }
+    }
+
     // Recomputed when the mode changes, since that is what alters the recording rate and so
     // how far back the camera can remember (§5); a stale estimate is worse than none.
     LaunchedEffect(open, settings?.recordingMode, settings?.retention) {
@@ -162,7 +169,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
             viewers = viewers,
             selfFingerprint = graph.identity.identity.shortFingerprint,
             onRevoke = { fingerprint ->
-                edit(scope, open) {
+                edit(scope, open, say) {
                     it.link.revoke(fingerprint)
                     viewers = runCatching { it.link.viewers().viewersList }.getOrNull()
                 }
@@ -201,6 +208,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         onTab = { tab = it },
         onBack = onExit,
         tabsEnabled = open != null,
+        toast = toast,
         // In landscape the picture has the screen, live or recorded.
         chrome = !(isLandscape() && (tab == CameraTab.CLIPS || (tab == CameraTab.LIVE && (state as? LiveState.Connected)?.video != null))),
     ) {
@@ -218,7 +226,16 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                         onTorch = { on -> torch = on; scope.launch { it.setTorch(on) } },
                         onMic = { on -> mic = on; scope.launch { it.setPushToTalk(on) } },
                         onZoom = { value -> zoom = value; scope.launch { it.setZoom(value) } },
-                        onRotate = { edit(scope, it) { session -> session.rotateQuarterTurn() } },
+                        onRotate = { edit(scope, it, say) { session -> session.rotateQuarterTurn() } },
+                        onSnapshot = {
+                            edit(scope, it, say) { session ->
+                                val still = session.link.snapshot()
+                                val saved = com.homecam.app.viewer.ClipExport.imageToGallery(
+                                    context, still.jpeg.toByteArray(), "homecam-${System.currentTimeMillis()}.jpg",
+                                )
+                                say(if (saved != null) "Snapshot saved to the gallery." else "The snapshot could not be saved.")
+                            }
+                        },
                         torchAvailable = gates?.torch ?: true,
                         pushToTalkAvailable = gates?.pushToTalk ?: true,
                         sirenAvailable = gates?.siren ?: false,
@@ -266,14 +283,14 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     loadThumbnail = open?.let { s -> { id -> s.link.thumbnail(id) } },
                     pinnedNearCeiling = nearCeiling,
                     onPlay = { clip ->
-                        edit(scope, open) {
+                        edit(scope, open, say) {
                             downloading = clip.id
                             runCatching { fetch(it, clip) }.onSuccess { file -> playing = file; playingId = clip.id }
                             downloading = null
                         }
                     },
                     onExport = { chosen ->
-                        edit(scope, open) {
+                        edit(scope, open, say) {
                             chosen.forEach { clip ->
                                 downloading = clip.id
                                 runCatching { fetch(it, clip) }.onSuccess { file ->
@@ -281,56 +298,59 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                                 }
                             }
                             downloading = null
+                            say(if (chosen.size == 1) "Saved to the gallery." else "Saved ${chosen.size} clips to the gallery.")
                         }
                     },
                     onPin = { clip ->
-                        edit(scope, open) { it.link.pinClip(clip.id, !clip.pinned); refresh() }
+                        edit(scope, open, say) { it.link.pinClip(clip.id, !clip.pinned); refresh() }
                     },
                     onDelete = { doomed ->
-                        edit(scope, open) {
+                        edit(scope, open, say) {
                             doomed.forEach { clip -> it.link.deleteClip(clip.id) }
                             if (doomed.any { clip -> clip.id == playingId }) { playing = null; playingId = null }
                             refresh()
+                            say(if (doomed.size == 1) "Clip deleted." else "${doomed.size} clips deleted.")
                         }
                     },
                     onBack = onExit,
+                    openAtMs = openAtMs,
                 )
             }
 
             CameraTab.SETTINGS -> CameraSettingsScreen(
                 settings = settings,
-                onArmed = { armed -> edit(scope, open) { settings = it.link.setArmed(armed) } },
-                onAlias = { alias -> edit(scope, open) { settings = it.link.setAlias(alias) } },
+                onArmed = { armed -> edit(scope, open, say) { settings = it.link.setArmed(armed) } },
+                onAlias = { alias -> edit(scope, open, say) { settings = it.link.setAlias(alias) } },
                 onMicrophone = { on ->
-                    edit(scope, open) { settings = it.link.setMicrophone(on) }
+                    edit(scope, open, say) { settings = it.link.setMicrophone(on) }
                 },
                 onRecordingMode = { mode ->
-                    edit(scope, open) { settings = it.link.setRecordingMode(mode) }
+                    edit(scope, open, say) { settings = it.link.setRecordingMode(mode) }
                 },
                 projectedDays = projectedDays,
                 autoSpotlightSupported = capabilities?.spotlight ?: true,
                 autoSpotlight = settings?.autoSpotlight ?: false,
                 onAutoSpotlight = { on ->
-                    edit(scope, open) { settings = it.link.setAutoSpotlight(on) }
+                    edit(scope, open, say) { settings = it.link.setAutoSpotlight(on) }
                 },
                 reminderEnabled = settings?.detectionReminder?.enabled ?: false,
                 onDetectionReminder = { on ->
-                    edit(scope, open) { settings = it.link.setDetectionReminder(on, 60) }
+                    edit(scope, open, say) { settings = it.link.setDetectionReminder(on, 60) }
                 },
                 soundDetectionEnabled = settings?.soundDetection?.enabled ?: false,
                 onSoundDetection = { on ->
-                    edit(scope, open) { settings = it.link.setSoundDetection(on) }
+                    edit(scope, open, say) { settings = it.link.setSoundDetection(on) }
                 },
                 soundClasses = settings?.soundRecognition?.classesList?.toSet() ?: emptySet(),
                 onSoundClass = { soundClass, on ->
-                    edit(scope, open) {
+                    edit(scope, open, say) {
                         val next = (settings?.soundRecognition?.classesList ?: emptyList()).toMutableSet()
                         if (on) next.add(soundClass) else next.remove(soundClass)
                         settings = it.link.setSoundRecognition(next.toList())
                     }
                 },
                 onDetectionMode = { person, vehicle, pet, packages ->
-                    edit(scope, open) {
+                    edit(scope, open, say) {
                         settings = it.link.setDetectionMode(person, vehicle, pet, packages)
                     }
                 },
@@ -339,7 +359,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     if (on && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         askToNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
-                    edit(scope, open) {
+                    edit(scope, open, say) {
                         it.link.registerAlerts(
                             alertPublicKey = alertKeys.publicKeySpki,
                             topic = alertKeys.topic(context),
@@ -366,11 +386,19 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
 private fun edit(
     scope: kotlinx.coroutines.CoroutineScope,
     session: ViewerSession?,
+    say: (String) -> Unit,
     block: suspend (ViewerSession) -> Unit,
 ) {
-    val open = session ?: return
-    scope.launch { runCatching { block(open) }.onFailure { Log.w(TAG, "camera setting change failed", it) } }
+    val open = session ?: return say("Not connected to the camera. Nothing was changed.")
+    scope.launch {
+        runCatching { block(open) }.onFailure {
+            Log.w(TAG, "camera request failed", it)
+            say("The camera did not answer. Nothing was changed.")
+        }
+    }
 }
+
+private const val TOAST_MS = 2_800L
 
 /**
  * Off the home network the remote address is the only way to the camera, and the Settings

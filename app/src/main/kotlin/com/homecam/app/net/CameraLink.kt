@@ -194,6 +194,11 @@ class CameraLink(private val peer: RpcPeer) {
         )
     ).deleted
 
+    /** A still of what the camera sees now; the camera logs it as an access. */
+    suspend fun snapshot(): com.homecam.proto.Snapshot = com.homecam.proto.Snapshot.parseFrom(
+        peer.request(RpcMessage.Service.SESSION, Controls.Session.SNAPSHOT)
+    )
+
     /** Streams a clip into [destination]. Chunked because a clip does not fit one frame. */
     suspend fun downloadClip(id: String, destination: File) {
         destination.parentFile?.mkdirs()

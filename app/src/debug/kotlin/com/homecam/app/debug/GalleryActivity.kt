@@ -76,8 +76,8 @@ private const val NOW = 1_790_917_200_000L
 private const val MINUTE = 60_000L
 
 private val cameras = listOf(
-    CameraEntity("Y1TM-4JVY-9K8F", ByteArray(0), "Living room", "192.168.0.18", 8443, "100.64.0.9", 0, NOW - 90 * MINUTE, System.currentTimeMillis() - 2 * MINUTE),
-    CameraEntity("Q7RD-2MXA-HH3C", ByteArray(0), "Garage", "192.168.0.31", 8443, "", 0, NOW - 9000 * MINUTE, System.currentTimeMillis() - 3 * 24 * 60 * MINUTE),
+    CameraEntity("Y1TM-4JVY-9K8F", ByteArray(0), "Living room", "192.168.0.18", 8443, "100.64.0.9", 0, NOW - 90 * MINUTE, System.currentTimeMillis() - 2 * MINUTE, lastArmed = 1, lastRecordingMode = "Continuous"),
+    CameraEntity("Q7RD-2MXA-HH3C", ByteArray(0), "Garage", "192.168.0.31", 8443, "", 0, NOW - 9000 * MINUTE, System.currentTimeMillis() - 3 * 24 * 60 * MINUTE, lastArmed = 0, lastRecordingMode = "Detection"),
 )
 
 private val settings = SettingsSnapshot.newBuilder()

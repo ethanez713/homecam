@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -418,7 +419,10 @@ fun Sheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
             )
         },
     ) {
-        Column(Modifier.fillMaxWidth().padding(start = Gutter, end = Gutter, bottom = 20.dp), content = content)
+        Column(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(start = Gutter, end = Gutter, bottom = 20.dp),
+            content = content,
+        )
     }
 }
 
@@ -541,4 +545,21 @@ fun FullScreen() {
         controller?.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
         onDispose { controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars()) }
     }
+}
+
+/** One line, no title, on the raised surface of the page it belongs to. It clears itself. */
+@Composable
+fun Toast(message: String, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(EthanRadius.control)
+    Text(
+        message,
+        style = Ethan.type.bodySmall,
+        color = Ethan.colors.textHeading,
+        modifier = modifier
+            .padding(12.dp)
+            .clip(shape)
+            .background(Ethan.colors.surfaceRaised)
+            .border(1.dp, Ethan.colors.borderDefault, shape)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+    )
 }

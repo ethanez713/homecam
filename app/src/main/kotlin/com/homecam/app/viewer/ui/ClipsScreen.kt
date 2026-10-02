@@ -102,6 +102,8 @@ fun ClipsScreen(
     pinnedNearCeiling: Boolean = false,
     /** Leaves the camera; drawn only in landscape, where the shell's own bar is not. */
     onBack: () -> Unit = {},
+    /** Where to put the playhead on opening, as an alert about that moment does. */
+    openAtMs: Long? = null,
 ) {
     if (clips == null) {
         EmptyState("Loading clips", busy = true)
@@ -113,7 +115,9 @@ fun ClipsScreen(
     }
 
     val timeline = remember(clips) { Timeline(clips) }
-    var playheadMs by remember { mutableLongStateOf(timeline.clips.last().startedAtMs) }
+    var playheadMs by remember(openAtMs) {
+        mutableLongStateOf(openAtMs?.let(timeline::clamp) ?: timeline.clips.last().startedAtMs)
+    }
     var msPerDp by remember { mutableFloatStateOf(DEFAULT_MS_PER_DP) }
     var wantPlaying by remember { mutableStateOf(false) }
     var scrubbing by remember { mutableStateOf(false) }

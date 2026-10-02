@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.homecam.app.ui.kit.Toast
 import androidx.compose.ui.unit.dp
 import com.homecam.app.R
 import com.homecam.app.ui.kit.Badge
@@ -38,6 +40,7 @@ fun CameraShell(
     onBack: () -> Unit,
     tabsEnabled: Boolean = true,
     chrome: Boolean = true,
+    toast: String? = null,
     content: @Composable () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
@@ -49,7 +52,10 @@ fun CameraShell(
                 }
             }
         }
-        Box(Modifier.weight(1f)) { content() }
+        Box(Modifier.weight(1f)) {
+            content()
+            if (toast != null) Toast(toast, Modifier.align(Alignment.BottomStart))
+        }
         if (chrome && tabsEnabled) BottomTabs(tabs, tab, onTab)
     }
 }
