@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
  * The camera's alert fan-out. §2.7 wants a push to every paired viewer when a session
  * starts — the point being that if a device you don't recognise starts watching, your
  * phone buzzes. The viewer that started it is left out (D14). Detection alerts go to all,
- * once per appearance.
+ * once per visit.
  */
 class Alerts(private val graph: AppGraph) {
 

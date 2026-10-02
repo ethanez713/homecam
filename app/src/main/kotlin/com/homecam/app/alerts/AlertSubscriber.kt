@@ -119,7 +119,8 @@ class AlertSubscriber : LifecycleService() {
     private fun describe(labels: List<String>): String = when {
         labels.isEmpty() -> "Something happened"
         labels.first() == SESSION_LABEL -> labels.getOrNull(1)?.let { "$it started watching" } ?: "Someone started watching"
-        else -> "Detected: ${labels.joinToString(", ")}"
+        else -> "Detected: " + labels.groupingBy { it }.eachCount().entries
+            .joinToString(", ") { (label, count) -> if (count > 1) "$label ×$count" else label }
     }
 
     /**
