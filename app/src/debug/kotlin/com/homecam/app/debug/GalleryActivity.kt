@@ -166,7 +166,7 @@ private fun controls(siren: Boolean = false) = LiveControls(
 @Composable
 private fun Shell(tab: CameraTab, armed: Boolean = true, content: @Composable () -> Unit) {
     var current by remember { mutableStateOf(tab) }
-    CameraShell("Living room", "Y1TM-4JVY-9K8F", armed, current, { current = it }, {}, content = content)
+    CameraShell("Living room", "Connected · home network", armed, current, { current = it }, {}, content = content)
 }
 
 @Composable
@@ -233,7 +233,7 @@ private fun Settings(snapshot: SettingsSnapshot, remote: String) {
         soundDetectionEnabled = snapshot.soundDetection.enabled, onSoundDetection = {},
         soundClasses = snapshot.soundRecognition.classesList.toSet(), onSoundClass = { _, _ -> },
         alertsEnabled = true, onAlerts = {}, remoteAddress = remote, onRemoteAddress = {}, onDevices = {},
-        verificationPhrase = "amber-otter-seven",
+        verificationPhrase = "amber-otter-seven", fingerprint = "Y1TM-4JVY-9K8F",
     )
 }
 

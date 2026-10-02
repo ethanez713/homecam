@@ -175,7 +175,12 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
 
     CameraShell(
         alias = settings?.alias ?: camera.alias,
-        fingerprint = camera.fingerprint,
+        status = when (val now = state) {
+            is LiveState.Locating -> "Finding the camera"
+            is LiveState.Connecting -> "Connecting"
+            is LiveState.Connected -> "Connected · ${now.via.lowercase()}"
+            is LiveState.Failed -> "Not connected"
+        },
         armed = settings?.armed,
         tab = tab,
         onTab = { tab = it },
@@ -335,6 +340,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 onRemoteAddress = saveRemoteAddress,
                 onDevices = { showingDevices = true },
                 verificationPhrase = (state as? LiveState.Connected)?.phrase.orEmpty(),
+                fingerprint = camera.fingerprint,
             )
 
             CameraTab.LOG -> {

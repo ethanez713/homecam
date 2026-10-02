@@ -31,7 +31,8 @@ private val tabs = listOf(
 @Composable
 fun CameraShell(
     alias: String,
-    fingerprint: String,
+    /** Where the connection stands, in a few words. */
+    status: String,
     armed: Boolean?,
     tab: CameraTab,
     onTab: (CameraTab) -> Unit,
@@ -42,7 +43,7 @@ fun CameraShell(
 ) {
     Column(Modifier.fillMaxSize()) {
         if (chrome) {
-            TopBar(alias, onBack = onBack, subtitle = fingerprint) {
+            TopBar(alias, onBack = onBack, subtitle = status, subtitleIsData = false) {
                 if (armed != null) {
                     Badge(if (armed) "Armed" else "Disarmed", if (armed) Tone.SUCCESS else Tone.WARNING, dot = true)
                     Spacer(Modifier.width(8.dp))

@@ -66,6 +66,7 @@ fun CameraSettingsScreen(
     onRemoteAddress: (String) -> Unit,
     onDevices: () -> Unit,
     verificationPhrase: String = "",
+    fingerprint: String = "",
 ) {
     if (settings == null) {
         EmptyState("Reading the camera's settings", busy = true)
@@ -143,6 +144,10 @@ fun CameraSettingsScreen(
             }
             Rule()
             ListRow("Paired devices", meta = "Who can see this camera, and revoke", onClick = onDevices) { Chevron() }
+            if (fingerprint.isNotBlank()) {
+                Rule()
+                ListRow("Fingerprint", meta = fingerprint, metaMono = true)
+            }
             if (verificationPhrase.isNotBlank()) {
                 Rule()
                 ListRow("Verification phrase", meta = verificationPhrase, metaMono = true)
