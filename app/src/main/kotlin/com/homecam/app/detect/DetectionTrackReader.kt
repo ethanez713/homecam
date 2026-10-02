@@ -18,8 +18,12 @@ object DetectionTrackReader {
     private const val METADATA_MIME = "application/x-homecam-detections"
     private const val MAX_SAMPLE_BYTES = 64 * 1024
 
-    /** Keyed by presentation time in milliseconds from the start of the clip. */
-    fun read(file: File): Map<Long, DetectionFrame> {
+    /**
+     * Keyed by milliseconds from [clipStartedAtMs], taken from each frame's own wall-clock
+     * time. The track's sample times cannot place it: the fragmented muxer writes no
+     * decode-time base, so they count from the track's first sample, not from the clip's.
+     */
+    fun read(file: File, clipStartedAtMs: Long): Map<Long, DetectionFrame> {
         val extractor = MediaExtractor()
         return try {
             extractor.setDataSource(file.absolutePath)
@@ -36,7 +40,7 @@ object DetectionTrackReader {
                     if (size <= 0) break
                     val bytes = ByteArray(size).also { buffer.position(0); buffer.get(it) }
                     runCatching { DetectionFrame.parseFrom(bytes) }
-                        .onSuccess { put(extractor.sampleTime / 1000, it) }
+                        .onSuccess { put(it.atMs - clipStartedAtMs, it) }
                     if (!extractor.advance()) break
                 }
             }

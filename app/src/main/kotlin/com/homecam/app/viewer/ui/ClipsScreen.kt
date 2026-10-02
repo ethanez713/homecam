@@ -281,6 +281,7 @@ private fun Picture(state: PlaybackState, modifier: Modifier) {
             state.unplayable -> Text("This clip cannot be played on this phone.", style = Ethan.type.body, color = Color.White)
             state.file != null -> ClipVideo(
                 file = state.file,
+                clipStartedAtMs = clip.startedAtMs,
                 playing = state.playing,
                 seek = state.seek,
                 showBoxes = state.showBoxes,

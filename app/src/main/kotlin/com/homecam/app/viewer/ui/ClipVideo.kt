@@ -49,6 +49,7 @@ data class Seek(val token: Int, val positionMs: Long)
 @Composable
 fun ClipVideo(
     file: File,
+    clipStartedAtMs: Long,
     playing: Boolean,
     seek: Seek?,
     showBoxes: Boolean,
@@ -68,7 +69,7 @@ fun ClipVideo(
     // Straight from the file: the clip carries its own boxes, so playback needs neither a
     // sidecar nor the camera to be reachable.
     val frames by produceState(emptyMap<Long, DetectionFrame>(), file) {
-        value = withContext(Dispatchers.IO) { DetectionTrackReader.read(file) }
+        value = withContext(Dispatchers.IO) { DetectionTrackReader.read(file, clipStartedAtMs) }
     }
 
     DisposableEffect(Unit) { onDispose { holder.release() } }
