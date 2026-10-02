@@ -65,7 +65,18 @@ class DetectionPipeline(
             return
         }
 
-        val i420 = frame.buffer.toI420() ?: return
+        // Scaled on the GPU before the readback: the detector's input is a few hundred
+        // pixels wide, and reading back 1080p five times a second is most of this app's CPU.
+        val scale = ANALYSIS_LONG_EDGE.toFloat() / maxOf(frame.buffer.width, frame.buffer.height)
+        val small = if (scale < 1f) {
+            frame.buffer.cropAndScale(
+                0, 0, frame.buffer.width, frame.buffer.height,
+                (frame.buffer.width * scale).toInt() / 2 * 2, (frame.buffer.height * scale).toInt() / 2 * 2,
+            )
+        } else {
+            frame.buffer.also { it.retain() }
+        }
+        val i420 = small.toI420().also { small.release() } ?: return
         try {
             val grid = lumaGrid(i420)
             averageLuma = grid.average().toFloat()
@@ -75,7 +86,7 @@ class DetectionPipeline(
             val previousDetectAtMs = lastDetectAtMs
             lastDetectAtMs = now
 
-            val bitmap = toBitmap(i420)
+            val bitmap = upright(toBitmap(i420), frame.rotation)
             val detections = synchronized(inference) {
                 if (closed) null else detector?.detect(bitmap).orEmpty()
             } ?: run { bitmap.recycle(); return }
@@ -151,6 +162,14 @@ class DetectionPipeline(
         return grid
     }
 
+    /** A camera on its side shows the detector sideways people, which it does not recognise. */
+    private fun upright(bitmap: Bitmap, rotation: Int): Bitmap {
+        if (rotation % 360 == 0) return bitmap
+        val turn = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, turn, true)
+            .also { if (it !== bitmap) bitmap.recycle() }
+    }
+
     private fun toBitmap(buffer: VideoFrame.I420Buffer): Bitmap {
         val width = buffer.width
         val height = buffer.height
@@ -201,6 +220,7 @@ class DetectionPipeline(
         const val GRID = 16
         const val CELL_SAMPLE_STEP = 4
         const val GRID_INTERVAL_MS = 200L
+        const val ANALYSIS_LONG_EDGE = 640
         const val DETECT_INTERVAL_MS = 400L
         const val JPEG_QUALITY = 80
     }

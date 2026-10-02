@@ -121,6 +121,8 @@ class ContinuousCapture(
 
     fun setTorch(on: Boolean) = capturer?.setTorch(on)
 
+    fun setPowerSaving(saving: Boolean) = capturer?.setPowerSaving(saving)
+
     fun setZoom(ratio: Float) = capturer?.setZoom(ratio)
 
     fun setLens(facing: Lens.Facing) = capturer?.setLensFacing(facing == Lens.Facing.FRONT)

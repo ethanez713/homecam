@@ -172,6 +172,10 @@ class Recorder(
 
     val recording: Boolean get() = recorder.recording
 
+    /** A detection's tail or a manual clip is running — as opposed to an idle continuous segment. */
+    val eventInProgress: Boolean
+        get() = System.currentTimeMillis().let { it < detectionUntilMs || it < manualUntilMs }
+
     /**
      * Why DETECTION is the default rather than CONTINUOUS: recording on detection keeps the
      * retention budget spent on the minutes something happened, instead of filling it with

@@ -1,8 +1,16 @@
 package com.homecam.app.media
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureRequest
+import android.util.Range
 import android.util.Size
 import android.view.Surface
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.CameraState
@@ -40,6 +48,7 @@ class CameraXVideoCapturer(
 
     private var lensFacing = initialLensFacing
     private var format = Triple(1920, 1080, 30)
+    @Volatile private var powerSaving = false
 
     private var helper: SurfaceTextureHelper? = null
     private var observer: CapturerObserver? = null
@@ -86,6 +95,7 @@ class CameraXVideoCapturer(
             provider = cameraProvider
 
             val useCase = Preview.Builder()
+                .also(::leaveOutWhatAFixedCameraDoesNotNeed)
                 .setResolutionSelector(
                     ResolutionSelector.Builder()
                         // CameraX defaults to 4:3; the texture it fills is sized 16:9, so a
@@ -132,7 +142,50 @@ class CameraXVideoCapturer(
             )
             camera = bound
             watchCameraState(bound)
+            applyFrameRate(bound)
         }, main)
+    }
+
+    /**
+     * The HAL's face detection, stabilisation and high-quality noise reduction keep a CPU
+     * core busy around the clock on the S20U. Nothing here uses face metadata, the phone
+     * does not move, and the encoder discards most of what the slow filters preserve.
+     */
+    @SuppressLint("UnsafeOptInUsageError")
+    private fun leaveOutWhatAFixedCameraDoesNotNeed(builder: Preview.Builder) {
+        Camera2Interop.Extender(builder)
+            .setCaptureRequestOption(
+                CaptureRequest.STATISTICS_FACE_DETECT_MODE, CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF,
+            )
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
+            )
+            .setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
+            .setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+    }
+
+    /**
+     * Half rate while nothing is happening and nobody is watching: the sensor, the HAL and
+     * both encoders all scale with frames delivered.
+     */
+    fun setPowerSaving(saving: Boolean) {
+        if (saving == powerSaving) return
+        powerSaving = saving
+        ContextCompat.getMainExecutor(context).execute { camera?.let(::applyFrameRate) }
+    }
+
+    @SuppressLint("UnsafeOptInUsageError")
+    private fun applyFrameRate(bound: Camera) {
+        val supported = Camera2CameraInfo.from(bound.cameraInfo)
+            .getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+            .orEmpty()
+        val fixed = { fps: Int -> supported.firstOrNull { it.lower == fps && it.upper == fps } }
+        val range = (if (powerSaving) fixed(POWER_SAVING_FPS) else null) ?: fixed(format.third) ?: return
+        Camera2CameraControl.from(bound.cameraControl).setCaptureRequestOptions(
+            CaptureRequestOptions.Builder()
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range)
+                .build()
+        )
     }
 
     private fun watchCameraState(bound: Camera) {
@@ -196,6 +249,8 @@ class CameraXVideoCapturer(
     override fun isScreencast(): Boolean = false
 
     companion object {
+        private const val POWER_SAVING_FPS = 15
+
         fun errorName(code: Int): String = when (code) {
             CameraState.ERROR_MAX_CAMERAS_IN_USE -> "MAX_CAMERAS_IN_USE"
             CameraState.ERROR_CAMERA_IN_USE -> "CAMERA_IN_USE"
