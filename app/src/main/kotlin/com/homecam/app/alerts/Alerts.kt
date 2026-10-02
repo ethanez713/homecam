@@ -16,8 +16,8 @@ class Alerts(private val graph: AppGraph) {
     fun onSessionStarted(viewerLabel: String, viewerFingerprint: String) {
         send(sessionAlert = true) {
             base()
-                .addLabels("session")
-                .setCameraAlias("${graph.settings.current.alias} — $viewerLabel ($viewerFingerprint)")
+                .addLabels(AlertSubscriber.SESSION_LABEL)
+                .addLabels("$viewerLabel ($viewerFingerprint)")
                 .build()
         }
     }

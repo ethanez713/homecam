@@ -107,9 +107,15 @@ class AlertSubscriber : LifecycleService() {
         val payload = runCatching { AlertPayload.parseFrom(opened) }.getOrNull() ?: return
         notify(
             title = payload.cameraAlias.ifBlank { "homecam" },
-            body = payload.labelsList.joinToString(", ").ifBlank { "Something happened" },
+            body = describe(payload.labelsList),
             thumbnail = payload.thumbnailJpeg.takeIf { !it.isEmpty }?.toByteArray(),
         )
+    }
+
+    private fun describe(labels: List<String>): String = when {
+        labels.isEmpty() -> "Something happened"
+        labels.first() == SESSION_LABEL -> labels.getOrNull(1)?.let { "$it started watching" } ?: "Someone started watching"
+        else -> "Detected: ${labels.joinToString(", ")}"
     }
 
     /**
@@ -177,6 +183,7 @@ class AlertSubscriber : LifecycleService() {
 
     companion object {
         private const val TAG = "AlertSubscriber"
+        const val SESSION_LABEL = "session"
         private const val ALERT_CHANNEL = "homecam.alerts"
         private const val STATUS_CHANNEL = "homecam.alerts.status"
         private const val NOTIFICATION_ID = 2
