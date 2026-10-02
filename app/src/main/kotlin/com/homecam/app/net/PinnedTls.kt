@@ -39,7 +39,7 @@ object PinnedTls {
             override fun getCertificateChain(alias: String?): Array<X509Certificate> = chain
             override fun getPrivateKey(alias: String?): PrivateKey = identity.privateKeyHandle()
         }
-        return SSLContext.getInstance("TLSv1.2").apply {
+        return newContext().apply {
             init(arrayOf(keyManager), arrayOf(acceptAnyClientCertificate()), SecureRandom())
         }
     }
@@ -71,7 +71,7 @@ object PinnedTls {
 
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
         }
-        return SSLContext.getInstance("TLSv1.2").apply {
+        return newContext().apply {
             init(null, arrayOf<TrustManager>(trustManager), SecureRandom())
         }
     }
@@ -87,6 +87,14 @@ object PinnedTls {
             throw CertificateException("this context is never a client")
         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
     }
+
+    /**
+     * TLS 1.3 where the platform has it (Android 10+), which encrypts the certificate and is
+     * AEAD-only, and 1.2 where it does not. Both stay behind the same key pin; the
+     * context never enables anything older than 1.2.
+     */
+    private fun newContext(): SSLContext =
+        runCatching { SSLContext.getInstance("TLSv1.3") }.getOrElse { SSLContext.getInstance("TLSv1.2") }
 
     private const val ALIAS = "homecam"
 }

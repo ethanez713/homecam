@@ -40,7 +40,14 @@ class PinnedTlsHandshakeTest {
         assertThrows(SSLHandshakeException::class.java) { handshake(stranger) {} }
     }
 
-    private fun handshake(pin: ByteArray, onServed: (X509Certificate) -> Unit) {
+    @Test
+    fun theHandshakeNegotiatesTls13WhereThePlatformHasItAndNeverAnythingOlderThanTls12() {
+        val protocol = handshake(identity.identity.spki) {}
+        val expected = if (android.os.Build.VERSION.SDK_INT >= 29) "TLSv1.3" else "TLSv1.2"
+        org.junit.Assert.assertEquals(expected, protocol)
+    }
+
+    private fun handshake(pin: ByteArray, onServed: (X509Certificate) -> Unit): String {
         val loopback = InetAddress.getLoopbackAddress()
         val server = PinnedTls.serverContext(identity).serverSocketFactory
             .createServerSocket(0, 1, loopback) as SSLServerSocket
@@ -51,8 +58,9 @@ class PinnedTlsHandshakeTest {
             }
             val client = PinnedTls.clientContext(pin, onServed).socketFactory
                 .createSocket(loopback, server.localPort) as SSLSocket
-            client.use { it.startHandshake() }
+            val negotiated = client.use { it.startHandshake(); it.session.protocol }
             accepted.get(10, TimeUnit.SECONDS)
+            return negotiated
         } finally {
             server.close()
             pool.shutdownNow()
