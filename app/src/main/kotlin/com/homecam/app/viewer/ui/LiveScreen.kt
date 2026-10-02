@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,6 +56,7 @@ data class LiveControls(
     val onTorch: (Boolean) -> Unit,
     val onMic: (Boolean) -> Unit,
     val onZoom: (Float) -> Unit,
+    val onRotate: () -> Unit = {},
     // Hidden when the camera's capabilities say it has no flash / no speaker (Phase 2).
     val torchAvailable: Boolean = true,
     val pushToTalkAvailable: Boolean = true,
@@ -128,6 +130,9 @@ private fun LiveVideo(state: LiveState.Connected, controls: LiveControls?, onBac
                     modifier = Modifier.fillMaxWidth(0.8f),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    IconButton(onClick = it.onRotate) {
+                        Icon(Icons.Filled.RotateRight, contentDescription = "Rotate", tint = Color.White)
+                    }
                     if (it.torchAvailable) {
                         IconButton(onClick = { it.onTorch(!it.torchOn) }) {
                             Icon(

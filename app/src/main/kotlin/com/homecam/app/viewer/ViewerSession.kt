@@ -98,6 +98,21 @@ class ViewerSession(
         )
     }
 
+    /**
+     * Turns the camera's picture a quarter-turn clockwise, for a phone propped on its side.
+     * The camera applies it at capture, so recordings and detection turn with the live view.
+     */
+    suspend fun rotateQuarterTurn() {
+        val status = com.homecam.proto.SessionStatus.parseFrom(
+            client.rpc.request(RpcMessage.Service.STATUS, Controls.Status.SESSION, com.google.protobuf.ByteString.EMPTY)
+        )
+        client.rpc.request(
+            RpcMessage.Service.SESSION, Controls.Session.ORIENTATION,
+            com.homecam.proto.Orientation.newBuilder()
+                .setDegrees((status.orientationDegrees + 90) % 360).build().toByteString(),
+        )
+    }
+
     suspend fun setZoom(ratio: Float) {
         client.rpc.request(
             RpcMessage.Service.SESSION, Controls.Session.ZOOM,

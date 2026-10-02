@@ -95,6 +95,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         startForegroundWithNotification(idleNotification())
 
         capture = ContinuousCapture(this, this).also {
+            it.setOrientation(capturePrefs().getInt(KEY_ORIENTATION, 0))
             it.start(mask = graph.settings.current.privacyMask)
         }
         recorder = Recorder(graph, capture, ClipStore(this, graph.database.clips())).also {
@@ -108,6 +109,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             settings = { graph.settings.current },
             onEvent = { detections, thumbnailJpeg ->
                 recorder.onDetection(detections, System.currentTimeMillis())
+                capture.setPowerSaving(false)
                 if (detections.isNotEmpty()) {
                     alerts.onDetection(detections.map { it.category }, clipId = "", thumbnailJpeg = thumbnailJpeg)
                     maybeAutoSpotlight()
@@ -258,6 +260,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             while (true) {
                 kotlinx.coroutines.delay(ROLLOVER_TICK_MS)
                 recorder.tick()
+                capture.setPowerSaving(live == null && !recorder.eventInProgress)
                 statusFromPipeline()
                 maintainResponses()
                 // Blindness is fifteen seconds without a frame, so the rollover tick
@@ -487,6 +490,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             },
         )
         live = LiveSession(peer, media)
+        capture.setPowerSaving(false)
         audioDetection.setLive(true)
         media.start()
         showLive(peer.label)
@@ -550,7 +554,13 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     override fun setLens(facing: com.homecam.proto.Lens.Facing) = capture.setLens(facing) ?: Unit
 
-    override fun setOrientation(degrees: Int) = capture.setOrientation(degrees)
+    override fun setOrientation(degrees: Int) {
+        capture.setOrientation(degrees)
+        // A camera propped on its side stays on its side across a restart.
+        capturePrefs().edit().putInt(KEY_ORIENTATION, capture.orientationDegrees).apply()
+    }
+
+    private fun capturePrefs() = getSharedPreferences("homecam.capture", MODE_PRIVATE)
 
     override suspend fun snapshot(): com.homecam.proto.Snapshot {
         val jpeg = capture.snapshotJpeg()
@@ -691,6 +701,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         private const val NOTIFICATION_ID = 1
         private const val REMINDER_NOTIFICATION_ID = 2
         private const val PAUSED_NOTIFICATION_ID = 4
+        private const val KEY_ORIENTATION = "orientation_degrees"
         private const val PAUSED_CHANNEL_ID = "homecam.camera.paused"
         private const val AUTO_SPOTLIGHT_MS = 20_000L
         private const val SHUTDOWN_GRACE_MS = 1_000

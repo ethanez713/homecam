@@ -172,6 +172,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                         onTorch = { on -> torch = on; scope.launch { it.setTorch(on) } },
                         onMic = { on -> mic = on; scope.launch { it.setPushToTalk(on) } },
                         onZoom = { value -> zoom = value; scope.launch { it.setZoom(value) } },
+                        onRotate = { edit(scope, it) { session -> session.rotateQuarterTurn() } },
                         torchAvailable = gates?.torch ?: true,
                         pushToTalkAvailable = gates?.pushToTalk ?: true,
                         sirenAvailable = gates?.siren ?: false,
