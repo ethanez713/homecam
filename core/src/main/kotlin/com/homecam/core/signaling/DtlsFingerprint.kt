@@ -1,16 +1,11 @@
 package com.homecam.core.signaling
 
 /**
- * §2.5, the step that is easy to skip and expensive to get wrong.
- *
- * WebRTC's media encryption is keyed by DTLS, and the fingerprint of the certificate that
- * keys it travels in the SDP. Authenticating the signaling channel therefore only proves
- * who you negotiated *with* — it says nothing about who ends up on the other end of the
- * media. An attacker who can inject SDP still gets the video, over a perfectly
- * authenticated WebSocket.
- *
- * So the fingerprint parsed out of a received SDP must equal the one the authenticated
- * peer committed to over the pinned channel. Mismatch means tear the session down.
+ * §2.5: WebRTC's media encryption is keyed by DTLS, and the fingerprint of the certificate
+ * that keys it travels in the SDP. An SDP is accepted only from a peer that has completed
+ * the mutual handshake over the pinned channel, so the fingerprint it carries is the
+ * authenticated peer's; a session whose SDP carries no usable fingerprint, a weak hash, or
+ * a different fingerprint from an earlier SDP is torn down (D16).
  */
 object DtlsFingerprint {
 
@@ -56,13 +51,9 @@ object DtlsFingerprint {
 
 /**
  * Holds the DTLS identity a session is pinned to. The first SDP a peer sends establishes
- * it; every SDP after that must agree.
- *
- * The re-offer case is the one worth spelling out. Renegotiation happens for ordinary
- * reasons — an added audio track, an ICE restart — and each one carries a fresh SDP. If
- * only the first were checked, a session could be handed a new DTLS identity halfway
- * through and carry on streaming to somebody else. So the commitment outlives the offer
- * that created it.
+ * it; every SDP after that must agree, because renegotiation (an added track, an ICE
+ * restart) carries a fresh SDP and a session must not be handed a new DTLS identity halfway
+ * through.
  */
 class DtlsCommitment {
 
@@ -72,8 +63,8 @@ class DtlsCommitment {
         private set
 
     /**
-     * [declared] is what the peer said over the authenticated channel; [sdp] is what it
-     * actually sent. They must agree with each other and with anything committed earlier.
+     * [declared] is the fingerprint the same message names; it must agree with [sdp] and with
+     * anything committed earlier. Blank means the peer did not declare one.
      */
     fun check(sdp: String, declared: String): Result {
         val parsed = DtlsFingerprint.parse(sdp) ?: return Result.MISSING

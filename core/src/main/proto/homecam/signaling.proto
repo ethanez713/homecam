@@ -68,9 +68,10 @@ message Presence {
 
 message Sdp {
   string sdp = 1;
-  // The DTLS fingerprint the sender commits to over this authenticated channel.
-  // The fingerprint parsed out of `sdp` must equal this or the session is torn
-  // down — authenticating signaling alone does not protect the media path (§2.5).
+  // The DTLS fingerprint the sender says `sdp` carries. It travels in the same message, so
+  // it is a consistency check on that message and not an independent commitment; the media
+  // path is protected because an SDP is only accepted from an authenticated peer and the
+  // fingerprint cannot change mid-session (D16).
   string dtls_fingerprint = 2;
   string session_id = 3;
 }

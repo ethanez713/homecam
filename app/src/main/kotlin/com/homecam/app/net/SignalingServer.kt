@@ -95,12 +95,6 @@ class SignalingServer(
             private set
         val authenticated: Boolean get() = viewer != null
 
-        /**
-         * The DTLS fingerprint this peer committed to over the authenticated channel.
-         * §2.5 — the media path is only as safe as this check.
-         */
-        var committedDtlsFingerprint: String? = null
-
         val openedAtMs: Long = System.currentTimeMillis()
 
         /**

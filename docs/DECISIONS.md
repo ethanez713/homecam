@@ -303,3 +303,13 @@ log (`health_state`, `recording_cap`) and not the audit chain. The pause saves l
 than it sounds: one encoder runs in every mode (D6), so a pause stops the muxer and the
 flash writes, not the encode. Whether that is enough is measured at GATE-H; if it is not,
 the next lever is a lower capture tier.
+
+## D16 — The DTLS check is a consistency check, and the guarantee is the channel
+
+`Sdp.dtls_fingerprint` travels in the same message as the `sdp` it describes, so comparing
+the two does not make an independent commitment. What protects the media path is that an
+SDP is accepted only over the pinned, mutually authenticated signaling channel (D3), and
+that `DtlsCommitment` refuses a fingerprint that differs from the one an earlier SDP of the
+same session established. A real independent commitment would declare the fingerprint in
+the signed handshake before any SDP; it was not built because nothing reachable without
+authentication can inject an SDP, and it would change the handshake transcript.
