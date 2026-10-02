@@ -273,3 +273,10 @@ screen. Without it, or when the window brings no frames within fifteen seconds, 
 service posts a "Camera paused — tap to resume" notification, whose tap opens the same
 window. Either way the loss is logged (`camera_blind` / `camera_recovered`) and said on the
 camera phone; it is never silent.
+
+## D14 — A session alert skips the viewer that opened the session
+
+§2.7 sends a push to every paired viewer when a session starts. The viewer that started it
+learns nothing from being told so, and an alert on every open trains its owner to ignore
+the one that matters: a session they did not start. Every other paired viewer is still
+told, and the session is in the audit log either way.
