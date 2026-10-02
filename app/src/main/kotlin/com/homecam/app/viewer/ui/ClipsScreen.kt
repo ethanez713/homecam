@@ -82,7 +82,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Everything the camera has recorded, as one recording you move through: a picture, a
- * ruler of time under it with what was detected marked on it, and the same footage as a
+ * ruler of time under it with what was detected marked on it, and the detections as a
  * list below for finding a thing by what it was rather than when.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -392,9 +392,10 @@ private fun ClipList(
     var selected by remember { mutableStateOf(setOf<String>()) }
     var expanded by remember { mutableStateOf(setOf<Long>()) }
 
+    val listed = remember(clips) { ClipFilter.listed(clips) }
     val labels = remember(clips) { clips.flatMap { it.labelsList }.groupingBy { it }.eachCount().toSortedMap() }
     val pinnedCount = remember(clips) { clips.count { it.pinned } }
-    val shown = clips
+    val shown = listed
         .let { if (activeLabel != null) ClipFilter.withLabel(it, activeLabel!!) else it }
         .let { if (pinnedOnly) it.filter { clip -> clip.pinned } else it }
     val runs = remember(shown) { ClipRuns.group(shown) }
@@ -432,8 +433,10 @@ private fun ClipList(
             }
         }
 
-        if (runs.isEmpty()) {
-            EmptyState("No clips match.", detail = "Clear the filter to see everything.", modifier = Modifier.height(160.dp))
+        if (listed.isEmpty()) {
+            EmptyState("Nothing detected yet.", detail = "Scrub the timeline to see everything recorded.", modifier = Modifier.height(160.dp))
+        } else if (runs.isEmpty()) {
+            EmptyState("No clips match.", detail = "Clear the filter to see every detection.", modifier = Modifier.height(160.dp))
         }
         LazyColumn(Modifier.weight(1f)) {
             runs.groupBy { dayOf(it.startedAtMs) }.forEach { (day, runsThatDay) ->
