@@ -18,6 +18,9 @@ object WebRtc {
 
     @Volatile private var factory: PeerConnectionFactory? = null
 
+    /** Receives what WebRTC's recorder captures, on its audio thread, while a session runs. */
+    @Volatile var capturedAudio: ((JavaAudioDeviceModule.AudioSamples) -> Unit)? = null
+
     fun factory(context: Context): PeerConnectionFactory = factory ?: synchronized(this) {
         factory ?: build(context.applicationContext).also { factory = it }
     }
@@ -31,6 +34,7 @@ object WebRtc {
         val audio = JavaAudioDeviceModule.builder(context)
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(true)
+            .setSamplesReadyCallback { capturedAudio?.invoke(it) }
             .createAudioDeviceModule()
 
         return PeerConnectionFactory.builder()

@@ -2,10 +2,12 @@ package com.homecam.app.detect
 
 import android.content.Context
 import com.homecam.core.detect.DetectionPolicy
+import com.homecam.core.sound.PcmWindower
 import com.homecam.core.sound.SoundGate
 import com.homecam.proto.SettingsSnapshot
 import java.time.Instant
 import java.time.ZoneId
+import org.webrtc.audio.JavaAudioDeviceModule
 
 /**
  * The audio counterpart to [DetectionPipeline] (Phase 6). It listens only while the mic
@@ -32,23 +34,45 @@ class AudioDetectionPipeline(
 
     val classifierAvailable: Boolean get() = classifier != null
 
-    /** Whether the microphone tap is actually running — the privacy check for GATE-E. */
-    val listening: Boolean get() = tap.running
+    /** Whether a microphone path is actually feeding detection — the privacy check for GATE-E. */
+    val listening: Boolean get() = tap.running || (live && shouldListen(settings()))
 
     private val tap = AudioTap(windowSamples) { waveform, levelDb, nowMs ->
         onWindow(waveform, levelDb, nowMs)
     }
 
+    // While a viewer is live, WebRTC's VOICE_COMMUNICATION recorder holds the microphone and
+    // Android silences the tap, so detection listens to WebRTC's own capture instead.
+    @Volatile private var live = false
+    private val liveWindower = PcmWindower(windowSamples) { waveform, levelDb ->
+        onWindow(waveform, levelDb, System.currentTimeMillis())
+    }
+
     /** Starts or stops the microphone tap to match the current settings. Call on any change. */
     fun sync() {
-        val snapshot = settings()
-        val shouldListen = snapshot.microphone && snapshot.soundDetection.enabled
-        if (shouldListen && !tap.running) tap.start()
-        else if (!shouldListen && tap.running) {
-            tap.stop()
-            gate.reset()
-        }
+        val shouldListen = shouldListen(settings())
+        val tapWanted = shouldListen && !live
+        if (tapWanted && !tap.running) tap.start()
+        else if (!tapWanted && tap.running) tap.stop()
+        if (!shouldListen) gate.reset()
     }
+
+    /** Switches between the tap and WebRTC's capture as a session starts and ends. */
+    fun setLive(active: Boolean) {
+        live = active
+        liveWindower.reset()
+        sync()
+    }
+
+    /** Called on WebRTC's audio thread with whatever its recorder captured. */
+    fun onLiveSamples(samples: JavaAudioDeviceModule.AudioSamples) {
+        if (!live || !shouldListen(settings())) return
+        if (samples.audioFormat != android.media.AudioFormat.ENCODING_PCM_16BIT) return
+        liveWindower.push(samples.data, samples.data.size, samples.sampleRate, samples.channelCount)
+    }
+
+    private fun shouldListen(snapshot: SettingsSnapshot) =
+        snapshot.microphone && snapshot.soundDetection.enabled
 
     /** The tap thread may be mid-classification; see [DetectionPipeline.close]. */
     fun close() {

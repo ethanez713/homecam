@@ -26,6 +26,7 @@ import com.homecam.app.detect.DetectionPipeline
 import com.homecam.app.media.CameraMediaSession
 import com.homecam.app.media.CameraXVideoCapturer
 import com.homecam.app.media.ContinuousCapture
+import com.homecam.app.media.WebRtc
 import com.homecam.core.media.CaptureWatchdog
 import com.homecam.core.rpc.Controls
 import com.homecam.proto.AuditEvent
@@ -131,6 +132,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 graph.diagnostics.soundEvent(category, levelDb)
             },
         ).also { it.sync() }
+        WebRtc.capturedAudio = { audioDetection.onLiveSamples(it) }
         ClipPruneWorker.schedule(this)
         observeArming()
         observeRecordingMode()
@@ -166,6 +168,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
         mdns?.stop()
         siren.stop()
+        WebRtc.capturedAudio = null
         audioDetection.close()
         capture.removeSink(detection)
         capture.stop()
@@ -484,6 +487,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             },
         )
         live = LiveSession(peer, media)
+        audioDetection.setLive(true)
         media.start()
         showLive(peer.label)
         alerts.onSessionStarted(peer.label, viewerFingerprint)
@@ -655,6 +659,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val ending = live ?: return
         live = null
         ending.media.close()
+        audioDetection.setLive(false)
         showLive(null)
         if (reason == Bye.Reason.FINGERPRINT_MISMATCH) {
             // §2.5 says this one is not just a teardown: it is an event the owner is
