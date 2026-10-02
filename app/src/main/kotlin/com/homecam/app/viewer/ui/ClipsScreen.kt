@@ -14,7 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -63,9 +69,15 @@ import com.homecam.app.ui.formatBytes
 import com.homecam.app.ui.formatDuration
 import com.homecam.app.ui.formatStamp
 import com.homecam.core.media.ClipFilter
+import com.homecam.core.media.ClipRun
+import com.homecam.core.media.ClipRuns
 import com.homecam.proto.Clip
 import com.homecam.proto.TimelineCount
 import java.io.File
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun ClipsScreen(
@@ -148,43 +160,164 @@ fun ClipsScreen(
             Spacer(Modifier.height(8.dp))
         }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(shown, key = { it.id }) { clip ->
-                Card(Modifier.fillMaxWidth()) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        loadThumbnail?.let {
-                            ClipThumbnail(clip.id, it)
-                            Spacer(Modifier.width(12.dp))
+        var expanded by remember { mutableStateOf(setOf<Long>()) }
+        val runs = remember(shown) { ClipRuns.group(shown) }
+        val actions = ClipActions(onPlay, onPin, onExport, onDelete)
+
+        LazyColumn {
+            runs.groupBy { dayOf(it.startedAtMs) }.forEach { (day, runsThatDay) ->
+                stickyHeader(key = "day-$day") { DayHeader(day) }
+                runsThatDay.forEach { run ->
+                    if (run.clips.size == 1) {
+                        item(key = run.clips.single().id) {
+                            ClipRow(run.clips.single(), downloadingId, loadThumbnail, actions)
                         }
-                        Column(Modifier.weight(1f)) {
-                            Text(formatStamp(clip.startedAtMs), style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "${formatDuration(clip.durationMs.toLong())} · " +
-                                    "${formatBytes(clip.sizeBytes)} · ${clip.width}×${clip.height}" +
-                                    clip.labelsList.joinToString("") { label -> " · $label" },
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                    } else {
+                        val open = run.startedAtMs in expanded
+                        item(key = "run-${run.startedAtMs}") {
+                            RunRow(run, open, loadThumbnail) {
+                                expanded = if (open) expanded - run.startedAtMs else expanded + run.startedAtMs
+                            }
                         }
-                        IconButton(onClick = { onPin(clip) }) {
-                            Icon(
-                                Icons.Filled.PushPin,
-                                contentDescription = if (clip.pinned) "Unpin" else "Pin",
-                                tint = if (clip.pinned) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                        if (open) {
+                            items(run.clips, key = { it.id }) { clip ->
+                                ClipRow(clip, downloadingId, loadThumbnail, actions, indented = true)
+                            }
                         }
-                        if (downloadingId == clip.id) {
-                            CircularProgressIndicator(Modifier.height(24.dp))
-                        } else {
-                            TextButton(onClick = { onPlay(clip) }) { Text("Play") }
-                        }
-                        TextButton(onClick = { onExport(clip) }) { Text("Save") }
-                        TextButton(onClick = { onDelete(clip) }) { Text("Delete") }
                     }
                 }
+            }
+        }
+    }
+}
+
+private class ClipActions(
+    val play: (Clip) -> Unit,
+    val pin: (Clip) -> Unit,
+    val export: (Clip) -> Unit,
+    val delete: (Clip) -> Unit,
+)
+
+private fun dayOf(atMs: Long): LocalDate = Instant.ofEpochMilli(atMs).atZone(ZoneId.systemDefault()).toLocalDate()
+
+private val clock = DateTimeFormatter.ofPattern("HH:mm")
+private val dayName = DateTimeFormatter.ofPattern("EEE d MMM")
+
+private fun clockOf(atMs: Long): String = clock.format(Instant.ofEpochMilli(atMs).atZone(ZoneId.systemDefault()))
+
+@Composable
+private fun DayHeader(day: LocalDate) {
+    val today = LocalDate.now()
+    Text(
+        when (day) {
+            today -> "Today"
+            today.minusDays(1) -> "Yesterday"
+            else -> dayName.format(day)
+        },
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(vertical = 6.dp),
+    )
+}
+
+/** A stretch of back-to-back clips, shown as one line until it is opened. */
+@Composable
+private fun RunRow(
+    run: ClipRun,
+    open: Boolean,
+    loadThumbnail: (suspend (String) -> ByteArray?)?,
+    onToggle: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        loadThumbnail?.let {
+            ClipThumbnail(run.clips.first().id, it)
+            Spacer(Modifier.width(12.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                "${clockOf(run.startedAtMs)} – ${clockOf(run.endedAtMs)}" + run.labels.joinToString("") { " · $it" },
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${formatDuration(run.endedAtMs - run.startedAtMs)} · ${run.clips.size} clips · ${formatBytes(run.sizeBytes)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        if (run.pinned) {
+            Icon(Icons.Filled.PushPin, contentDescription = "Has pinned clips", tint = MaterialTheme.colorScheme.primary)
+        }
+        Icon(
+            if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            contentDescription = if (open) "Collapse" else "Expand",
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+    }
+}
+
+/** Tapping the row plays it; everything else is behind the pin and the menu. */
+@Composable
+private fun ClipRow(
+    clip: Clip,
+    downloadingId: String?,
+    loadThumbnail: (suspend (String) -> ByteArray?)?,
+    actions: ClipActions,
+    indented: Boolean = false,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { actions.play(clip) }
+            .padding(start = if (indented) 24.dp else 0.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        loadThumbnail?.let {
+            ClipThumbnail(clip.id, it)
+            Spacer(Modifier.width(12.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                clockOf(clip.startedAtMs) + clip.labelsList.joinToString("") { " · $it" },
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${formatDuration(clip.durationMs.toLong())} · ${formatBytes(clip.sizeBytes)} · ${minOf(clip.width, clip.height)}p",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        if (downloadingId == clip.id) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
+        IconButton(onClick = { actions.pin(clip) }) {
+            Icon(
+                Icons.Filled.PushPin,
+                contentDescription = if (clip.pinned) "Unpin" else "Pin",
+                tint = if (clip.pinned) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            )
+        }
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "More")
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(text = { Text("Play") }, onClick = { menuOpen = false; actions.play(clip) })
+                DropdownMenuItem(text = { Text("Save to gallery") }, onClick = { menuOpen = false; actions.export(clip) })
+                DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; actions.delete(clip) })
             }
         }
     }
@@ -232,7 +365,7 @@ private fun ClipThumbnail(clipId: String, load: suspend (String) -> ByteArray?) 
     }
     Box(
         Modifier
-            .size(width = 72.dp, height = 48.dp)
+            .size(width = 64.dp, height = 40.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
