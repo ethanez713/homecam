@@ -101,6 +101,13 @@ class ClipRecorder(
 
     var onClipWritten: ((Written) -> Unit)? = null
 
+    /**
+     * Asked when a clip reaches [Config.maxClipMs]: the id of the segment that continues
+     * it, or null to stop. The switch happens on a keyframe inside the encoder's own
+     * thread, so consecutive segments share no frame and lose none.
+     */
+    var nextSegmentId: (() -> String?)? = null
+
     val recording: Boolean get() = synchronized(lock) { muxer != null }
 
     val currentClipId: String? get() = synchronized(lock) { currentId }
@@ -179,30 +186,7 @@ class ClipRecorder(
     fun beginClip(id: String, nowMs: Long) {
         synchronized(lock) {
             if (muxer != null) return
-            val format = formatForMuxer ?: run {
-                Log.w(TAG, "no encoded format yet; clip $id skipped")
-                return
-            }
-            val file = File(clipsDir, "$id.mp4")
-            file.parentFile?.mkdirs()
-
-            val stream = FileOutputStream(file)
-            val output = FragmentedMp4Muxer.Builder(stream.channel)
-                // A fragment that does not start on a keyframe is not independently
-                // decodable, so there is nothing to gain from a boundary between IDRs.
-                .setFragmentDurationMs(config.keyframeIntervalSeconds * 1000L)
-                // Every sample handed over is a freshly allocated array that nothing
-                // writes to again, so the muxer's defensive copy is pure cost.
-                .setSampleCopyingEnabled(false)
-                .build()
-            videoTrackIndex = output.addTrack(MediaFormatUtil.createFormatFromMediaFormat(format))
-            metadataTrackIndex = addMetadataTrack(output)
-
-            muxer = output
-            muxerOutput = stream
-            currentClip = file
-            currentId = id
-            firstSampleUs = -1
+            val output = openLocked(id) ?: return
 
             // A clip that starts on a mid-GOP frame is undecodable until the next
             // keyframe, so the pre-roll is trimmed to begin at one.
@@ -212,6 +196,43 @@ class ClipRecorder(
             } ?: 0L)
             fromKeyframe.forEach { writeSample(output, it) }
             preRoll.clear()
+            if (fromKeyframe.isEmpty()) requestKeyframeLocked()
+        }
+    }
+
+    private fun openLocked(id: String): FragmentedMp4Muxer? {
+        val format = formatForMuxer ?: run {
+            Log.w(TAG, "no encoded format yet; clip $id skipped")
+            return null
+        }
+        val file = File(clipsDir, "$id.mp4")
+        file.parentFile?.mkdirs()
+
+        val stream = FileOutputStream(file)
+        val output = FragmentedMp4Muxer.Builder(stream.channel)
+            // A fragment that does not start on a keyframe is not independently
+            // decodable, so there is nothing to gain from a boundary between IDRs.
+            .setFragmentDurationMs(config.keyframeIntervalSeconds * 1000L)
+            // Every sample handed over is a freshly allocated array that nothing
+            // writes to again, so the muxer's defensive copy is pure cost.
+            .setSampleCopyingEnabled(false)
+            .build()
+        videoTrackIndex = output.addTrack(MediaFormatUtil.createFormatFromMediaFormat(format))
+        metadataTrackIndex = addMetadataTrack(output)
+
+        muxer = output
+        muxerOutput = stream
+        currentClip = file
+        currentId = id
+        firstSampleUs = -1
+        return output
+    }
+
+    private fun requestKeyframeLocked() {
+        runCatching {
+            encoder?.setParameters(
+                android.os.Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) },
+            )
         }
     }
 
@@ -317,9 +338,19 @@ class ClipRecorder(
 
         val output = muxer
         if (output != null) {
-            writeSample(output, sample)
-            if (lastSampleUs - firstSampleUs > config.maxClipMs * 1000) endClipLocked()
-            return
+            val full = firstSampleUs >= 0 &&
+                sample.presentationTimeUs - firstSampleUs > config.maxClipMs * 1000
+            if (!(full && sample.keyframe)) {
+                writeSample(output, sample)
+                return
+            }
+            endClipLocked()
+            val next = nextSegmentId?.invoke()?.let { openLocked(it) }
+            if (next != null) {
+                clipStartedAtMs = System.currentTimeMillis()
+                writeSample(next, sample)
+                return
+            }
         }
         preRoll.addLast(sample)
         while (preRoll.size > 1 &&
@@ -331,6 +362,8 @@ class ClipRecorder(
     }
 
     private fun writeSample(output: FragmentedMp4Muxer, sample: Sample) {
+        // The muxer cannot open a fragment on anything but a keyframe.
+        if (firstSampleUs < 0 && !sample.keyframe) return
         if (firstSampleUs < 0) firstSampleUs = sample.presentationTimeUs
         lastSampleUs = sample.presentationTimeUs
         val info = MediaCodec.BufferInfo().apply {

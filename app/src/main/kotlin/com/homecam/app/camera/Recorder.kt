@@ -43,6 +43,7 @@ class Recorder(
     private val labelsInClip = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     init {
+        recorder.nextSegmentId = { if (shouldKeepRecording()) UUID.randomUUID().toString() else null }
         recorder.onClipWritten = { written ->
             val labels = labelsInClip.toList()
             labelsInClip.clear()

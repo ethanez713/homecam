@@ -122,13 +122,16 @@ class ClipStore(context: Context, private val dao: ClipDao) {
 
     /**
      * A file with no row is invisible to retention and would grow the library forever —
-     * the normal way to get one is a clip whose muxer was killed mid-write.
+     * the normal way to get one is a clip whose muxer was killed mid-write. The clip being
+     * written right now has no row either, and deleting it leaves the recorder writing two
+     * minutes into an unlinked file; its modification time is what tells the two apart.
      */
     private suspend fun removeOrphanFiles() {
         val known = HashSet<String>()
         dao.all().forEach { known += it.path; known += thumbnailFile(File(it.path)).absolutePath }
+        val abandonedBefore = System.currentTimeMillis() - ORPHAN_GRACE_MS
         directory.listFiles()?.forEach { file ->
-            if (file.absolutePath !in known) file.delete()
+            if (file.absolutePath !in known && file.lastModified() < abandonedBefore) file.delete()
         }
     }
 
@@ -153,6 +156,8 @@ class ClipStore(context: Context, private val dao: ClipDao) {
         const val TAG = "ClipStore"
         const val THUMBNAIL_WIDTH = 320
         const val THUMBNAIL_QUALITY = 75
+        // Longer than any clip stays open: a segment is two minutes, a manual clip five.
+        const val ORPHAN_GRACE_MS = 15 * 60_000L
     }
 }
 
