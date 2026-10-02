@@ -280,3 +280,26 @@ camera phone; it is never silent.
 learns nothing from being told so, and an alert on every open trains its owner to ignore
 the one that matters: a session they did not start. Every other paired viewer is still
 told, and the session is in the audit log either way.
+
+## D15 — Protection caps the recording mode; it never rewrites it
+
+The `recording_mode` setting is the user's request and only the user changes it: from a
+viewer or the camera's own screen (both audited), or by a timed revert the camera enforces
+itself. `HealthPolicy` (`:core` `health/`) turns heat, charge and storage into a cap, and
+the recorder applies `effective = min(requested, cap)` through `RecordingGate`. When the
+cap lifts the requested mode resumes on the next tick, because a camera that paused itself
+at 3 a.m. must not wait for someone to notice and re-enable it.
+
+`NO_CONTINUOUS` degrades `CONTINUOUS` to `DETECTION`, not `OFF`: a camera that stops
+recording when it is heated can be blinded with a hair dryer, one that falls back to event
+recording and says so cannot. `NO_RECORDING` (critical heat, storage below half its floor)
+keeps nothing and refuses a manual clip with the cause; alerts still fire. A level rises at
+once and falls only after ten minutes lower, so a reading at a threshold makes one
+transition. Turning thermal or battery auto-pause off removes only the `PAUSE` rung;
+`CRITICAL` always caps, because past it the risk is the battery, not the footage.
+
+Auto-pause is the camera protecting itself, not an access, so it is in the diagnostics
+log (`health_state`, `recording_cap`) and not the audit chain. The pause saves less heat
+than it sounds: one encoder runs in every mode (D6), so a pause stops the muxer and the
+flash writes, not the encode. Whether that is enough is measured at GATE-H; if it is not,
+the next lever is a lower capture tier.
