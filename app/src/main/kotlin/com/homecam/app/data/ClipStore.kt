@@ -133,13 +133,41 @@ class ClipStore(
      * the normal way to get one is a clip whose muxer was killed mid-write. The clip being
      * written right now has no row either, and deleting it leaves the recorder writing two
      * minutes into an unlinked file; its modification time is what tells the two apart.
+     * A fragmented file cut off by a kill still plays up to its last fragment, so one that
+     * does is indexed rather than thrown away.
      */
     private suspend fun removeOrphanFiles() {
         val known = HashSet<String>()
         dao.all().forEach { known += it.path; known += thumbnailFile(File(it.path)).absolutePath }
         val abandonedBefore = System.currentTimeMillis() - ORPHAN_GRACE_MS
         directory.listFiles()?.forEach { file ->
-            if (file.absolutePath !in known && file.lastModified() < abandonedBefore) file.delete()
+            if (file.absolutePath in known || file.lastModified() >= abandonedBefore) return@forEach
+            val adopted = file.name.endsWith(".mp4") && adoptIfPlayable(file) != null
+            if (!adopted) file.delete()
+        }
+    }
+
+    /** Indexes a clip file the recorder never closed, if it holds video; null when it does not. */
+    suspend fun adoptIfPlayable(file: File): ClipEntity? {
+        val durationMs = playableDurationMs(file) ?: return null
+        val entity = index(
+            ClipRecorder.Written(file.nameWithoutExtension, file, file.lastModified() - durationMs, durationMs),
+        )
+        Log.w(TAG, "indexed ${file.name} left by an unclean stop: ${durationMs}ms")
+        return entity
+    }
+
+    private fun playableDurationMs(file: File): Int? {
+        if (file.length() == 0L) return null
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toIntOrNull()?.takeIf { it > 0 }
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
         }
     }
 
