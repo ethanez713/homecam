@@ -1,17 +1,20 @@
 package com.homecam.app.alerts
 
 import com.homecam.app.AppGraph
+import com.homecam.core.detect.AlertThrottle
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.launch
 
 /**
  * The camera's alert fan-out. §2.7 wants a push to every paired viewer when a session
  * starts — the point being that if a device you don't recognise starts watching, your
- * phone buzzes. The viewer that started it is left out (D14). Detection alerts go to all.
+ * phone buzzes. The viewer that started it is left out (D14). Detection alerts go to all,
+ * once per appearance.
  */
 class Alerts(private val graph: AppGraph) {
 
     private val publisher = AlertPublisher()
+    private val detectionThrottle = AlertThrottle()
 
     fun onSessionStarted(viewerLabel: String, viewerFingerprint: String) {
         send(sessionAlert = true, except = viewerFingerprint) {
@@ -23,6 +26,7 @@ class Alerts(private val graph: AppGraph) {
     }
 
     fun onDetection(labels: List<String>, clipId: String, thumbnailJpeg: ByteArray?) {
+        if (!detectionThrottle.shouldAlert(labels, System.currentTimeMillis())) return
         send(sessionAlert = false) {
             base()
                 .addAllLabels(labels)
