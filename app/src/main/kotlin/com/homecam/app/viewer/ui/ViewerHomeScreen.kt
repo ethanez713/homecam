@@ -23,8 +23,9 @@ import androidx.compose.ui.unit.dp
 import com.homecam.app.R
 import com.homecam.app.data.CameraEntity
 import com.homecam.app.ui.formatAgo
+import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.Chevron
-import com.homecam.app.ui.kit.ConfirmSheet
+import com.homecam.app.ui.kit.Tone
 import com.homecam.app.ui.kit.EmptyState
 import com.homecam.app.ui.kit.Eyebrow
 import com.homecam.app.ui.kit.Gutter
@@ -46,8 +47,9 @@ fun ViewerHomeScreen(
     onLog: () -> Unit,
     onNetwork: () -> Unit,
     onSwitchRole: () -> Unit = {},
+    starred: String? = null,
+    onStar: (String) -> Unit = {},
 ) {
-    var forgetting by remember { mutableStateOf<CameraEntity?>(null) }
 
     Column(Modifier.fillMaxSize()) {
         TopBar("Cameras") {
@@ -65,7 +67,9 @@ fun ViewerHomeScreen(
             } else {
                 Spacer(Modifier.height(12.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    cameras.forEach { camera -> CameraCard(camera, { onOpen(camera) }, { forgetting = camera }) }
+                    cameras.forEach { camera ->
+                        CameraCard(camera, camera.fingerprint == starred, cameras.size > 1, { onOpen(camera) }, { onStar(camera.fingerprint) })
+                    }
                 }
             }
 
@@ -83,26 +87,22 @@ fun ViewerHomeScreen(
             Spacer(Modifier.height(24.dp))
         }
     }
-
-    forgetting?.let { camera ->
-        ConfirmSheet(
-            title = "Forget ${camera.alias}?",
-            body = "This phone stops trusting the camera. To watch it again, pair from the camera's screen.",
-            confirm = "Forget",
-            onConfirm = { onForget(camera.fingerprint) },
-            onDismiss = { forgetting = null },
-        )
-    }
 }
 
 @Composable
-private fun CameraCard(camera: CameraEntity, onOpen: () -> Unit, onForget: () -> Unit) {
+private fun CameraCard(camera: CameraEntity, starred: Boolean, canStar: Boolean, onOpen: () -> Unit, onStar: () -> Unit) {
     PaperCard(padding = 0.dp, onClick = onOpen) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             LucideIcon(R.drawable.lucide_cctv, null, size = 22.dp, tint = Ethan.colors.textAccent)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(camera.alias, style = Ethan.type.title2, color = Ethan.colors.textHeading, maxLines = 1)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(camera.alias, style = Ethan.type.title2, color = Ethan.colors.textHeading, maxLines = 1)
+                    if (starred) {
+                        Spacer(Modifier.width(8.dp))
+                        Badge("Opens first", Tone.ACCENT)
+                    }
+                }
                 Text(camera.fingerprint, style = Ethan.type.monoSmall, color = Ethan.colors.textMuted, maxLines = 1)
                 Text(
                     "Seen ${formatAgo(camera.lastSeenMs)} · " +
@@ -112,7 +112,15 @@ private fun CameraCard(camera: CameraEntity, onOpen: () -> Unit, onForget: () ->
                     maxLines = 1,
                 )
             }
-            IconAction(R.drawable.lucide_trash_2, "Forget ${camera.alias}", tint = Ethan.colors.textFaint, onClick = onForget)
+            // With one camera there is nothing to choose between, so no star is drawn.
+            if (canStar) {
+                IconAction(
+                    R.drawable.lucide_star,
+                    if (starred) "Opens when the app starts" else "Open this camera when the app starts",
+                    tint = if (starred) Ethan.colors.accent else Ethan.colors.borderStrong,
+                    onClick = onStar,
+                )
+            }
             Chevron()
             Spacer(Modifier.width(10.dp))
         }

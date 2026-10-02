@@ -43,6 +43,17 @@ fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
 
     var screen by remember { mutableStateOf<ViewerScreen>(ViewerScreen.Home) }
     val cameras by node.paired.collectAsState()
+    val prefs = remember { context.getSharedPreferences("homecam.viewer", android.content.Context.MODE_PRIVATE) }
+    var starred by remember { mutableStateOf(prefs.getString(KEY_STARRED, null)) }
+
+    // The app opens on a camera, not on a list of one: the starred camera, or the only one.
+    var openedOnLaunch by remember { mutableStateOf(false) }
+    LaunchedEffect(cameras) {
+        if (openedOnLaunch || cameras.isEmpty()) return@LaunchedEffect
+        openedOnLaunch = true
+        val first = cameras.firstOrNull { it.fingerprint == starred } ?: cameras.singleOrNull()
+        if (first != null && screen == ViewerScreen.Home) screen = ViewerScreen.Live(first)
+    }
 
     BackHandler(enabled = screen != ViewerScreen.Home && screen !is ViewerScreen.Live) { screen = ViewerScreen.Home }
 
@@ -55,6 +66,11 @@ fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
             onLog = { screen = ViewerScreen.Log },
             onNetwork = { screen = ViewerScreen.Network },
             onSwitchRole = onSwitchRole,
+            starred = starred,
+            onStar = { fingerprint ->
+                starred = fingerprint.takeIf { it != starred }
+                prefs.edit().putString(KEY_STARRED, starred).apply()
+            },
         )
 
         ViewerScreen.Scan -> ScanScreen(onBack = { screen = ViewerScreen.Home }) { invite -> screen = ViewerScreen.Pairing(invite) }
@@ -109,6 +125,8 @@ fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
         }
     }
 }
+
+private const val KEY_STARRED = "starred_camera"
 
 internal fun describeBye(reason: com.homecam.proto.Bye.Reason, detail: String): String = when (reason) {
     com.homecam.proto.Bye.Reason.FINGERPRINT_MISMATCH ->

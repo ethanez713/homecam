@@ -15,18 +15,17 @@ import com.homecam.app.ui.kit.TabItem
 import com.homecam.app.ui.kit.Tone
 import com.homecam.app.ui.kit.TopBar
 
-enum class CameraTab { LIVE, CLIPS, LOG, SETTINGS }
+enum class CameraTab { LIVE, CLIPS, SETTINGS }
 
 private val tabs = listOf(
     TabItem(CameraTab.LIVE, "Live", R.drawable.lucide_video),
     TabItem(CameraTab.CLIPS, "Clips", R.drawable.lucide_film),
-    TabItem(CameraTab.LOG, "Log", R.drawable.lucide_scroll_text),
     TabItem(CameraTab.SETTINGS, "Settings", R.drawable.lucide_settings),
 )
 
 /**
- * The frame around one camera: its name and whether it is armed above, the four places to
- * go below. [chrome] is off while a clip plays, which takes the whole screen.
+ * The frame around one camera: its name and whether it is armed above, the three places to
+ * go below. [chrome] is off when the picture has the whole screen, as it does in landscape.
  */
 @Composable
 fun CameraShell(

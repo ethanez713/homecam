@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import com.homecam.app.ui.RecordingModeControl
 import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.Chevron
+import com.homecam.app.ui.kit.ConfirmSheet
+import com.homecam.app.ui.kit.DangerButton
 import com.homecam.app.ui.kit.EmptyState
 import com.homecam.app.ui.kit.Eyebrow
 import com.homecam.app.ui.kit.Gutter
@@ -65,6 +67,8 @@ fun CameraSettingsScreen(
     remoteAddress: String,
     onRemoteAddress: (String) -> Unit,
     onDevices: () -> Unit,
+    onLog: () -> Unit = {},
+    onForget: () -> Unit = {},
     verificationPhrase: String = "",
     fingerprint: String = "",
 ) {
@@ -74,6 +78,7 @@ fun CameraSettingsScreen(
     }
 
     var editing by remember { mutableStateOf<Field?>(null) }
+    var forgetting by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Gutter)) {
         Eyebrow("Watching")
@@ -144,6 +149,8 @@ fun CameraSettingsScreen(
             }
             Rule()
             ListRow("Paired devices", meta = "Who can see this camera, and revoke", onClick = onDevices) { Chevron() }
+            Rule()
+            ListRow("Access log", meta = "Every connection, with a tamper check", onClick = onLog) { Chevron() }
             if (fingerprint.isNotBlank()) {
                 Rule()
                 ListRow("Fingerprint", meta = fingerprint, metaMono = true)
@@ -153,7 +160,19 @@ fun CameraSettingsScreen(
                 ListRow("Verification phrase", meta = verificationPhrase, metaMono = true)
             }
         }
+        Spacer(Modifier.height(12.dp))
+        DangerButton("Forget this camera", { forgetting = true }, Modifier.fillMaxWidth(), filled = false)
         Spacer(Modifier.height(24.dp))
+    }
+
+    if (forgetting) {
+        ConfirmSheet(
+            title = "Forget ${settings.alias}?",
+            body = "This phone stops trusting the camera. To watch it again, pair from the camera's screen.",
+            confirm = "Forget",
+            onConfirm = onForget,
+            onDismiss = { forgetting = false },
+        )
     }
 
     when (editing) {

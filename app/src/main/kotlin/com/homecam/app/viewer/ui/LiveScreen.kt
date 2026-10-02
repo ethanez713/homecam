@@ -9,7 +9,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.homecam.app.ui.kit.FullScreen
+import com.homecam.app.ui.kit.isLandscape
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -84,6 +89,8 @@ fun LiveScreen(
     onRetry: () -> Unit,
     /** Offered when the connection fails: the address lives on this phone, so it needs no camera. */
     onSetRemoteAddress: (() -> Unit)? = null,
+    /** Leaves the camera; drawn only where the shell's own bar is not, in landscape. */
+    onBack: () -> Unit = {},
     /** Stands in for the video where there is no track to render, as in a preview. */
     videoPlaceholder: (@Composable () -> Unit)? = null,
 ) {
@@ -102,7 +109,7 @@ fun LiveScreen(
         }
 
         is LiveState.Connected ->
-            if (state.video != null || videoPlaceholder != null) LiveVideo(state, controls, videoPlaceholder)
+            if (state.video != null || videoPlaceholder != null) LiveVideo(state, controls, videoPlaceholder, onBack)
             else Waiting(state)
     }
 }
@@ -140,15 +147,38 @@ private fun LiveVideo(
     state: LiveState.Connected,
     controls: LiveControls?,
     videoPlaceholder: (@Composable () -> Unit)?,
+    onBack: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f).fillMaxWidth().background(Color.Black)) {
+    val picture: @Composable (Modifier) -> Unit = { modifier ->
+        Box(modifier.background(Color.Black)) {
             if (state.video != null) VideoSurface(state.video, Modifier.fillMaxSize()) else videoPlaceholder?.invoke()
             Row(Modifier.align(Alignment.TopStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Badge("Live", Tone.ACCENT, dot = true)
                 if (state.via.isNotBlank()) Badge(state.via, Tone.NEUTRAL)
             }
         }
+    }
+
+    if (isLandscape()) {
+        // The camera usually lies on its side, so this is the natural way to watch it: the
+        // picture takes the screen and the keys stand in a rail beside it.
+        FullScreen()
+        Row(Modifier.fillMaxSize()) {
+            picture(Modifier.weight(1f).fillMaxHeight())
+            Column(
+                Modifier.fillMaxHeight().width(76.dp).background(Ethan.colors.bgApp)
+                    .verticalScroll(rememberScrollState()).padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ControlKey(R.drawable.lucide_arrow_left, "Back", Modifier.fillMaxWidth(), onClick = onBack)
+                controls?.let { Keys(it, Modifier.fillMaxWidth()) }
+            }
+        }
+        return
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        picture(Modifier.weight(1f).fillMaxWidth())
         Rule()
         Column(Modifier.fillMaxWidth().background(Ethan.colors.bgApp).padding(horizontal = Gutter, vertical = 10.dp)) {
             state.status?.let {
@@ -172,33 +202,39 @@ private fun CameraStats(status: RuntimeStatus) {
 
 @Composable
 private fun Controls(controls: LiveControls) {
-    var confirmSiren by remember { mutableStateOf(false) }
-
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("ZOOM", style = Ethan.type.micro, color = Ethan.colors.textFaint)
         EthanSlider(controls.zoom, controls.onZoom, Modifier.weight(1f).padding(horizontal = 12.dp))
         Text("%3.0f%%".format(controls.zoom * 100), style = Ethan.type.monoSmall, color = Ethan.colors.textMuted)
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ControlKey(R.drawable.lucide_rotate_cw, "Rotate", Modifier.weight(1f), onClick = controls.onRotate)
-        if (controls.torchAvailable) {
-            ControlKey(
-                if (controls.torchOn) R.drawable.lucide_flashlight else R.drawable.lucide_flashlight_off,
-                "Torch", Modifier.weight(1f), on = controls.torchOn,
-            ) { controls.onTorch(!controls.torchOn) }
-        }
-        if (controls.pushToTalkAvailable) {
-            ControlKey(
-                if (controls.micOn) R.drawable.lucide_mic else R.drawable.lucide_mic_off,
-                "Talk", Modifier.weight(1f), on = controls.micOn,
-            ) { controls.onMic(!controls.micOn) }
-        }
-        if (controls.sirenAvailable) {
-            ControlKey(
-                R.drawable.lucide_siren, if (controls.sirenOn) "Stop siren" else "Siren",
-                Modifier.weight(1f), on = controls.sirenOn, danger = true,
-            ) { if (controls.sirenOn) controls.onSiren(false) else confirmSiren = true }
-        }
+        Keys(controls, Modifier.weight(1f))
+    }
+}
+
+/** The same keys in a row under the picture or a rail beside it; [each] sizes one of them. */
+@Composable
+private fun Keys(controls: LiveControls, each: Modifier) {
+    var confirmSiren by remember { mutableStateOf(false) }
+
+    ControlKey(R.drawable.lucide_rotate_cw, "Rotate", each, onClick = controls.onRotate)
+    if (controls.torchAvailable) {
+        ControlKey(
+            if (controls.torchOn) R.drawable.lucide_flashlight else R.drawable.lucide_flashlight_off,
+            "Torch", each, on = controls.torchOn,
+        ) { controls.onTorch(!controls.torchOn) }
+    }
+    if (controls.pushToTalkAvailable) {
+        ControlKey(
+            if (controls.micOn) R.drawable.lucide_mic else R.drawable.lucide_mic_off,
+            "Talk", each, on = controls.micOn,
+        ) { controls.onMic(!controls.micOn) }
+    }
+    if (controls.sirenAvailable) {
+        ControlKey(
+            R.drawable.lucide_siren, if (controls.sirenOn) "Stop" else "Siren",
+            each, on = controls.sirenOn, danger = true,
+        ) { if (controls.sirenOn) controls.onSiren(false) else confirmSiren = true }
     }
 
     if (confirmSiren) {

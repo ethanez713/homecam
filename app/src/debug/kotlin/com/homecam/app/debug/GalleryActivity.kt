@@ -166,14 +166,17 @@ private fun controls(siren: Boolean = false) = LiveControls(
 @Composable
 private fun Shell(tab: CameraTab, armed: Boolean = true, content: @Composable () -> Unit) {
     var current by remember { mutableStateOf(tab) }
-    CameraShell("Living room", "Connected · home network", armed, current, { current = it }, {}, content = content)
+    CameraShell(
+        "Living room", "Connected · home network", armed, current, { current = it }, {},
+        chrome = !(com.homecam.app.ui.kit.isLandscape() && current != CameraTab.SETTINGS), content = content,
+    )
 }
 
 @Composable
 private fun Screen(name: String) {
     when (name) {
         "role" -> RolePickerScreen {}
-        "viewer_home" -> ViewerHomeScreen(cameras, {}, {}, {}, {}, {})
+        "viewer_home" -> ViewerHomeScreen(cameras, {}, {}, {}, {}, {}, starred = "Y1TM-4JVY-9K8F")
         "viewer_home_empty" -> ViewerHomeScreen(emptyList(), {}, {}, {}, {}, {})
         "live" -> Shell(CameraTab.LIVE) {
             LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Home network"), controls(), {}) { Room() }
@@ -202,7 +205,7 @@ private fun Screen(name: String) {
             null, 14.0, {}, {}, {}, true, {}, playingId = "solo-1",
         )
         "clips_empty" -> Shell(CameraTab.CLIPS) { ClipsScreen(emptyList(), null, null, null, {}, {}, {}, true, {}) }
-        "log" -> Shell(CameraTab.LOG) { AuditScreen(events, AuditChain.Verification(true, 0)) }
+        "log" -> AuditScreen(events, AuditChain.Verification(true, 0), onBack = {})
         "log_broken" -> AuditScreen(events, AuditChain.Verification(false, 37), onBack = {})
         "settings" -> Shell(CameraTab.SETTINGS) { Settings(settings, "100.64.0.9") }
         "settings_disarmed" -> Shell(CameraTab.SETTINGS, armed = false) {

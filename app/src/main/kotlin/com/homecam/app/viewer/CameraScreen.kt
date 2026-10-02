@@ -29,6 +29,7 @@ import com.homecam.app.camera.ui.AuditScreen
 import com.homecam.app.data.CameraEntity
 import com.homecam.app.viewer.ui.CameraSettingsScreen
 import com.homecam.app.viewer.ui.CameraShell
+import com.homecam.app.ui.kit.isLandscape
 import com.homecam.app.viewer.ui.CameraTab
 import com.homecam.app.viewer.ui.ClipsScreen
 import com.homecam.app.viewer.ui.LiveControls
@@ -62,6 +63,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
     var attempt by remember(camera.fingerprint) { mutableIntStateOf(0) }
     var tab by remember(camera.fingerprint) { mutableStateOf(CameraTab.LIVE) }
     var showingDevices by remember(camera.fingerprint) { mutableStateOf(false) }
+    var showingLog by remember(camera.fingerprint) { mutableStateOf(false) }
     var playerOpen by remember(camera.fingerprint) { mutableStateOf(false) }
     var state by remember(camera.fingerprint, attempt) {
         mutableStateOf<LiveState>(LiveState.Locating(camera.alias))
@@ -171,6 +173,20 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         return
     }
 
+    if (showingLog) {
+        BackHandler { showingLog = false }
+        var remote by remember(open) { mutableStateOf<com.homecam.proto.AuditQuery?>(null) }
+        LaunchedEffect(open) {
+            remote = open?.let { runCatching { it.link.audit() }.getOrNull() }
+        }
+        AuditScreen(
+            events = remote?.eventsList.orEmpty(),
+            verification = remote?.let { AuditChain.Verification(it.chainValid, it.firstBrokenSeq) },
+            onBack = { showingLog = false },
+        )
+        return
+    }
+
     BackHandler(enabled = !playerOpen) { if (tab == CameraTab.LIVE) onExit() else tab = CameraTab.LIVE }
 
     CameraShell(
@@ -186,7 +202,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         onTab = { tab = it },
         onBack = onExit,
         tabsEnabled = open != null,
-        chrome = !playerOpen,
+        chrome = !playerOpen && !(isLandscape() && tab == CameraTab.LIVE && (state as? LiveState.Connected)?.video != null),
     ) {
         when (tab) {
             CameraTab.LIVE -> LiveScreen(
@@ -212,6 +228,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 },
                 onRetry = { attempt++ },
                 onSetRemoteAddress = { editingRemote = true },
+                onBack = onExit,
             )
 
             CameraTab.CLIPS -> {
@@ -339,22 +356,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 remoteAddress = remoteAddress,
                 onRemoteAddress = saveRemoteAddress,
                 onDevices = { showingDevices = true },
+                onLog = { showingLog = true },
+                onForget = { scope.launch { node.forget(camera.fingerprint); onExit() } },
                 verificationPhrase = (state as? LiveState.Connected)?.phrase.orEmpty(),
                 fingerprint = camera.fingerprint,
             )
-
-            CameraTab.LOG -> {
-                var remote by remember(open) { mutableStateOf<com.homecam.proto.AuditQuery?>(null) }
-                LaunchedEffect(open) {
-                    remote = open?.let { runCatching { it.link.audit() }.getOrNull() }
-                }
-                AuditScreen(
-                    events = remote?.eventsList.orEmpty(),
-                    verification = remote?.let {
-                        AuditChain.Verification(it.chainValid, it.firstBrokenSeq)
-                    },
-                )
-            }
         }
     }
 }
