@@ -76,6 +76,7 @@ class SignalingClient(
 
     private val authenticated = CompletableDeferred<String>()
     private var closeReason: Bye.Reason = Bye.Reason.UNSPECIFIED
+    private var closeDetail = ""
 
     private val socket = object : WebSocketClient(URI("wss://$host:$port${Signaling.PATH}")) {
         override fun onOpen(handshakedata: ServerHandshake) {
@@ -109,7 +110,7 @@ class SignalingClient(
                 )
             }
             rpcScope.launch { rpc.failAllPending("signaling channel closed") }
-            listener?.onClosed(closeReason, reason.orEmpty())
+            listener?.onClosed(closeReason, closeDetail.ifBlank { reason.orEmpty() })
         }
 
         override fun onError(ex: Exception) {
@@ -151,6 +152,7 @@ class SignalingClient(
             SignalMessage.BodyCase.RPC -> rpcScope.launch { rpc.onMessage(message.rpc) }
             SignalMessage.BodyCase.BYE -> {
                 closeReason = message.bye.reason
+                closeDetail = message.bye.detail
                 socket.close()
             }
             else -> Unit
