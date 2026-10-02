@@ -1,6 +1,10 @@
 package com.homecam.app.viewer
 
+import android.Manifest
+import android.os.Build
 import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.PrimaryTabRow
@@ -78,6 +82,8 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
     var zoom by remember(camera.fingerprint, attempt) { mutableFloatStateOf(0f) }
     val alertKeys = remember { AlertKeys(context) }
     var alertsOn by remember { mutableStateOf(AlertPreferences.enabled(context)) }
+    // Without it Android 13+ drops every alert notification without telling anyone.
+    val askToNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     var remoteAddress by remember(camera.fingerprint) {
         mutableStateOf(
             if (camera.remoteHost.isBlank()) ""
@@ -281,7 +287,9 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 },
                 alertsEnabled = alertsOn,
                 onAlerts = { on ->
-                    alertsOn = on
+                    if (on && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        askToNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
                     edit(scope, open) {
                         it.link.registerAlerts(
                             alertPublicKey = alertKeys.publicKeySpki,
@@ -290,6 +298,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                             enabled = on,
                         )
                         AlertPreferences.setEnabled(context, on)
+                        alertsOn = on
                         if (on) AlertSubscriber.start(context) else AlertSubscriber.stop(context)
                     }
                 },
@@ -342,7 +351,7 @@ private fun edit(
     block: suspend (ViewerSession) -> Unit,
 ) {
     val open = session ?: return
-    scope.launch { runCatching { block(open) } }
+    scope.launch { runCatching { block(open) }.onFailure { Log.w(TAG, "camera setting change failed", it) } }
 }
 
 /**
