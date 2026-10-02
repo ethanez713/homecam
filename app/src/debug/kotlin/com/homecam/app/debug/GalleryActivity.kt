@@ -28,6 +28,7 @@ import com.homecam.app.data.CameraEntity
 import com.homecam.app.data.ViewerEntity
 import com.homecam.app.ui.NetworkActivityScreen
 import com.homecam.app.ui.RolePickerScreen
+import com.homecam.app.ui.formatStamp
 import com.homecam.app.ui.theme.HomecamTheme
 import com.homecam.app.ui.viewerEgress
 import com.homecam.app.viewer.ui.CameraSettingsScreen
@@ -152,9 +153,25 @@ private fun Room() {
     Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
 }
 
-private fun controls(siren: Boolean = false) = LiveControls(
+private val pausedStatus = status.toBuilder()
+    .setCharging(false).setBatteryPercent(62f).setDrainPercentPerHour(9f).setBatteryTempC(45.3f)
+    .setThermalStatus(RuntimeStatus.Thermal.THERMAL_SEVERE)
+    .setCap(RuntimeStatus.Cap.CAP_NO_CONTINUOUS).setCapReason(RuntimeStatus.CapReason.REASON_THERMAL)
+    .setCapSinceMs(System.currentTimeMillis() - 12 * MINUTE)
+    .setRequestedRecordingMode(RecordingMode.CONTINUOUS).setEffectiveRecordingMode(RecordingMode.DETECTION)
+    .setRecordingRevertAtMs(System.currentTimeMillis() + 50 * MINUTE).setRecordingRevertTo(RecordingMode.DETECTION)
+    .build()
+
+private fun controls(siren: Boolean = false, from: RuntimeStatus = status) = LiveControls(
     torchOn = false, micOn = false, zoom = 0.25f, onTorch = {}, onMic = {}, onZoom = {},
     sirenAvailable = true, sirenOn = siren,
+    recording = com.homecam.app.ui.RecordingPanelState(
+        mode = from.requestedRecordingMode.takeIf { from.cap != RuntimeStatus.Cap.CAP_NONE } ?: RecordingMode.DETECTION,
+        readout = com.homecam.core.health.HealthReadout.recording(from, ::formatStamp),
+        projectedDays = 14.0,
+        onChange = { _, _ -> },
+    ),
+    health = com.homecam.core.health.HealthReadout.card(from, null, 30),
 )
 
 @Composable
@@ -174,6 +191,9 @@ private fun Screen(name: String) {
         "viewer_home_empty" -> ViewerHomeScreen(emptyList(), {}, {}, {}, {}, {})
         "live" -> Shell(CameraTab.LIVE) {
             LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Home network"), controls(), {}) { Room() }
+        }
+        "live_paused" -> Shell(CameraTab.LIVE) {
+            LiveScreen(LiveState.Connected("amber-otter-seven", null, pausedStatus, null, "Home network"), controls(from = pausedStatus), {}) { Room() }
         }
         "live_siren" -> Shell(CameraTab.LIVE) {
             LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Remote"), controls(siren = true), {}) { Room() }

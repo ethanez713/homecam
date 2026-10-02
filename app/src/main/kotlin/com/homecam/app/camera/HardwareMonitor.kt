@@ -110,6 +110,11 @@ class HardwareMonitor(
         .setFloorHeld(storage.floorHeld)
         .setThermalThrottled(state.thermal.level >= Level.PAUSE)
         .setHealth(state, graph.settings.current.recordingMode)
+        .apply {
+            val revert = graph.settings.current.recordingRevert
+            setRecordingRevertAtMs(revert.atMs)
+            setRecordingRevertTo(revert.to)
+        }
 
     private class StorageReading(
         val freeBytes: Long,

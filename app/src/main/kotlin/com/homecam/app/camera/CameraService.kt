@@ -31,6 +31,7 @@ import com.homecam.core.health.Axis
 import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.HealthSample
 import com.homecam.core.health.HealthState
+import com.homecam.core.health.RecordingTimer
 import com.homecam.core.media.CaptureWatchdog
 import com.homecam.core.rpc.Controls
 import com.homecam.proto.AuditEvent
@@ -272,6 +273,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 capture.setPowerSaving(live == null && !recorder.eventInProgress)
                 statusFromPipeline()
                 if (ticks % HARDWARE_SAMPLE_EVERY_TICKS == 0) sampleHardware()
+                revertTimedRecording()
                 maintainResponses()
                 // Blindness is fifteen seconds without a frame, so the rollover tick
                 // already wakes often enough to notice it.
@@ -303,6 +305,16 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         if (previous.cap != current.cap || previous.capReason != current.capReason) {
             val requested = graph.settings.current.recordingMode
             graph.diagnostics.recordingCap(current, requested, HealthProtocol.effectiveMode(requested, current.cap))
+        }
+    }
+
+    private suspend fun revertTimedRecording() {
+        val current = graph.settings.current
+        val target = RecordingTimer.dueMode(current.recordingRevert, System.currentTimeMillis()) ?: return
+        graph.diagnostics.recordingReverted(current.recordingMode, target, current.recordingRevert.atMs)
+        graph.settings.update {
+            setRecordingMode(target)
+            clearRecordingRevert()
         }
     }
 

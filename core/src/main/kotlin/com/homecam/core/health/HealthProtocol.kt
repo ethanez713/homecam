@@ -49,6 +49,7 @@ object HealthProtocol {
             .setCapReason(state.capReason.toProto())
             .setCapSinceMs(state.capSinceMs)
             .setDrainPercentPerHour(state.drainPercentPerHour)
+            .setRequestedRecordingMode(requested)
             .setEffectiveRecordingMode(effectiveMode(requested, state.cap))
 
     fun ThermalStatus?.toProto(): RuntimeStatus.Thermal = when (this) {

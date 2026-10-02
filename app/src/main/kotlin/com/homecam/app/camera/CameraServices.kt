@@ -5,6 +5,7 @@ import com.homecam.app.AppGraph
 import com.homecam.app.data.ClipStore
 import com.homecam.app.data.toProto
 import com.homecam.core.health.HealthProtocol
+import com.homecam.core.health.RecordingTimer
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcException
 import com.homecam.core.rpc.RpcPeer
@@ -315,7 +316,9 @@ class CameraServices(
         }
         settingSetter(peer, Controls.Settings.RETENTION) { setRetention(RetentionPolicy.parseFrom(it)) }
         settingSetter(peer, Controls.Settings.RECORDING_MODE) {
-            setRecordingMode(RecordingModeSetting.parseFrom(it).mode)
+            val (mode, revert) = RecordingTimer.applyRequest(RecordingModeSetting.parseFrom(it), System.currentTimeMillis())
+            setRecordingMode(mode)
+            if (revert != null) setRecordingRevert(revert) else clearRecordingRevert()
         }
         settingSetter(peer, Controls.Settings.HARDWARE_PROTECTION) {
             setHardwareProtection(HealthProtocol.protectionOf(HealthProtocol.configOf(

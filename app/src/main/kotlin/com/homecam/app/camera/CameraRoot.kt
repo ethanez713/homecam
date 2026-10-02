@@ -119,7 +119,7 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
             },
             onRecordingMode = { mode ->
                 scope.launch {
-                    graph.settings.update { setRecordingMode(mode) }
+                    graph.settings.update { setRecordingMode(mode); clearRecordingRevert() }
                     graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = "recording ${mode.name.lowercase()}")
                 }
             },

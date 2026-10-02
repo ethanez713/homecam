@@ -67,11 +67,18 @@ class CameraLink(private val peer: RpcPeer) {
         )
     )
 
-    suspend fun setRecordingMode(mode: RecordingMode): SettingsSnapshot = SettingsSnapshot.parseFrom(
+    /** [forMinutes] > 0 makes the mode temporary: the camera itself returns to [revertTo] when it ends. */
+    suspend fun setRecordingMode(
+        mode: RecordingMode,
+        forMinutes: Int = 0,
+        revertTo: RecordingMode = RecordingMode.DETECTION,
+    ): SettingsSnapshot = SettingsSnapshot.parseFrom(
         peer.request(
             RpcMessage.Service.SETTINGS,
             Controls.Settings.RECORDING_MODE,
-            RecordingModeSetting.newBuilder().setMode(mode).build().toByteString(),
+            RecordingModeSetting.newBuilder()
+                .setMode(mode).setRevertAfterMinutes(forMinutes).setRevertTo(revertTo)
+                .build().toByteString(),
         )
     )
 

@@ -43,6 +43,9 @@ import com.homecam.app.viewer.ui.RemoteRosterScreen
 import com.homecam.app.data.toRetentionLimits
 import com.homecam.core.audit.AuditChain
 import com.homecam.core.health.HealthProtocol
+import com.homecam.core.health.HealthReadout
+import com.homecam.app.ui.RecordingPanelState
+import com.homecam.app.ui.formatStamp
 import com.homecam.core.rpc.ControlGating
 import com.homecam.core.retention.ClipRef
 import com.homecam.core.retention.RetentionPlanner
@@ -153,6 +156,18 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
         }
     }
 
+    // The picture of the camera's health is only as good as its last reading, and a pause or a
+    // timed revert can happen while this screen is open.
+    LaunchedEffect(open) {
+        val link = open?.link ?: return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(STATUS_REFRESH_MS)
+            val fresh = runCatching { link.runtimeStatus() }.getOrNull() ?: continue
+            (state as? LiveState.Connected)?.let { state = it.copy(status = fresh) }
+            runCatching { link.settings() }.getOrNull()?.let { settings = it }
+        }
+    }
+
     LaunchedEffect(settings?.armed, settings?.recordingMode) {
         settings?.let { node.rememberState(camera.fingerprint, it.armed, it.recordingMode.name.lowercase().replaceFirstChar { c -> c.uppercase() }) }
     }
@@ -251,6 +266,24 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         sirenAvailable = gates?.siren ?: false,
                         sirenOn = siren,
                         onSiren = { on -> siren = on; scope.launch { it.link.setSiren(on) } },
+                        recording = (state as? LiveState.Connected)?.status?.let { status ->
+                            RecordingPanelState(
+                                mode = status.requestedRecordingMode,
+                                readout = HealthReadout.recording(status, ::formatStamp),
+                                projectedDays = projectedDays,
+                                onChange = { mode, minutes ->
+                                    edit(scope, open, say) {
+                                        settings = it.link.setRecordingMode(mode, minutes)
+                                        runCatching { it.link.runtimeStatus() }.getOrNull()?.let { fresh ->
+                                            (state as? LiveState.Connected)?.let { c -> state = c.copy(status = fresh) }
+                                        }
+                                    }
+                                },
+                            )
+                        },
+                        health = (state as? LiveState.Connected)?.status?.let {
+                            HealthReadout.card(it, capabilities, settings?.let { s -> HealthProtocol.configOf(s).batteryPausePercent } ?: 30)
+                        }.orEmpty(),
                     )
                 },
                 onRetry = { attempt++ },
@@ -429,6 +462,7 @@ private fun edit(
 }
 
 private const val TOAST_MS = 2_800L
+private const val STATUS_REFRESH_MS = 20_000L
 
 /**
  * Off the home network the remote address is the only way to the camera, and the Settings

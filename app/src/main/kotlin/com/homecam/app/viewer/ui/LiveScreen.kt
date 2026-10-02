@@ -32,7 +32,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.homecam.app.R
+import com.homecam.app.ui.RecordingPanel
+import com.homecam.app.ui.RecordingPanelState
 import com.homecam.app.ui.formatBytes
+import com.homecam.core.health.HealthItem
 import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.ConfirmSheet
 import com.homecam.app.ui.kit.EmptyState
@@ -81,6 +84,8 @@ data class LiveControls(
     val sirenAvailable: Boolean = false,
     val sirenOn: Boolean = false,
     val onSiren: (Boolean) -> Unit = {},
+    val recording: RecordingPanelState? = null,
+    val health: List<HealthItem> = emptyList(),
 )
 
 @Composable
@@ -111,12 +116,12 @@ fun LiveScreen(
 
         is LiveState.Connected ->
             if (state.video != null || videoPlaceholder != null) LiveVideo(state, controls, videoPlaceholder, onBack)
-            else Waiting(state)
+            else Waiting(state, controls)
     }
 }
 
 @Composable
-private fun Waiting(state: LiveState.Connected) {
+private fun Waiting(state: LiveState.Connected, controls: LiveControls?) {
     Column(Modifier.fillMaxSize().padding(Gutter), verticalArrangement = Arrangement.Center) {
         EmptyState(
             line = when (state.presence?.state) {
@@ -138,7 +143,11 @@ private fun Waiting(state: LiveState.Connected) {
         }
         state.status?.let {
             Spacer(Modifier.height(8.dp))
-            PaperCard { CameraStats(it) }
+            PaperCard { CameraStats(it, controls?.health.orEmpty()) }
+        }
+        controls?.recording?.let {
+            Spacer(Modifier.height(8.dp))
+            RecordingPanel(it)
         }
     }
 }
@@ -183,7 +192,11 @@ private fun LiveVideo(
         Rule()
         Column(Modifier.fillMaxWidth().background(Ethan.colors.bgApp).padding(horizontal = Gutter, vertical = 10.dp)) {
             state.status?.let {
-                CameraStats(it)
+                CameraStats(it, controls?.health.orEmpty())
+                Spacer(Modifier.height(10.dp))
+            }
+            controls?.recording?.let {
+                RecordingPanel(it)
                 Spacer(Modifier.height(10.dp))
             }
             controls?.let { Controls(it) }
@@ -192,12 +205,23 @@ private fun LiveVideo(
 }
 
 @Composable
-private fun CameraStats(status: RuntimeStatus) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Stat("Battery", "%.0f%%%s".format(status.batteryPercent, if (status.charging) " charging" else ""))
-        Stat("Temp", "%.1f °C".format(status.batteryTempC))
-        Stat("Free", formatBytes(status.freeBytes))
-        Stat("Clips", formatBytes(status.clipBytes))
+private fun CameraStats(status: RuntimeStatus, health: List<HealthItem>) {
+    if (health.isEmpty()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Stat("Battery", "%.0f%%%s".format(status.batteryPercent, if (status.charging) " charging" else ""))
+            Stat("Temp", "%.1f °C".format(status.batteryTempC))
+            Stat("Free", formatBytes(status.freeBytes))
+            Stat("Clips", formatBytes(status.clipBytes))
+        }
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        health.forEach { item ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(item.label.uppercase(), style = Ethan.type.micro, color = Ethan.colors.textFaint)
+                Text(item.value, style = Ethan.type.monoSmall, color = Ethan.colors.textBody)
+            }
+        }
     }
 }
 

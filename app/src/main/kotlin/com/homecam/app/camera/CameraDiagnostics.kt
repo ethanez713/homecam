@@ -99,6 +99,13 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
             put("floor_held", reading.floorHeld)
         }
 
+    fun recordingReverted(from: RecordingMode, to: RecordingMode, dueAtMs: Long) = event("recording_revert") {
+        put("from", from.name)
+        put("to", to.name)
+        put("due_at_ms", dueAtMs)
+        put("late_ms", System.currentTimeMillis() - dueAtMs)
+    }
+
     fun recordingCap(state: HealthState, requested: RecordingMode, effective: RecordingMode) =
         event("recording_cap") {
             put("cap", state.cap.name.lowercase())
