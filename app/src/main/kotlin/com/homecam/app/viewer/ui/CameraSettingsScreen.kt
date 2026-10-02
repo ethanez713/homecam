@@ -67,6 +67,8 @@ fun CameraSettingsScreen(
     onSoundClass: (String, Boolean) -> Unit,
     alertsEnabled: Boolean,
     onAlerts: (Boolean) -> Unit,
+    healthAlertsEnabled: Boolean = true,
+    onHealthAlerts: (Boolean) -> Unit = {},
     remoteAddress: String,
     onRemoteAddress: (String) -> Unit,
     onDevices: () -> Unit,
@@ -94,6 +96,10 @@ fun CameraSettingsScreen(
             )
             Rule()
             SwitchRow("Push alerts to this phone", alertsEnabled, onAlerts, meta = "Encrypted to this phone; the push service sees only ciphertext")
+            if (alertsEnabled && protection != null) {
+                Rule()
+                SwitchRow("Health alerts", healthAlertsEnabled, onHealthAlerts, meta = "When the camera pauses recording to protect the phone, and when it resumes")
+            }
         }
 
         Eyebrow("Recording")

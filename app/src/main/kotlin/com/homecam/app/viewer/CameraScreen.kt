@@ -89,6 +89,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     var zoom by remember(camera.fingerprint, attempt, foreground) { mutableFloatStateOf(0f) }
     val alertKeys = remember { AlertKeys(context) }
     var alertsOn by remember { mutableStateOf(AlertPreferences.enabled(context)) }
+    var healthAlertsOn by remember { mutableStateOf(AlertPreferences.health(context)) }
     // Without it Android 13+ drops every alert notification without telling anyone.
     val askToNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     var remoteAddress by remember(camera.fingerprint) {
@@ -379,10 +380,25 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                             topic = alertKeys.topic(context),
                             endpoint = AlertSubscriber.endpointOf(context),
                             enabled = on,
+                            healthAlerts = healthAlertsOn,
                         )
                         AlertPreferences.setEnabled(context, on)
                         alertsOn = on
                         if (on) AlertSubscriber.start(context) else AlertSubscriber.stop(context)
+                    }
+                },
+                healthAlertsEnabled = healthAlertsOn,
+                onHealthAlerts = { on ->
+                    edit(scope, open, say) {
+                        it.link.registerAlerts(
+                            alertPublicKey = alertKeys.publicKeySpki,
+                            topic = alertKeys.topic(context),
+                            endpoint = AlertSubscriber.endpointOf(context),
+                            enabled = alertsOn,
+                            healthAlerts = on,
+                        )
+                        AlertPreferences.setHealth(context, on)
+                        healthAlertsOn = on
                     }
                 },
                 remoteAddress = remoteAddress,

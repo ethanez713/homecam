@@ -2,6 +2,8 @@ package com.homecam.app.alerts
 
 import com.homecam.app.AppGraph
 import com.homecam.core.detect.AlertThrottle
+import com.homecam.core.health.HealthAlertPolicy
+import com.homecam.core.health.HealthState
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.launch
 
@@ -15,9 +17,12 @@ class Alerts(private val graph: AppGraph) {
 
     private val publisher = AlertPublisher()
     private val detectionThrottle = AlertThrottle()
+    private val healthPolicy = HealthAlertPolicy()
+
+    private enum class Kind(val label: String) { SESSION("session"), DETECTION("detection"), HEALTH("health") }
 
     fun onSessionStarted(viewerLabel: String, viewerFingerprint: String) {
-        send(sessionAlert = true, except = viewerFingerprint) {
+        send(Kind.SESSION, except = viewerFingerprint) {
             base()
                 .addLabels(AlertSubscriber.SESSION_LABEL)
                 .addLabels("$viewerLabel ($viewerFingerprint)")
@@ -27,7 +32,7 @@ class Alerts(private val graph: AppGraph) {
 
     fun onDetection(labels: List<String>, clipId: String, thumbnailJpeg: ByteArray?) {
         if (!detectionThrottle.shouldAlert(labels, System.currentTimeMillis())) return
-        send(sessionAlert = false) {
+        send(Kind.DETECTION) {
             base()
                 .addAllLabels(labels)
                 .setClipId(clipId)
@@ -42,8 +47,15 @@ class Alerts(private val graph: AppGraph) {
 
     /** A response action fired (Phase 8), so the alert says what happened, not just what was seen. */
     fun onResponseAction(action: String) {
-        send(sessionAlert = false) {
+        send(Kind.DETECTION) {
             base().addLabels(action).build()
+        }
+    }
+
+    /** The camera protected itself, or stopped doing so (Phase 11). Says nothing about footage. */
+    fun onHealth(transition: HealthState, previous: HealthState) {
+        healthPolicy.onChange(previous, transition, System.currentTimeMillis()).forEach { alert ->
+            send(Kind.HEALTH) { base().addLabels(alert.label).build() }
         }
     }
 
@@ -52,10 +64,16 @@ class Alerts(private val graph: AppGraph) {
         .setCameraAlias(graph.settings.current.alias)
         .setCameraFingerprint(graph.identity.identity.shortFingerprint)
 
-    private fun send(sessionAlert: Boolean, except: String? = null, build: () -> AlertPayload) {
+    private fun send(kind: Kind, except: String? = null, build: () -> AlertPayload) {
         graph.scope.launch {
             val recipients = graph.database.viewers().alertable()
-                .filter { if (sessionAlert) it.sessionAlerts else it.detectionAlerts }
+                .filter {
+                    when (kind) {
+                        Kind.SESSION -> it.sessionAlerts
+                        Kind.DETECTION -> it.detectionAlerts
+                        Kind.HEALTH -> it.healthAlerts
+                    }
+                }
                 .filter { it.fingerprint != except }
             if (recipients.isEmpty()) return@launch
             val payload = build()
@@ -63,7 +81,7 @@ class Alerts(private val graph: AppGraph) {
             // The camera's half of GATE-F: whether it managed to post the alert at all. The
             // viewer arriving while locked (Doze) is checked on the receiving side.
             graph.diagnostics.alert(
-                kind = if (sessionAlert) "session" else "detection",
+                kind = kind.label,
                 recipients = recipients.size,
                 delivered = delivered,
             )

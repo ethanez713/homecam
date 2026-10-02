@@ -20,7 +20,8 @@ interface ViewerDao {
     @Query("SELECT * FROM viewers WHERE alertsEnabled = 1 AND alertTopic != ''") suspend fun alertable(): List<ViewerEntity>
     @Query(
         "UPDATE viewers SET alertPublicKey = :key, alertTopic = :topic, alertEndpoint = :endpoint, " +
-            "alertsEnabled = :enabled, sessionAlerts = :sessionAlerts, detectionAlerts = :detectionAlerts " +
+            "alertsEnabled = :enabled, sessionAlerts = :sessionAlerts, detectionAlerts = :detectionAlerts, " +
+            "healthAlerts = :healthAlerts " +
             "WHERE fingerprint = :fingerprint"
     )
     suspend fun setAlerts(
@@ -31,6 +32,7 @@ interface ViewerDao {
         enabled: Boolean,
         sessionAlerts: Boolean,
         detectionAlerts: Boolean,
+        healthAlerts: Boolean,
     )
 }
 

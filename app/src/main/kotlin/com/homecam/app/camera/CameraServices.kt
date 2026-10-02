@@ -394,6 +394,7 @@ class CameraServices(
                 enabled = registration.enabled,
                 sessionAlerts = registration.sessionAlerts,
                 detectionAlerts = registration.detectionAlerts,
+                healthAlerts = !registration.hasHealthAlerts() || registration.healthAlerts,
             )
             graph.audit.record(
                 AuditEvent.Kind.SETTINGS_CHANGED,

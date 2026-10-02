@@ -16,6 +16,7 @@ import com.homecam.app.AppGraph
 import com.homecam.app.MainActivity
 import com.homecam.app.R
 import com.homecam.core.crypto.AlertCrypto
+import com.homecam.core.health.HealthAlertLabels
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -105,7 +106,8 @@ class AlertSubscriber : LifecycleService() {
         }
 
         val payload = runCatching { AlertPayload.parseFrom(opened) }.getOrNull() ?: return
-        val isSession = payload.labelsList.firstOrNull() == SESSION_LABEL
+        val first = payload.labelsList.firstOrNull().orEmpty()
+        val isSession = first == SESSION_LABEL || HealthAlertLabels.isHealth(first)
         notify(
             title = payload.cameraAlias.ifBlank { "homecam" },
             body = describe(payload.labelsList),
@@ -118,6 +120,7 @@ class AlertSubscriber : LifecycleService() {
 
     private fun describe(labels: List<String>): String = when {
         labels.isEmpty() -> "Something happened"
+        HealthAlertLabels.isHealth(labels.first()) -> HealthAlertLabels.describe(labels.first()) ?: "The camera's health changed"
         labels.first() == SESSION_LABEL -> labels.getOrNull(1)?.let { "$it started watching" } ?: "Someone started watching"
         else -> "Detected: " + labels.groupingBy { it }.eachCount().entries
             .joinToString(", ") { (label, count) -> if (count > 1) "$label ×$count" else label }

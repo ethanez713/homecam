@@ -123,6 +123,7 @@ class CameraLink(private val peer: RpcPeer) {
         enabled: Boolean,
         sessionAlerts: Boolean = true,
         detectionAlerts: Boolean = true,
+        healthAlerts: Boolean = true,
     ) {
         peer.request(
             RpcMessage.Service.ACCESS,
@@ -134,6 +135,7 @@ class CameraLink(private val peer: RpcPeer) {
                 .setEnabled(enabled)
                 .setSessionAlerts(sessionAlerts)
                 .setDetectionAlerts(detectionAlerts)
+                .setHealthAlerts(healthAlerts)
                 .build()
                 .toByteString(),
         )

@@ -299,6 +299,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             graph.diagnostics.healthState(it, previous.level(it), current.level(it), reading, current)
         }
         if (previous.cap != current.cap) recorder.setCap(current.cap)
+        if (::alerts.isInitialized) alerts.onHealth(current, previous)
         if (previous.cap != current.cap || previous.capReason != current.capReason) {
             val requested = graph.settings.current.recordingMode
             graph.diagnostics.recordingCap(current, requested, HealthProtocol.effectiveMode(requested, current.cap))

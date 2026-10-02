@@ -19,6 +19,7 @@ data class ViewerEntity(
     val alertsEnabled: Boolean = false,
     val sessionAlerts: Boolean = true,
     val detectionAlerts: Boolean = true,
+    val healthAlerts: Boolean = true,
 ) {
     override fun equals(other: Any?) = other is ViewerEntity && other.fingerprint == fingerprint
     override fun hashCode() = fingerprint.hashCode()
