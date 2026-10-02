@@ -1,13 +1,18 @@
 package com.homecam.core.crypto
 
+import java.math.BigInteger
 import java.security.GeneralSecurityException
+import java.security.InvalidKeyException
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.SecureRandom
+import java.security.interfaces.ECPublicKey
+import java.security.spec.ECFieldFp
 import java.security.spec.ECGenParameterSpec
+import java.security.spec.ECParameterSpec
 import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
@@ -49,8 +54,35 @@ object AlertCrypto {
             initialize(ECGenParameterSpec(CURVE), random)
         }.generateKeyPair()
 
-    fun publicKeyFrom(spki: ByteArray): PublicKey =
-        KeyFactory.getInstance(KEY_ALGORITHM).generatePublic(X509EncodedKeySpec(spki))
+    /**
+     * Rejects a key whose point is not on P-256 itself rather than trusting the provider to
+     * notice at `doPhase`: an invalid-curve point is how ECDH leaks a private key a few bits
+     * at a time. Throws [GeneralSecurityException] so every caller's existing failure path applies.
+     */
+    fun publicKeyFrom(spki: ByteArray): PublicKey {
+        val key = KeyFactory.getInstance(KEY_ALGORITHM).generatePublic(X509EncodedKeySpec(spki))
+        val ec = key as? ECPublicKey ?: throw InvalidKeyException("not an EC key")
+        if (!onCurve(ec.w.affineX, ec.w.affineY, ec.params)) throw InvalidKeyException("point is not on the curve")
+        return key
+    }
+
+    /** True when (x, y) is a finite point on the P-256 curve [params] describes. */
+    internal fun onCurve(x: BigInteger, y: BigInteger, params: ECParameterSpec): Boolean {
+        val curve = params.curve
+        val field = curve.field as? ECFieldFp ?: return false
+        val p = field.p
+        if (curve.a != P256_A) return false
+        if (curve.b != P256_B) return false
+        if (p != P256_P) return false
+        if (x.signum() < 0 || y.signum() < 0 || x >= p || y >= p) return false
+        val left = y.modPow(BigInteger.TWO, p)
+        val right = (x.modPow(BigInteger.valueOf(3), p) + curve.a.multiply(x) + curve.b).mod(p)
+        return left == right
+    }
+
+    private val P256_P = BigInteger("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff", 16)
+    private val P256_A = P256_P - BigInteger.valueOf(3)
+    private val P256_B = BigInteger("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b", 16)
 
     /**
      * Wire format: `version || ephemeralSpkiLength(2) || ephemeralSpki || nonce ||

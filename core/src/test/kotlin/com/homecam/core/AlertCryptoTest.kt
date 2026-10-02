@@ -104,4 +104,39 @@ class AlertCryptoTest {
         )
         assertTrue(AlertPayload.parseFrom(opened).thumbnailJpeg.size() == 200_000)
     }
+
+    private fun offCurve(spki: ByteArray): ByteArray =
+        spki.copyOf().also { it[it.lastIndex] = (it[it.lastIndex].toInt() xor 0x01).toByte() }
+
+    @Test
+    fun `a genuine key is on the curve and a nudged y coordinate is not`() {
+        val key = viewer.public as java.security.interfaces.ECPublicKey
+        assertTrue(AlertCrypto.onCurve(key.w.affineX, key.w.affineY, key.params))
+        assertFalse(AlertCrypto.onCurve(key.w.affineX, key.w.affineY + java.math.BigInteger.ONE, key.params))
+        assertFalse(AlertCrypto.onCurve(java.math.BigInteger.ZERO, java.math.BigInteger.ZERO, key.params))
+        assertFalse(AlertCrypto.onCurve(key.params.curve.field.fieldSize.toBigInteger(), key.w.affineY, key.params))
+    }
+
+    @Test
+    fun `an ephemeral key off the curve is refused as an ordinary failed open`() {
+        val sealed = AlertCrypto.seal(viewerSpki, alert.toByteArray())
+        val length = ((sealed[1].toInt() and 0xFF) shl 8) or (sealed[2].toInt() and 0xFF)
+        val ephemeral = sealed.copyOfRange(3, 3 + length)
+        offCurve(ephemeral).copyInto(sealed, 3)
+        assertNull(AlertCrypto.open(viewer.private, viewerSpki, sealed))
+    }
+
+    @Test
+    fun `sealing to a recipient key that is off the curve fails`() {
+        org.junit.Assert.assertThrows(java.security.GeneralSecurityException::class.java) {
+            AlertCrypto.seal(offCurve(viewerSpki), alert.toByteArray())
+        }
+    }
+
+    @Test
+    fun `a key on another curve is refused`() {
+        val other = java.security.KeyPairGenerator.getInstance("EC").apply { initialize(java.security.spec.ECGenParameterSpec("secp384r1")) }
+            .generateKeyPair().public.encoded
+        org.junit.Assert.assertThrows(java.security.GeneralSecurityException::class.java) { AlertCrypto.publicKeyFrom(other) }
+    }
 }
