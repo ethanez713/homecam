@@ -20,6 +20,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.activity.compose.BackHandler
 import com.homecam.app.AppGraph
 import com.homecam.app.alerts.AlertKeys
@@ -61,24 +64,28 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     val scope = rememberCoroutineScope()
 
     var attempt by remember(camera.fingerprint) { mutableIntStateOf(0) }
+    // A live session left running behind another app holds a voice-communication audio stream,
+    // and while one is active Android sends the volume keys to the call stream instead of media.
+    val foreground = LocalLifecycleOwner.current.lifecycle.currentStateAsState().value
+        .isAtLeast(Lifecycle.State.STARTED)
     var tab by remember(camera.fingerprint, openAtMs) { mutableStateOf(if (openAtMs != null) CameraTab.CLIPS else CameraTab.LIVE) }
     var toast by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(toast) { if (toast != null) { kotlinx.coroutines.delay(TOAST_MS); toast = null } }
     val say: (String) -> Unit = { toast = it }
     var showingDevices by remember(camera.fingerprint) { mutableStateOf(false) }
     var showingLog by remember(camera.fingerprint) { mutableStateOf(false) }
-    var state by remember(camera.fingerprint, attempt) {
+    var state by remember(camera.fingerprint, attempt, foreground) {
         mutableStateOf<LiveState>(LiveState.Locating(camera.alias))
     }
-    var session by remember(camera.fingerprint, attempt) { mutableStateOf<ViewerSession?>(null) }
-    var settings by remember(camera.fingerprint, attempt) { mutableStateOf<SettingsSnapshot?>(null) }
-    var capabilities by remember(camera.fingerprint, attempt) { mutableStateOf<Capabilities?>(null) }
-    var projectedDays by remember(camera.fingerprint, attempt) { mutableStateOf<Double?>(null) }
-    var viewers by remember(camera.fingerprint, attempt) { mutableStateOf<List<Viewer>?>(null) }
-    var torch by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
-    var mic by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
-    var siren by remember(camera.fingerprint, attempt) { mutableStateOf(false) }
-    var zoom by remember(camera.fingerprint, attempt) { mutableFloatStateOf(0f) }
+    var session by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<ViewerSession?>(null) }
+    var settings by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<SettingsSnapshot?>(null) }
+    var capabilities by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<Capabilities?>(null) }
+    var projectedDays by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<Double?>(null) }
+    var viewers by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<List<Viewer>?>(null) }
+    var torch by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
+    var mic by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
+    var siren by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
+    var zoom by remember(camera.fingerprint, attempt, foreground) { mutableFloatStateOf(0f) }
     val alertKeys = remember { AlertKeys(context) }
     var alertsOn by remember { mutableStateOf(AlertPreferences.enabled(context)) }
     // Without it Android 13+ drops every alert notification without telling anyone.
@@ -107,7 +114,8 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     val sessionToClose = session
     DisposableEffect(sessionToClose) { onDispose { sessionToClose?.close() } }
 
-    LaunchedEffect(camera.fingerprint, attempt) {
+    LaunchedEffect(camera.fingerprint, attempt, foreground) {
+        if (!foreground) return@LaunchedEffect
         runCatching {
             val address = node.locate(camera) ?: error(notAnswering(camera))
             state = LiveState.Connecting(address.host, address.port)
