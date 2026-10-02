@@ -633,21 +633,21 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         if (start) recorder.recordManually(seconds) else recorder.stopManual()
     }
 
-    override fun setSiren(on: Boolean, seconds: Int) {
+    override fun setSiren(on: Boolean, seconds: Int, by: Actor?) {
         graph.diagnostics.siren(on, seconds)
         if (on) {
             siren.start(seconds.takeIf { it > 0 } ?: 30)
-            recordResponseAction("siren", alert = true)
+            recordResponseAction("siren", alert = true, by = by)
         } else {
             siren.stop()
         }
     }
 
     /** The spotlight is the torch used deliberately as a light; manual use is audited but not alerted. */
-    override fun setSpotlight(on: Boolean) {
+    override fun setSpotlight(on: Boolean, by: Actor?) {
         capture.setTorch(on)
         autoSpotlightOn = false
-        recordResponseAction(if (on) "spotlight on" else "spotlight off")
+        recordResponseAction(if (on) "spotlight on" else "spotlight off", by = by)
     }
 
     private fun maybeAutoSpotlight() {
@@ -688,8 +688,16 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         )
     }
 
-    private fun recordResponseAction(detail: String, alert: Boolean = false) {
-        graph.scope.launch { graph.audit.record(AuditEvent.Kind.RESPONSE_ACTION, detail = detail) }
+    private fun recordResponseAction(detail: String, alert: Boolean = false, by: Actor? = null) {
+        graph.scope.launch {
+            graph.audit.record(
+                AuditEvent.Kind.RESPONSE_ACTION,
+                viewerFingerprint = by?.fingerprint.orEmpty(),
+                viewerLabel = by?.label.orEmpty(),
+                sourceIp = by?.sourceIp.orEmpty(),
+                detail = detail,
+            )
+        }
         if (alert) alerts.onResponseAction(detail)
     }
 

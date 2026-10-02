@@ -94,6 +94,7 @@ class AlertSubscriber : LifecycleService() {
         if (message.optString("event") != "message") return
         val body = message.optString("message").takeIf { it.isNotBlank() } ?: return
 
+        if (seenBefore(message.optString("id"), body)) return
         logDeliveryDelay(message)
 
         val sealed = runCatching { Base64.decode(body, Base64.DEFAULT) }.getOrNull()
@@ -117,6 +118,29 @@ class AlertSubscriber : LifecycleService() {
             thumbnail = payload.thumbnailJpeg.takeIf { !it.isEmpty }?.toByteArray(),
         )
     }
+
+    /**
+     * Each alert was logged twice. A message that arrives twice with the same id is a stream
+     * replay; the same sealed body under a new id is the publisher's POST having been retried.
+     * Both are shown once, and the line says which it was, so the next occurrence names its cause.
+     */
+    private fun seenBefore(id: String, body: String): Boolean {
+        val now = System.currentTimeMillis()
+        recent.entries.removeAll { now - it.value > DUPLICATE_WINDOW_MS }
+        val bodyKey = "body:" + body.hashCode()
+        val idKey = "id:$id"
+        val repeated = when {
+            id.isNotBlank() && idKey in recent -> "same id"
+            bodyKey in recent -> "same body, new id"
+            else -> null
+        }
+        if (id.isNotBlank()) recent[idKey] = now
+        recent[bodyKey] = now
+        if (repeated != null) Log.i(TAG, "dropped a repeated alert ($repeated)")
+        return repeated != null
+    }
+
+    private val recent = HashMap<String, Long>()
 
     private fun describe(labels: List<String>): String = when {
         labels.isEmpty() -> "Something happened"
@@ -204,6 +228,7 @@ class AlertSubscriber : LifecycleService() {
         private const val READ_TIMEOUT_MS = 0
         private const val MIN_BACKOFF_MS = 2_000L
         private const val MAX_BACKOFF_MS = 120_000L
+        private const val DUPLICATE_WINDOW_MS = 60_000L
 
         private const val PREFS = "homecam.alerts"
         private const val KEY_ENDPOINT = "endpoint"

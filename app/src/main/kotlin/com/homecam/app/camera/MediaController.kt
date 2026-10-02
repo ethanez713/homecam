@@ -12,6 +12,9 @@ import com.homecam.proto.Snapshot
  * does not have to know whether a camera is even attached — on a phone with no capture
  * running, these fail cleanly instead of being unimplemented.
  */
+/** The paired viewer behind a response action, so its audit row names who did it. */
+data class Actor(val fingerprint: String, val label: String, val sourceIp: String)
+
 interface MediaController {
     suspend fun startSession(viewerFingerprint: String, config: SessionConfig): SessionStatus
     suspend fun stopSession(viewerFingerprint: String)
@@ -24,8 +27,8 @@ interface MediaController {
     fun setLens(facing: Lens.Facing)
     fun setOrientation(degrees: Int)
     fun recordManually(seconds: Int, start: Boolean)
-    fun setSiren(on: Boolean, seconds: Int)
-    fun setSpotlight(on: Boolean)
+    fun setSiren(on: Boolean, seconds: Int, by: Actor? = null)
+    fun setSpotlight(on: Boolean, by: Actor? = null)
 
     /** A still off the live capture. Throws UNAVAILABLE when capture is not running. */
     suspend fun snapshot(): Snapshot

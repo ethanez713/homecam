@@ -51,4 +51,18 @@ class ResponseAuditTest {
         )
         assertTrue("the chain still verifies", log.verify().valid)
     }
+
+    @Test
+    fun aResponseActionNamesTheViewerThatCausedIt() = runTest {
+        log.record(
+            AuditEvent.Kind.RESPONSE_ACTION,
+            viewerFingerprint = "Y1TM-4JVY-9K8F", viewerLabel = "Ethan's S25", sourceIp = "100.64.0.21",
+            detail = "siren",
+        )
+
+        val row = database.audit().all().single { it.detail == "siren" }
+        assertTrue(row.viewerFingerprint == "Y1TM-4JVY-9K8F" && row.viewerLabel == "Ethan's S25")
+        assertTrue(row.sourceIp == "100.64.0.21")
+        assertTrue("the chain still verifies", log.verify().valid)
+    }
 }

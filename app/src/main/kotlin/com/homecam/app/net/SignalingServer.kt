@@ -273,6 +273,7 @@ class SignalingServer(
                     clips = clipStore,
                     viewerLabel = outcome.label,
                     viewerFingerprint = outcome.viewer.shortFingerprint,
+                    viewerIp = session.sourceIp,
                 ).registerOn(session.rpc)
                 listener?.onAuthenticated(session)
             }

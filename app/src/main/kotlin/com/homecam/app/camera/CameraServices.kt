@@ -70,7 +70,10 @@ class CameraServices(
     private val clips: ClipStore?,
     private val viewerLabel: String,
     private val viewerFingerprint: String,
+    private val viewerIp: String = "",
 ) {
+    private val actor = Actor(viewerFingerprint, viewerLabel, viewerIp)
+
     fun registerOn(peer: RpcPeer) {
         registerSession(peer)
         registerStatus(peer)
@@ -269,11 +272,11 @@ class CameraServices(
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.SIREN) { request ->
             val ask = Siren.parseFrom(request.payload)
-            media().setSiren(ask.on, ask.seconds)
+            media().setSiren(ask.on, ask.seconds, actor)
             request.payload
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.SPOTLIGHT) { request ->
-            media().setSpotlight(Spotlight.parseFrom(request.payload).on)
+            media().setSpotlight(Spotlight.parseFrom(request.payload).on, actor)
             request.payload
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.SNAPSHOT) {
