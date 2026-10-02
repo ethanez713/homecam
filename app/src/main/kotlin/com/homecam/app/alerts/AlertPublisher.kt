@@ -4,6 +4,7 @@ import android.util.Base64
 import android.util.Log
 import com.homecam.app.data.ViewerEntity
 import com.homecam.core.crypto.AlertCrypto
+import com.homecam.core.crypto.AlertEndpoint
 import com.homecam.core.crypto.AlertLimits
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.Dispatchers
@@ -22,9 +23,13 @@ import java.net.URL
 class AlertPublisher(private val userAgent: String = "homecam") {
 
     suspend fun publish(viewer: ViewerEntity, payload: AlertPayload): Boolean {
-        val endpoint = viewer.alertEndpoint.trimEnd('/')
         val key = viewer.alertPublicKey
-        if (!viewer.alertsEnabled || endpoint.isBlank() || viewer.alertTopic.isBlank()) return false
+        if (!viewer.alertsEnabled || viewer.alertTopic.isBlank()) return false
+        // Checked again here because a row written before the policy existed can hold anything.
+        val endpoint = AlertEndpoint.validOrNull(viewer.alertEndpoint) ?: run {
+            Log.w(TAG, "alert endpoint refused for a registered viewer: ${AlertEndpoint.hostOf(viewer.alertEndpoint)}")
+            return false
+        }
 
         val body = if (key == null) null else sealWithinLimit(key, payload)
 
@@ -61,6 +66,8 @@ class AlertPublisher(private val userAgent: String = "homecam") {
         runCatching {
             val connection = (URL("$endpoint/$topic").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
+                // A redirect would send the sealed body somewhere the endpoint check never saw.
+                instanceFollowRedirects = false
                 doOutput = true
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS

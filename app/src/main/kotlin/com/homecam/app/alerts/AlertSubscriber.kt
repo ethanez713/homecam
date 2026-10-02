@@ -16,6 +16,7 @@ import com.homecam.app.AppGraph
 import com.homecam.app.MainActivity
 import com.homecam.app.R
 import com.homecam.core.crypto.AlertCrypto
+import com.homecam.core.crypto.AlertEndpoint
 import com.homecam.core.health.HealthAlertLabels
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.Dispatchers
@@ -76,6 +77,7 @@ class AlertSubscriber : LifecycleService() {
     private suspend fun stream(endpoint: String, topic: String) = withContext(Dispatchers.IO) {
         val connection = (URL("$endpoint/$topic/json").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
+            instanceFollowRedirects = false
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
             setRequestProperty("User-Agent", "homecam")
@@ -236,13 +238,16 @@ class AlertSubscriber : LifecycleService() {
         /** Defaults to ntfy.sh, which needs no account and accepts an arbitrary topic. */
         const val DEFAULT_ENDPOINT = "https://ntfy.sh"
 
-        fun endpointOf(context: Context): String = context
-            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_ENDPOINT, DEFAULT_ENDPOINT) ?: DEFAULT_ENDPOINT
+        fun endpointOf(context: Context): String = AlertEndpoint.validOrNull(
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ENDPOINT, DEFAULT_ENDPOINT).orEmpty(),
+        ) ?: DEFAULT_ENDPOINT
 
-        fun setEndpoint(context: Context, endpoint: String) {
+        /** False, and nothing stored, when the endpoint is not one the camera would accept. */
+        fun setEndpoint(context: Context, endpoint: String): Boolean {
+            val checked = AlertEndpoint.validOrNull(endpoint) ?: return false
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().putString(KEY_ENDPOINT, endpoint).apply()
+                .edit().putString(KEY_ENDPOINT, checked).apply()
+            return true
         }
 
         fun start(context: Context) {

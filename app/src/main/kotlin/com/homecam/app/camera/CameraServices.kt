@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString
 import com.homecam.app.AppGraph
 import com.homecam.app.data.ClipStore
 import com.homecam.app.data.toProto
+import com.homecam.core.crypto.AlertEndpoint
 import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.RecordingTimer
 import com.homecam.core.rpc.Controls
@@ -392,11 +393,25 @@ class CameraServices(
 
         peer.register(RpcMessage.Service.ACCESS, Controls.Access.ALERT_REGISTRATION) { request ->
             val registration = AlertRegistration.parseFrom(request.payload)
+            val endpoint = when (val checked = AlertEndpoint.check(registration.endpoint)) {
+                is AlertEndpoint.Result.Valid -> checked.endpoint
+                is AlertEndpoint.Result.Refused -> {
+                    graph.audit.record(
+                        AuditEvent.Kind.SETTINGS_CHANGED,
+                        viewerFingerprint = viewerFingerprint,
+                        viewerLabel = viewerLabel,
+                        sourceIp = viewerIp,
+                        detail = "alert endpoint refused (${checked.reason}): " +
+                            AlertEndpoint.hostOf(registration.endpoint).ifBlank { "unparseable" },
+                    )
+                    throw RpcException(RpcError.Code.INVALID_ARGUMENT, "alert endpoint refused: ${checked.reason}")
+                }
+            }
             graph.database.viewers().setAlerts(
                 fingerprint = viewerFingerprint,
                 key = registration.alertPublicKey.toByteArray().takeIf { it.isNotEmpty() },
                 topic = registration.topic,
-                endpoint = registration.endpoint,
+                endpoint = endpoint,
                 enabled = registration.enabled,
                 sessionAlerts = registration.sessionAlerts,
                 detectionAlerts = registration.detectionAlerts,
@@ -406,7 +421,7 @@ class CameraServices(
                 AuditEvent.Kind.SETTINGS_CHANGED,
                 viewerFingerprint = viewerFingerprint,
                 viewerLabel = viewerLabel,
-                detail = if (registration.enabled) "alerts on" else "alerts off",
+                detail = if (registration.enabled) "alerts on via ${AlertEndpoint.hostOf(endpoint)}" else "alerts off",
             )
             registration.toByteString()
         }
