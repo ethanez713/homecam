@@ -80,7 +80,6 @@ class AlertSubscriber : LifecycleService() {
             instanceFollowRedirects = false
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
-            setRequestProperty("User-Agent", "homecam")
         }
         try {
             connection.inputStream.bufferedReader().useLines { lines ->

@@ -5,6 +5,7 @@ import android.util.Log
 import com.homecam.app.data.ViewerEntity
 import com.homecam.core.crypto.AlertCrypto
 import com.homecam.core.crypto.AlertEndpoint
+import com.homecam.core.crypto.AlertPadding
 import com.homecam.core.crypto.AlertLimits
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.Dispatchers
@@ -20,7 +21,7 @@ import java.net.URL
  * fallback is a **content-free** ping — "check your camera" — rather than the plaintext,
  * because a degraded path that leaks is worse than a degraded path that says less.
  */
-class AlertPublisher(private val userAgent: String = "homecam") {
+class AlertPublisher {
 
     suspend fun publish(viewer: ViewerEntity, payload: AlertPayload): Boolean {
         val key = viewer.alertPublicKey
@@ -34,9 +35,9 @@ class AlertPublisher(private val userAgent: String = "homecam") {
         val body = if (key == null) null else sealWithinLimit(key, payload)
 
         return if (body == null) {
-            post(endpoint, viewer.alertTopic, CONTENT_FREE_PING.toByteArray(), plain = true)
+            post(endpoint, viewer.alertTopic, CONTENT_FREE_PING.toByteArray())
         } else {
-            post(endpoint, viewer.alertTopic, body, plain = false)
+            post(endpoint, viewer.alertTopic, body)
         }
     }
 
@@ -48,6 +49,7 @@ class AlertPublisher(private val userAgent: String = "homecam") {
      */
     private fun sealWithinLimit(key: ByteArray, payload: AlertPayload): ByteArray? {
         val candidates = sequenceOf(payload, payload.toBuilder().clearThumbnailJpeg().build())
+            .map(AlertPadding::pad)
         for (candidate in candidates) {
             val sealed = runCatching { AlertCrypto.seal(key, candidate.toByteArray()) }.getOrNull()
                 ?: continue
@@ -61,7 +63,6 @@ class AlertPublisher(private val userAgent: String = "homecam") {
         endpoint: String,
         topic: String,
         body: ByteArray,
-        plain: Boolean,
     ): Boolean = withContext(Dispatchers.IO) {
         runCatching {
             val connection = (URL("$endpoint/$topic").openConnection() as HttpURLConnection).apply {
@@ -71,12 +72,7 @@ class AlertPublisher(private val userAgent: String = "homecam") {
                 doOutput = true
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS
-                setRequestProperty("User-Agent", userAgent)
                 setRequestProperty("Content-Type", "text/plain")
-                // The provider shows the title in the notification shade, so it must not
-                // say anything either: the real content is inside the ciphertext.
-                setRequestProperty("Title", "homecam")
-                if (!plain) setRequestProperty("X-Homecam", "1")
             }
             connection.outputStream.use { it.write(body) }
             val code = connection.responseCode
