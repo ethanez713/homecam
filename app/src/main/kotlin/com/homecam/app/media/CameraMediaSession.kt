@@ -209,6 +209,7 @@ class CameraMediaSession(
     )
 
     fun onCandidate(candidate: Candidate) {
+        Log.i(TAG, "ice remote ${candidate.candidate}")
         connection?.addIceCandidate(
             IceCandidate(candidate.sdpMid, candidate.sdpMLineIndex, candidate.candidate)
         )
@@ -225,6 +226,7 @@ class CameraMediaSession(
 
     private val observer = object : PeerConnectionObserverAdapter() {
         override fun onIceCandidate(candidate: IceCandidate) {
+            Log.i(TAG, "ice local ${candidate.sdp}")
             transport.sendCandidate(
                 Candidate.newBuilder()
                     .setSdpMid(candidate.sdpMid)
