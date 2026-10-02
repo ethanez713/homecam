@@ -13,6 +13,7 @@ devices have access, and every access is logged where you can see it.
 | [`docs/plans/README.md`](docs/plans/README.md) | The roadmap — what is being built next, and where it is up to |
 | [`docs/PLAN.md`](docs/PLAN.md) | The design: threat model, wire protocol, milestones |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Where the implementation diverged from the plan, and why |
+| [`docs/plans/SECURITY-HARDENING.md`](docs/plans/SECURITY-HARDENING.md) | The security audit's findings and the plan to close them |
 | [`docs/REMOTE_ACCESS.md`](docs/REMOTE_ACCESS.md) | Watching from outside the house, over Tailscale |
 | [`models/README.md`](models/README.md) | The detector, its licence, and what its class mapping cannot do |
 | `core/` | Pure JVM: wire protocol, crypto, handshake, RPC, audit chain, retention. 80 unit tests, no emulator |
