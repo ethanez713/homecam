@@ -1,18 +1,15 @@
 package com.homecam.app.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.homecam.app.ui.kit.Segmented
+import com.homecam.app.ui.theme.Ethan
 import com.homecam.proto.RecordingMode
 
 /**
@@ -26,28 +23,17 @@ fun RecordingModeControl(
     mode: RecordingMode,
     projectedDays: Double?,
     onChange: (RecordingMode) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column {
-        Text("Recording", style = MaterialTheme.typography.titleMedium)
+    Column(modifier.padding(12.dp)) {
+        Segmented(options, mode, onChange)
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEach { (option, label) ->
-                if (option == mode) {
-                    FilledTonalButton(onClick = { onChange(option) }) { Text(label) }
-                } else {
-                    OutlinedButton(onClick = { onChange(option) }) { Text(label) }
-                }
-            }
-        }
-        Text(
-            describe(mode),
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 6.dp),
-        )
+        Text(describe(mode), style = Ethan.type.bodySmall, color = Ethan.colors.textMuted)
         projectedDays?.let {
             Text(
-                "≈ %.0f days of history at the current rate".format(it),
-                style = MaterialTheme.typography.bodySmall,
+                "≈ %.0f days of history at this rate".format(it),
+                style = Ethan.type.monoSmall,
+                color = Ethan.colors.textMuted,
             )
         }
     }
@@ -61,6 +47,6 @@ private val options = listOf(
 
 private fun describe(mode: RecordingMode): String = when (mode) {
     RecordingMode.OFF -> "Keeps nothing. Live view and alerts still work."
-    RecordingMode.CONTINUOUS -> "Gap-free recording, segmented so a crash costs one segment."
-    else -> "Keeps clips around what is detected."
+    RecordingMode.CONTINUOUS -> "Records without gaps, in two-minute segments."
+    else -> "Keeps a clip around each thing it detects."
 }

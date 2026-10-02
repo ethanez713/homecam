@@ -1,5 +1,8 @@
 package com.homecam.app.camera.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -7,53 +10,90 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.material3.FilterChip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.homecam.app.R
+import com.homecam.app.ui.kit.Badge
+import com.homecam.app.ui.kit.EmptyState
+import com.homecam.app.ui.kit.Gutter
+import com.homecam.app.ui.kit.Rule
+import com.homecam.app.ui.kit.Tag
+import com.homecam.app.ui.kit.Tone
+import com.homecam.app.ui.kit.TopBar
+import com.homecam.app.ui.theme.Ethan
 import com.homecam.core.audit.AuditChain
-import com.homecam.app.ui.formatStamp
 import com.homecam.proto.AuditEvent
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
-/** The access log (§2.7), including whether its hash chain still verifies. */
+/**
+ * The access log (§2.7), including whether its hash chain still verifies. [onBack] is given
+ * where the log is a screen of its own; inside a camera's tabs the shell already has a bar.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun AuditScreen(events: List<AuditEvent>, verification: AuditChain.Verification?) {
+fun AuditScreen(events: List<AuditEvent>, verification: AuditChain.Verification?, onBack: (() -> Unit)? = null) {
     var filter by remember { mutableStateOf(AuditFilter.ALL) }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Access log", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
-        ChainBanner(verification)
-        Spacer(Modifier.height(8.dp))
+    Column(Modifier.fillMaxSize()) {
+        if (onBack != null) TopBar("Access log", onBack = onBack)
+        Column(Modifier.fillMaxSize().padding(horizontal = Gutter)) {
+            Spacer(Modifier.height(10.dp))
+            ChainBanner(verification)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                AuditFilter.entries.forEach { entry ->
+                    Tag(entry.label, selected = filter == entry, onClick = { filter = entry })
+                }
+            }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AuditFilter.entries.forEach { entry ->
-                FilterChip(
-                    selected = filter == entry,
-                    onClick = { filter = entry },
-                    label = { Text(entry.label) },
-                )
+            val shown = events.filter { filter.matches(it.kind) }
+            if (shown.isEmpty()) {
+                EmptyState("Nothing here yet.", icon = R.drawable.lucide_scroll_text, modifier = Modifier.height(220.dp))
+            }
+            LazyColumn {
+                shown.groupBy { dayOf(it.atMs) }.forEach { (day, thatDay) ->
+                    stickyHeader(key = "day-$day") { DayHeader(day, thatDay.size) }
+                    items(thatDay, key = { it.seq }) { event ->
+                        EventRow(event)
+                        Rule()
+                    }
+                }
             }
         }
-        Spacer(Modifier.height(8.dp))
+    }
+}
 
-        val shown = events.filter { filter.matches(it.kind) }
-        if (shown.isEmpty()) {
-            Text("Nothing here yet.", style = MaterialTheme.typography.bodyMedium)
-        }
-        LazyColumn { items(shown, key = { it.seq }) { EventRow(it) } }
+private fun dayOf(atMs: Long): LocalDate = Instant.ofEpochMilli(atMs).atZone(ZoneId.systemDefault()).toLocalDate()
+
+private val dayName = DateTimeFormatter.ofPattern("EEEE d MMMM")
+private val clock = DateTimeFormatter.ofPattern("HH:mm:ss")
+
+@Composable
+private fun DayHeader(day: LocalDate, count: Int) {
+    val today = LocalDate.now()
+    Row(Modifier.fillMaxWidth().background(Ethan.colors.bgApp).padding(top = 12.dp, bottom = 6.dp)) {
+        Text(
+            when (day) {
+                today -> "Today"
+                today.minusDays(1) -> "Yesterday"
+                else -> dayName.format(day)
+            }.uppercase(),
+            style = Ethan.type.micro, color = Ethan.colors.textFaint, modifier = Modifier.weight(1f),
+        )
+        Text("$count", style = Ethan.type.micro, color = Ethan.colors.textFaint)
     }
 }
 
@@ -85,41 +125,65 @@ private enum class AuditFilter(val label: String) {
 
 @Composable
 private fun ChainBanner(verification: AuditChain.Verification?) {
-    val (text, container) = when {
-        verification == null -> "Checking the chain…" to MaterialTheme.colorScheme.surfaceVariant
-        verification.valid -> "Chain intact — no entry has been edited or removed" to
-            MaterialTheme.colorScheme.secondaryContainer
-        else -> "Chain broken at entry ${verification.firstBrokenSeq} — an entry has been " +
-            "edited or removed since it was written" to MaterialTheme.colorScheme.errorContainer
-    }
-    Card(
-        colors = CardDefaults.cardColors(containerColor = container),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(text, Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        when {
+            verification == null -> Badge("Checking the chain", Tone.NEUTRAL, dot = true)
+            verification.valid -> Badge("Chain intact", Tone.SUCCESS, dot = true)
+            else -> Badge("Chain broken at entry ${verification.firstBrokenSeq}", Tone.DANGER, dot = true)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            when {
+                verification == null -> ""
+                verification.valid -> "No entry has been edited or removed."
+                else -> "An entry was edited or removed after it was written."
+            },
+            style = Ethan.type.bodySmall,
+            color = if (verification?.valid == false) Ethan.colors.textDanger else Ethan.colors.textMuted,
+        )
     }
 }
 
 @Composable
 private fun EventRow(event: AuditEvent) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth()) {
-            Text(describe(event.kind), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            Text(formatStamp(event.atMs), style = MaterialTheme.typography.bodySmall)
-        }
-        val who = listOfNotNull(
-            event.viewerLabel.takeIf { it.isNotBlank() },
-            event.viewerFingerprint.takeIf { it.isNotBlank() },
-            event.sourceIp.takeIf { it.isNotBlank() },
-            event.detail.takeIf { it.isNotBlank() },
-        ).joinToString(" · ")
-        if (who.isNotBlank()) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(describe(event), style = Ethan.type.bodyStrong, color = Ethan.colors.textHeading, modifier = Modifier.weight(1f), maxLines = 1)
             Text(
-                who,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                clock.format(Instant.ofEpochMilli(event.atMs).atZone(ZoneId.systemDefault())),
+                style = Ethan.type.monoSmall, color = Ethan.colors.textFaint,
             )
         }
+        // The first block of the fingerprint tells two phones of the same model apart; the
+        // whole of it is on the paired-devices screen.
+        val device = when {
+            event.viewerLabel.isNotBlank() && event.viewerFingerprint.isNotBlank() ->
+                "${event.viewerLabel} (${event.viewerFingerprint.substringBefore('-')})"
+            else -> event.viewerLabel.ifBlank { event.viewerFingerprint }
+        }
+        val who = listOfNotNull(
+            device.takeIf { it.isNotBlank() },
+            event.sourceIp.takeIf { it.isNotBlank() },
+            event.detail.takeIf { it.isNotBlank() && it != LIVE_VIDEO },
+        ).joinToString(" · ")
+        if (who.isNotBlank()) {
+            Text(who, style = Ethan.type.monoSmall, color = Ethan.colors.textMuted)
+        }
     }
+}
+
+private const val LIVE_VIDEO = "live video"
+
+/**
+ * A viewer connecting and a viewer starting live video are two entries of the same kind,
+ * told apart only by their detail; named separately they stop reading as a duplicate.
+ */
+private fun describe(event: AuditEvent): String = when {
+    event.kind == AuditEvent.Kind.SESSION_OPENED && event.detail == LIVE_VIDEO -> "Live view started"
+    event.kind == AuditEvent.Kind.SESSION_OPENED -> "Connected"
+    event.kind == AuditEvent.Kind.SESSION_CLOSED && event.detail.contains("·") -> "Live view ended"
+    event.kind == AuditEvent.Kind.SESSION_CLOSED -> "Disconnected"
+    else -> describe(event.kind)
 }
 
 private fun describe(kind: AuditEvent.Kind): String = when (kind) {

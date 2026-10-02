@@ -2,21 +2,23 @@ package com.homecam.app.viewer.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.homecam.app.R
+import com.homecam.app.ui.kit.EmptyState
+import com.homecam.app.ui.kit.Gutter
+import com.homecam.app.ui.kit.PaperCard
+import com.homecam.app.ui.kit.PrimaryButton
+import com.homecam.app.ui.kit.SecondaryButton
+import com.homecam.app.ui.theme.Ethan
 
 sealed interface PairState {
     data object Connecting : PairState
@@ -26,45 +28,40 @@ sealed interface PairState {
 
 @Composable
 fun PairConfirmScreen(state: PairState, onAccept: () -> Unit, onReject: () -> Unit, onRetry: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        when (state) {
-            PairState.Connecting -> {
-                CircularProgressIndicator()
-                Spacer(Modifier.height(16.dp))
-                Text("Proving this phone to the camera…")
-            }
+    when (state) {
+        PairState.Connecting -> EmptyState("Proving this phone to the camera", busy = true)
 
-            is PairState.Confirm -> {
-                Text("Do these match?", style = MaterialTheme.typography.headlineSmall)
-                Spacer(Modifier.height(20.dp))
-                Text(
-                    state.phrase,
-                    style = MaterialTheme.typography.displaySmall
-                        .copy(fontFamily = FontFamily.Monospace),
-                )
-                Spacer(Modifier.height(20.dp))
-                Text(
-                    "The camera phone is showing a phrase too. If they differ, something " +
-                        "relayed the connection — say no and revoke it from the camera.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(24.dp))
-                Button(onClick = onAccept) { Text("They match") }
-                TextButton(onClick = onReject) { Text("They don't match") }
-            }
+        is PairState.Failed -> EmptyState(
+            line = "Pairing failed",
+            detail = state.message,
+            icon = R.drawable.lucide_circle_alert,
+        ) { PrimaryButton("Scan again", onRetry, icon = R.drawable.lucide_qr_code) }
 
-            is PairState.Failed -> {
-                Text("Pairing failed", style = MaterialTheme.typography.headlineSmall)
-                Spacer(Modifier.height(12.dp))
-                Text(state.message, textAlign = TextAlign.Center)
-                Spacer(Modifier.height(24.dp))
-                Button(onClick = onRetry) { Text("Scan again") }
-            }
+        is PairState.Confirm -> PhraseCheck(
+            phrase = state.phrase,
+            explanation = "The camera phone is showing a phrase too. If they differ, something relayed " +
+                "the connection: say no, and revoke it from the camera.",
+        ) {
+            SecondaryButton("They differ", onReject, Modifier.weight(1f))
+            PrimaryButton("They match", onAccept, Modifier.weight(1f))
         }
+    }
+}
+
+/** The step both phones show at the end of pairing, so the two read as one check. */
+@Composable
+fun PhraseCheck(phrase: String, explanation: String, actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Column(Modifier.fillMaxSize().padding(horizontal = Gutter, vertical = 24.dp), verticalArrangement = Arrangement.Center) {
+        Text("Do these match?", style = Ethan.type.display, color = Ethan.colors.textHeading)
+        Spacer(Modifier.height(14.dp))
+        PaperCard(padding = 16.dp) {
+            Text("VERIFICATION PHRASE", style = Ethan.type.micro, color = Ethan.colors.textFaint)
+            Spacer(Modifier.height(4.dp))
+            Text(phrase, style = Ethan.type.monoLarge, color = Ethan.colors.textHeading)
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(explanation, style = Ethan.type.body, color = Ethan.colors.textBody)
+        Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), content = actions)
     }
 }

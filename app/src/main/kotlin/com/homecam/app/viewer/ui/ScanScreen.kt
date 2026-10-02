@@ -28,6 +28,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.fillMaxWidth
+import com.homecam.app.R
+import com.homecam.app.ui.kit.EmptyState
+import com.homecam.app.ui.kit.Gutter
+import com.homecam.app.ui.kit.PrimaryButton
+import com.homecam.app.ui.kit.Rule
+import com.homecam.app.ui.kit.TopBar
+import com.homecam.app.ui.theme.Ethan
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -42,7 +50,7 @@ import com.homecam.proto.PairingInvite
 import java.util.concurrent.Executors
 
 @Composable
-fun ScanScreen(onScanned: (PairingInvite) -> Unit) {
+fun ScanScreen(onBack: () -> Unit, onScanned: (PairingInvite) -> Unit) {
     val context = LocalContext.current
     var granted by remember {
         mutableStateOf(
@@ -55,22 +63,26 @@ fun ScanScreen(onScanned: (PairingInvite) -> Unit) {
     }
     LaunchedEffect(Unit) { if (!granted) ask.launch(Manifest.permission.CAMERA) }
 
-    if (!granted) {
-        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-            Text("Scanning needs the camera", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { ask.launch(Manifest.permission.CAMERA) }) { Text("Allow") }
+    Column(Modifier.fillMaxSize()) {
+        TopBar("Add a camera", onBack = onBack)
+        if (!granted) {
+            EmptyState(
+                line = "Scanning needs the camera",
+                detail = "It is used only to read the pairing code.",
+                icon = R.drawable.lucide_qr_code,
+            ) { PrimaryButton("Allow", { ask.launch(Manifest.permission.CAMERA) }) }
+            return@Column
         }
-        return
-    }
-
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        BarcodeCamera(onScanned)
-        Text(
-            "Point at the code on the camera phone",
-            Modifier.padding(24.dp),
-            style = MaterialTheme.typography.titleMedium,
-        )
+        Box(Modifier.weight(1f).fillMaxWidth()) { BarcodeCamera(onScanned) }
+        Rule()
+        Column(Modifier.fillMaxWidth().padding(Gutter)) {
+            Text("Point at the code on the camera phone", style = Ethan.type.title3, color = Ethan.colors.textHeading)
+            Text(
+                "On the camera, choose Pair a device. The code works once and lasts two minutes.",
+                style = Ethan.type.bodySmall,
+                color = Ethan.colors.textMuted,
+            )
+        }
     }
 }
 

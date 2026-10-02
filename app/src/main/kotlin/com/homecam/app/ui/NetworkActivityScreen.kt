@@ -1,7 +1,7 @@
 package com.homecam.app.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,14 +9,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.homecam.app.ui.kit.Badge
+import com.homecam.app.ui.kit.Eyebrow
+import com.homecam.app.ui.kit.Gutter
+import com.homecam.app.ui.kit.PaperCard
+import com.homecam.app.ui.kit.Rule
+import com.homecam.app.ui.kit.Tone
+import com.homecam.app.ui.kit.TopBar
+import com.homecam.app.ui.theme.Ethan
 
 data class Egress(
     val destination: String,
@@ -32,40 +38,39 @@ data class Egress(
  */
 @Composable
 fun NetworkActivityScreen(entries: List<Egress>, onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
-        Text("Network activity", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Everything this app sends, and when. There is no analytics, no crash " +
-                "reporting, no remote config and no ad SDK — not disabled, absent.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Spacer(Modifier.height(16.dp))
-
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            entries.forEach { entry ->
-                Card(
-                    Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (entry.active) MaterialTheme.colorScheme.secondaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(entry.destination, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            if (entry.active) entry.when_ else "${entry.when_} — off",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(entry.content, style = MaterialTheme.typography.bodySmall)
+    Column(Modifier.fillMaxSize()) {
+        TopBar("Network activity", onBack = onBack)
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Gutter)) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Everything this app sends, and when. There is no analytics, no crash reporting, " +
+                    "no remote config and no ad SDK. They are not switched off; they are absent.",
+                style = Ethan.type.body,
+                color = Ethan.colors.textBody,
+            )
+            Eyebrow("Outbound connections", trailing = "${entries.count { it.active }} of ${entries.size} on")
+            PaperCard(padding = 0.dp) {
+                entries.forEachIndexed { index, entry ->
+                    if (index > 0) Rule()
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                entry.destination,
+                                style = Ethan.type.bodyStrong,
+                                color = Ethan.colors.textHeading,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Badge(if (entry.active) "On" else "Off", if (entry.active) Tone.SUCCESS else Tone.NEUTRAL, dot = true)
+                        }
+                        Text(entry.when_, style = Ethan.type.bodySmall, color = Ethan.colors.textMuted)
+                        Text(entry.content, style = Ethan.type.bodySmall, color = Ethan.colors.textFaint)
                     }
                 }
             }
+            Spacer(Modifier.height(24.dp))
         }
-
-        Spacer(Modifier.height(24.dp))
-        TextButton(onClick = onBack) { Text("Back") }
     }
 }
 

@@ -1,6 +1,6 @@
 package com.homecam.app.camera.ui
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,18 +8,33 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.homecam.app.R
 import com.homecam.app.ui.RecordingModeControl
+import com.homecam.app.ui.kit.Badge
+import com.homecam.app.ui.kit.Chevron
+import com.homecam.app.ui.kit.Eyebrow
+import com.homecam.app.ui.kit.Gutter
+import com.homecam.app.ui.kit.ListRow
+import com.homecam.app.ui.kit.LucideIcon
+import com.homecam.app.ui.kit.PaperCard
+import com.homecam.app.ui.kit.PrimaryButton
+import com.homecam.app.ui.kit.QuietButton
+import com.homecam.app.ui.kit.Rule
+import com.homecam.app.ui.kit.SwitchRow
+import com.homecam.app.ui.kit.Tone
+import com.homecam.app.ui.kit.TopBar
+import com.homecam.app.ui.theme.Ethan
+import com.homecam.app.ui.theme.EthanRadius
 import com.homecam.proto.RecordingMode
 
 /**
@@ -47,104 +62,100 @@ fun CameraHomeScreen(
     canDrawOverlays: Boolean = true,
     onAllowOverlay: () -> Unit = {},
 ) {
-    Column(Modifier.fillMaxSize().padding(20.dp)) {
-        if (liveViewerLabel != null) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    "● LIVE — $liveViewerLabel",
-                    Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
+    Column(Modifier.fillMaxSize()) {
+        TopBar(alias, subtitle = "This phone is the camera", subtitleIsData = false) {
+            Badge(
+                if (serving) "Running" else "Stopped",
+                if (serving) Tone.SUCCESS else Tone.DANGER,
+                dot = true,
+            )
+            Spacer(Modifier.width(8.dp))
         }
 
-        Text(alias, style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(16.dp))
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Gutter)) {
+            Spacer(Modifier.height(12.dp))
+            WatchingBanner(liveViewerLabel)
 
-        Card(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
+            Eyebrow("Watching")
+            PaperCard(padding = 0.dp) {
+                SwitchRow(
+                    if (armed) "Armed" else "Disarmed", armed, onArmedChange,
+                    meta = if (armed) "Detecting, recording events and alerting" else "Not detecting. Nothing is recorded or alerted",
+                )
+            }
+
+            Eyebrow("Recording")
+            PaperCard(padding = 0.dp) { RecordingModeControl(recordingMode, projectedDays, onRecordingMode) }
+
+            Eyebrow("Access")
+            PaperCard(padding = 0.dp) {
+                ListRow(
                     "$accessCount ${if (accessCount == 1) "device has" else "devices have"} access",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onManage) { Text("Manage") }
+                    meta = "See who, and revoke",
+                    onClick = onManage,
+                    leading = { LucideIcon(R.drawable.lucide_users, null) },
+                ) { Chevron() }
+                Rule()
+                ListRow("Access log", meta = "Every connection, with a tamper check", onClick = onLog,
+                    leading = { LucideIcon(R.drawable.lucide_scroll_text, null) }) { Chevron() }
+                Rule()
+                ListRow("Network activity", meta = "Everything the app sends", onClick = onNetwork,
+                    leading = { LucideIcon(R.drawable.lucide_activity, null) }) { Chevron() }
             }
-        }
+            Spacer(Modifier.height(12.dp))
+            PrimaryButton("Pair a device", onPair, Modifier.fillMaxWidth(), icon = R.drawable.lucide_qr_code)
 
-        Spacer(Modifier.height(16.dp))
-        Card(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(if (armed) "Armed" else "Disarmed", style = MaterialTheme.typography.titleMedium)
+            if (!canDrawOverlays) {
+                Eyebrow("Needs attention")
+                PaperCard {
+                    Text("Resume after a restart", style = Ethan.type.bodyStrong, color = Ethan.colors.textHeading)
                     Text(
-                        if (armed) "Watching for events" else "Not watching",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Switch(checked = armed, onCheckedChange = onArmedChange)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                RecordingModeControl(recordingMode, projectedDays, onRecordingMode)
-            }
-        }
-
-        if (!canDrawOverlays) {
-            Spacer(Modifier.height(16.dp))
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text("Resume after a restart", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Android will not let the camera run after a restart until something is on screen. " +
+                        "Android keeps the camera off after a restart until something is on screen. " +
                             "Allowing display over other apps lets it recover by itself.",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = Ethan.type.bodySmall,
+                        color = Ethan.colors.textMuted,
                     )
-                    TextButton(onClick = onAllowOverlay, modifier = Modifier.align(Alignment.End)) {
-                        Text("Allow automatic resume")
-                    }
+                    QuietButton("Allow automatic resume", onAllowOverlay)
                 }
             }
-        }
 
-        Spacer(Modifier.height(24.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onPair, modifier = Modifier.fillMaxWidth()) {
-                Text("Pair a device")
+            Eyebrow("This phone")
+            PaperCard(padding = 0.dp) {
+                ListRow("Use this phone as a viewer", meta = "Stops the camera. Pairings and identity are kept", onClick = onSwitchRole,
+                    leading = { LucideIcon(R.drawable.lucide_repeat, null) }) { Chevron() }
+                Rule()
+                ListRow(
+                    "Identity key",
+                    meta = if (hardwareBacked) "Held in this phone's secure hardware" else "Held in software; this phone has no hardware keystore",
+                    leading = { LucideIcon(R.drawable.lucide_lock, null) },
+                ) { Badge(if (hardwareBacked) "Hardware" else "Software", if (hardwareBacked) Tone.SUCCESS else Tone.WARNING) }
             }
-            OutlinedButton(onClick = onLog, modifier = Modifier.fillMaxWidth()) {
-                Text("Access log")
-            }
-            OutlinedButton(onClick = onNetwork, modifier = Modifier.fillMaxWidth()) {
-                Text("Network activity")
-            }
-            TextButton(onClick = onSwitchRole, modifier = Modifier.fillMaxWidth()) {
-                Text("Use this phone as a viewer")
-            }
+            Spacer(Modifier.height(24.dp))
         }
+    }
+}
 
-        Spacer(Modifier.weight(1f))
-        Text(
-            if (serving) "Listening for paired devices" else "Not listening — the camera service is stopped",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Text(
-            if (hardwareBacked) "Identity key is held in this phone's secure hardware"
-            else "Identity key is held in software — this phone has no hardware keystore",
-            style = MaterialTheme.typography.bodySmall,
-        )
+/** Always on screen, so "nobody" is a statement and not an absence. */
+@Composable
+private fun WatchingBanner(liveViewerLabel: String?) {
+    val live = liveViewerLabel != null
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(EthanRadius.card))
+            .background(if (live) Ethan.colors.accent else Ethan.colors.bgSunken)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LucideIcon(R.drawable.lucide_eye, null, tint = if (live) Ethan.colors.onAccent else Ethan.colors.textFaint)
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(
+                if (live) "Being watched now" else "Nobody is watching",
+                style = Ethan.type.title3,
+                color = if (live) Ethan.colors.onAccent else Ethan.colors.textHeading,
+            )
+            if (live) Text(liveViewerLabel.orEmpty(), style = Ethan.type.monoSmall, color = Ethan.colors.onAccent)
+        }
     }
 }

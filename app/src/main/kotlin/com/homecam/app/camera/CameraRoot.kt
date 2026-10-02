@@ -3,6 +3,7 @@ package com.homecam.app.camera
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -90,6 +91,11 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
         CameraService.start(context)
     }
 
+    BackHandler(enabled = screen != CameraScreen.HOME) {
+        if (screen == CameraScreen.PAIRING) node.cancelPairing()
+        screen = CameraScreen.HOME
+    }
+
     when (screen) {
         CameraScreen.HOME -> CameraHomeScreen(
             alias = settings.alias,
@@ -125,6 +131,7 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
             sessionsIn30d = node::sessionsIn30d,
             onRevoke = { scope.launch { node.revoke(it) } },
             onRevokeAll = { scope.launch { node.revokeAll(); screen = CameraScreen.HOME } },
+            onBack = { screen = CameraScreen.HOME },
         )
 
         CameraScreen.PAIRING -> PairingScreen(
@@ -153,7 +160,7 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
             val verification by produceState<AuditChain.Verification?>(null, events.size) {
                 value = graph.audit.verify()
             }
-            AuditScreen(events, verification)
+            AuditScreen(events, verification, onBack = { screen = CameraScreen.HOME })
         }
     }
 }

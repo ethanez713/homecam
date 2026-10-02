@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import com.homecam.app.camera.CameraRoot
@@ -26,13 +27,14 @@ class MainActivity : ComponentActivity() {
         val roles = RoleStore(this)
         setContent {
             HomecamTheme {
-                Surface(Modifier.fillMaxSize().safeDrawingPadding()) {
+                // The paper runs under the system bars; only the content keeps clear of them.
+                Surface(Modifier.fillMaxSize()) { Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                     var role by remember { mutableStateOf(roles.role) }
                     // Leaving the camera role stops its foreground service; both stores
                     // (this phone's identity, its pairings) survive the switch, so a
                     // repurposed phone keeps who it already trusts.
                     val switchRole = {
-                        if (role == Role.CAMERA) CameraService.stop(this)
+                        if (role == Role.CAMERA) CameraService.stop(this@MainActivity)
                         roles.role = null
                         role = null
                     }
@@ -41,7 +43,7 @@ class MainActivity : ComponentActivity() {
                         Role.CAMERA -> CameraRoot(onSwitchRole = switchRole)
                         Role.VIEWER -> ViewerRoot(onSwitchRole = switchRole)
                     }
-                }
+                } }
             }
         }
     }

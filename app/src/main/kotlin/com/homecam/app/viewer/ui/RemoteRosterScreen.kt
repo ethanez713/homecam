@@ -1,27 +1,29 @@
 package com.homecam.app.viewer.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.homecam.app.ui.formatAgo
 import com.homecam.app.ui.formatStamp
+import com.homecam.app.ui.kit.ConfirmSheet
+import com.homecam.app.ui.kit.EmptyState
+import com.homecam.app.ui.kit.Eyebrow
+import com.homecam.app.ui.kit.Gutter
+import com.homecam.app.ui.kit.PaperCard
+import com.homecam.app.ui.kit.Rule
+import com.homecam.app.ui.kit.TopBar
+import com.homecam.app.ui.kit.DeviceRow
 import com.homecam.proto.Viewer
 
 /**
@@ -36,48 +38,43 @@ fun RemoteRosterScreen(
     onRevoke: (String) -> Unit,
     onBack: () -> Unit,
 ) {
-    if (viewers == null) {
-        Column(
-            Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) { CircularProgressIndicator() }
-        return
-    }
+    var revoking by remember { mutableStateOf<Viewer?>(null) }
 
-    Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text(
-            "${viewers.size} ${if (viewers.size == 1) "device has" else "devices have"} access",
-            style = MaterialTheme.typography.headlineSmall,
-        )
-        Spacer(Modifier.height(12.dp))
-
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.weight(1f)) {
-            items(viewers, key = { it.fingerprint }) { viewer ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(
-                            viewer.label + if (viewer.fingerprint == selfFingerprint) " (this phone)" else "",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            viewer.fingerprint,
-                            style = MaterialTheme.typography.bodySmall
-                                .copy(fontFamily = FontFamily.Monospace),
-                        )
-                        Text(
-                            "paired ${formatStamp(viewer.pairedAtMs)} · seen ${formatAgo(viewer.lastSeenMs)} · " +
-                                "${viewer.sessions30D} sessions in 30d",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = { onRevoke(viewer.fingerprint) }) { Text("Revoke") }
-                        }
-                    }
+    Column(Modifier.fillMaxSize()) {
+        TopBar("Paired devices", onBack = onBack)
+        if (viewers == null) {
+            EmptyState("Asking the camera who has access", busy = true)
+            return@Column
+        }
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Gutter)) {
+            Eyebrow("${viewers.size} ${if (viewers.size == 1) "device has" else "devices have"} access")
+            PaperCard(padding = 0.dp) {
+                viewers.forEachIndexed { index, viewer ->
+                    if (index > 0) Rule()
+                    DeviceRow(
+                        label = viewer.label,
+                        self = viewer.fingerprint == selfFingerprint,
+                        fingerprint = viewer.fingerprint,
+                        detail = "Paired ${formatStamp(viewer.pairedAtMs)} · seen ${formatAgo(viewer.lastSeenMs)} · ${viewer.sessions30D} sessions in 30 days",
+                        onRevoke = { revoking = viewer },
+                    )
                 }
             }
+            Spacer(Modifier.height(24.dp))
         }
+    }
 
-        TextButton(onClick = onBack) { Text("Back") }
+    revoking?.let { viewer ->
+        ConfirmSheet(
+            title = "Revoke ${viewer.label}?",
+            body = if (viewer.fingerprint == selfFingerprint) {
+                "This is the phone you are holding. It loses access at once and has to pair again from the camera's screen."
+            } else {
+                "It loses access at once, and any session it has open ends. It has to scan a new code to come back."
+            },
+            confirm = "Revoke",
+            onConfirm = { onRevoke(viewer.fingerprint) },
+            onDismiss = { revoking = null },
+        )
     }
 }

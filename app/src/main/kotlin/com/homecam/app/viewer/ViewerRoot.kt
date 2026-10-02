@@ -1,5 +1,6 @@
 package com.homecam.app.viewer
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,6 +44,8 @@ fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
     var screen by remember { mutableStateOf<ViewerScreen>(ViewerScreen.Home) }
     val cameras by node.paired.collectAsState()
 
+    BackHandler(enabled = screen != ViewerScreen.Home && screen !is ViewerScreen.Live) { screen = ViewerScreen.Home }
+
     when (val current = screen) {
         ViewerScreen.Home -> ViewerHomeScreen(
             cameras = cameras,
@@ -54,7 +57,7 @@ fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
             onSwitchRole = onSwitchRole,
         )
 
-        ViewerScreen.Scan -> ScanScreen { invite -> screen = ViewerScreen.Pairing(invite) }
+        ViewerScreen.Scan -> ScanScreen(onBack = { screen = ViewerScreen.Home }) { invite -> screen = ViewerScreen.Pairing(invite) }
 
         is ViewerScreen.Pairing -> {
             var state by remember(current.invite) {
@@ -102,7 +105,7 @@ fun ViewerRoot(onSwitchRole: () -> Unit = {}) {
             val verification by produceState<AuditChain.Verification?>(null, events.size) {
                 value = graph.audit.verify()
             }
-            AuditScreen(events, verification)
+            AuditScreen(events, verification, onBack = { screen = ViewerScreen.Home })
         }
     }
 }

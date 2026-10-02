@@ -2,6 +2,7 @@ package com.homecam.app.viewer.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,26 +12,36 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.homecam.app.ui.RecordingModeControl
+import com.homecam.app.ui.kit.Badge
+import com.homecam.app.ui.kit.Chevron
+import com.homecam.app.ui.kit.EmptyState
+import com.homecam.app.ui.kit.Eyebrow
+import com.homecam.app.ui.kit.Gutter
+import com.homecam.app.ui.kit.ListRow
+import com.homecam.app.ui.kit.PaperCard
+import com.homecam.app.ui.kit.PrimaryButton
+import com.homecam.app.ui.kit.Rule
+import com.homecam.app.ui.kit.SecondaryButton
+import com.homecam.app.ui.kit.Sheet
+import com.homecam.app.ui.kit.SwitchRow
+import com.homecam.app.ui.kit.Tag
+import com.homecam.app.ui.kit.Tone
+import com.homecam.app.ui.theme.Ethan
 import com.homecam.proto.RecordingMode
 import com.homecam.proto.SettingsSnapshot
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CameraSettingsScreen(
     settings: SettingsSnapshot?,
@@ -53,137 +64,156 @@ fun CameraSettingsScreen(
     onAlerts: (Boolean) -> Unit,
     remoteAddress: String,
     onRemoteAddress: (String) -> Unit,
-    onBack: () -> Unit,
+    onDevices: () -> Unit,
+    verificationPhrase: String = "",
 ) {
     if (settings == null) {
-        Column(
-            Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) { CircularProgressIndicator() }
+        EmptyState("Reading the camera's settings", busy = true)
         return
     }
 
-    var alias by remember(settings.alias) { mutableStateOf(settings.alias) }
+    var editing by remember { mutableStateOf<Field?>(null) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
-        Text("Camera settings", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = alias,
-            onValueChange = { alias = it },
-            label = { Text("Name") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { onAlias(alias) }, enabled = alias != settings.alias) {
-                Text("Rename")
-            }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Gutter)) {
+        Eyebrow("Watching")
+        PaperCard(padding = 0.dp) {
+            SwitchRow(
+                "Armed", settings.armed, onArmed,
+                meta = if (settings.armed) "Detecting, recording events and alerting" else "Not detecting. Nothing is recorded or alerted",
+            )
+            Rule()
+            SwitchRow("Push alerts to this phone", alertsEnabled, onAlerts, meta = "Encrypted to this phone; the push service sees only ciphertext")
         }
 
-        Spacer(Modifier.height(8.dp))
-        Toggle("Armed", "Watch for events and send alerts", settings.armed, onArmed)
-        Toggle("Microphone", "Send the camera's audio", settings.microphone, onMicrophone)
+        Eyebrow("Recording")
+        PaperCard(padding = 0.dp) { RecordingModeControl(settings.recordingMode, projectedDays, onRecordingMode) }
 
-        Spacer(Modifier.height(16.dp))
-        RecordingModeControl(settings.recordingMode, projectedDays, onRecordingMode)
-
-        Spacer(Modifier.height(16.dp))
-        Text("Detect", style = MaterialTheme.typography.titleMedium)
         val mode = settings.detectionMode
-        Toggle("People", null, mode.person) {
-            onDetectionMode(it, mode.vehicle, mode.pet, mode.getPackage())
-        }
-        Toggle("Vehicles", null, mode.vehicle) {
-            onDetectionMode(mode.person, it, mode.pet, mode.getPackage())
-        }
-        Toggle("Pets", null, mode.pet) {
-            onDetectionMode(mode.person, mode.vehicle, it, mode.getPackage())
-        }
-        Toggle("Packages", null, mode.getPackage()) {
-            onDetectionMode(mode.person, mode.vehicle, mode.pet, it)
+        Eyebrow("Detect")
+        PaperCard(padding = 0.dp) {
+            SwitchRow("People", mode.person, { onDetectionMode(it, mode.vehicle, mode.pet, mode.getPackage()) })
+            Rule()
+            SwitchRow("Vehicles", mode.vehicle, { onDetectionMode(mode.person, it, mode.pet, mode.getPackage()) })
+            Rule()
+            SwitchRow("Pets", mode.pet, { onDetectionMode(mode.person, mode.vehicle, it, mode.getPackage()) })
+            Rule()
+            SwitchRow("Packages", mode.getPackage(), { onDetectionMode(mode.person, mode.vehicle, mode.pet, it) })
         }
 
-        Spacer(Modifier.height(16.dp))
-        Text("Hear", style = MaterialTheme.typography.titleMedium)
-        Toggle(
-            "Sound detection",
-            "Record on a loud noise, using the camera's microphone (respects the mic switch)",
-            soundDetectionEnabled,
-            onSoundDetection,
-        )
-        if (soundDetectionEnabled) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                com.homecam.core.sound.SoundClasses.ALL.forEach { soundClass ->
-                    FilterChip(
-                        selected = soundClass in soundClasses,
-                        onClick = { onSoundClass(soundClass, soundClass !in soundClasses) },
-                        label = { Text(soundClass) },
-                    )
+        Eyebrow("Sound")
+        PaperCard(padding = 0.dp) {
+            SwitchRow("Microphone", settings.microphone, onMicrophone, meta = "Send the camera's audio and let it listen")
+            Rule()
+            SwitchRow("Loud sounds", soundDetectionEnabled, onSoundDetection, meta = "Record on a loud noise")
+            if (soundDetectionEnabled) {
+                Rule()
+                Column(Modifier.padding(12.dp)) {
+                    Text("Name these when heard", style = Ethan.type.bodySmall, color = Ethan.colors.textMuted)
+                    Spacer(Modifier.height(8.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        com.homecam.core.sound.SoundClasses.ALL.forEach { soundClass ->
+                            Tag(soundClass, selected = soundClass in soundClasses, onClick = { onSoundClass(soundClass, soundClass !in soundClasses) })
+                        }
+                    }
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-        Text("Respond", style = MaterialTheme.typography.titleMedium)
-        if (autoSpotlightSupported) {
-            Toggle(
-                "Auto spotlight",
-                "Turn on the camera's light when something is seen in the dark",
-                autoSpotlight,
-                onAutoSpotlight,
-            )
+        Eyebrow("Respond")
+        PaperCard(padding = 0.dp) {
+            if (autoSpotlightSupported) {
+                SwitchRow("Auto spotlight", autoSpotlight, onAutoSpotlight, meta = "Light up when something is seen in the dark")
+                Rule()
+            }
+            SwitchRow("Armed reminder", reminderEnabled, onDetectionReminder, meta = "A notice on the camera every hour while it is armed")
         }
-        Toggle(
-            "Armed reminder",
-            "Periodically remind you the camera is armed and detecting",
-            reminderEnabled,
-            onDetectionReminder,
-        )
 
-        Spacer(Modifier.height(16.dp))
-        Text("Alerts", style = MaterialTheme.typography.titleMedium)
-        Toggle(
-            "Push alerts",
-            "The camera encrypts each alert to this phone and posts only ciphertext. " +
-                "The push provider sees opaque bytes and a random topic.",
-            alertsEnabled,
-            onAlerts,
-        )
-
-        Spacer(Modifier.height(16.dp))
-        Text("Remote access", style = MaterialTheme.typography.titleMedium)
-        var remote by remember(remoteAddress) { mutableStateOf(remoteAddress) }
-        OutlinedTextField(
-            value = remote,
-            onValueChange = { remote = it },
-            label = { Text("host or host:port") },
-            supportingText = { Text("Used when the camera is not on this network. A Tailscale name works here; mDNS does not cross a tailnet.") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { onRemoteAddress(remote) }, enabled = remote != remoteAddress) {
-                Text("Save")
+        Eyebrow("Camera")
+        PaperCard(padding = 0.dp) {
+            ListRow("Name", meta = settings.alias, onClick = { editing = Field.NAME }) { Chevron() }
+            Rule()
+            ListRow(
+                "Remote address",
+                meta = remoteAddress.ifBlank { "Not set. Live view works on the home network only" },
+                metaMono = remoteAddress.isNotBlank(),
+                onClick = { editing = Field.REMOTE },
+            ) {
+                if (remoteAddress.isBlank()) Badge("Home only", Tone.WARNING)
+                Chevron()
+            }
+            Rule()
+            ListRow("Paired devices", meta = "Who can see this camera, and revoke", onClick = onDevices) { Chevron() }
+            if (verificationPhrase.isNotBlank()) {
+                Rule()
+                ListRow("Verification phrase", meta = verificationPhrase, metaMono = true)
             }
         }
-
         Spacer(Modifier.height(24.dp))
-        TextButton(onClick = onBack) { Text("Back") }
+    }
+
+    when (editing) {
+        Field.NAME -> EditSheet(
+            title = "Name this camera",
+            hint = "Shown on this phone and in alerts.",
+            initial = settings.alias,
+            onSave = onAlias,
+            onDismiss = { editing = null },
+        )
+        Field.REMOTE -> RemoteAddressSheet(remoteAddress, onRemoteAddress) { editing = null }
+        null -> Unit
+    }
+}
+
+private enum class Field { NAME, REMOTE }
+
+/** One line of text, asked for from the bottom edge. */
+@Composable
+fun EditSheet(
+    title: String,
+    hint: String,
+    initial: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+    allowBlank: Boolean = false,
+) {
+    var value by remember(initial) { mutableStateOf(initial) }
+    Sheet(onDismiss) {
+        Text(title, style = Ethan.type.title2, color = Ethan.colors.textHeading)
+        Text(hint, style = Ethan.type.bodySmall, color = Ethan.colors.textMuted)
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = { value = it },
+            singleLine = true,
+            textStyle = Ethan.type.body,
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Ethan.colors.accent,
+                unfocusedBorderColor = Ethan.colors.borderStrong,
+                focusedContainerColor = Ethan.colors.surfaceCard,
+                unfocusedContainerColor = Ethan.colors.surfaceCard,
+                cursorColor = Ethan.colors.accent,
+            ),
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryButton("Cancel", onDismiss, Modifier.weight(1f))
+            PrimaryButton(
+                "Save", { onSave(value.trim()); onDismiss() }, Modifier.weight(1f),
+                enabled = value.trim() != initial && (allowBlank || value.isNotBlank()),
+            )
+        }
     }
 }
 
 @Composable
-private fun Toggle(title: String, body: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                body?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            }
-            Switch(checked = checked, onCheckedChange = onChange)
-        }
-    }
+fun RemoteAddressSheet(current: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    EditSheet(
+        title = "Remote address",
+        hint = "The camera's Tailscale name or address, as host or host:port. Used when it is not on this network.",
+        initial = current,
+        onSave = onSave,
+        onDismiss = onDismiss,
+        allowBlank = true,
+    )
 }

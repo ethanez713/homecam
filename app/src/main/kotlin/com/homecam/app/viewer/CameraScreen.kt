@@ -7,10 +7,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Tab
-import androidx.compose.material3.LocalTextStyle
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,9 +19,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.sp
+import androidx.activity.compose.BackHandler
 import com.homecam.app.AppGraph
 import com.homecam.app.alerts.AlertKeys
 import com.homecam.app.alerts.AlertPreferences
@@ -33,10 +28,13 @@ import com.homecam.app.alerts.AlertSubscriber
 import com.homecam.app.camera.ui.AuditScreen
 import com.homecam.app.data.CameraEntity
 import com.homecam.app.viewer.ui.CameraSettingsScreen
+import com.homecam.app.viewer.ui.CameraShell
+import com.homecam.app.viewer.ui.CameraTab
 import com.homecam.app.viewer.ui.ClipsScreen
 import com.homecam.app.viewer.ui.LiveControls
 import com.homecam.app.viewer.ui.LiveScreen
 import com.homecam.app.viewer.ui.LiveState
+import com.homecam.app.viewer.ui.RemoteAddressSheet
 import com.homecam.app.viewer.ui.RemoteRosterScreen
 import com.homecam.app.data.toRetentionLimits
 import com.homecam.core.audit.AuditChain
@@ -50,16 +48,11 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "CameraScreen"
 
-private enum class CameraTab(val label: String) {
-    LIVE("Live"), CLIPS("Clips"), SETTINGS("Settings"), ACCESS("Access"), LOG("Log")
-}
-
 /**
  * Everything the viewer does with one camera, over **one** connection. The tabs are views
  * onto the same authenticated session rather than four screens that each dial the camera
  * — waking a sleeping phone four times to read four things would be its own battery bug.
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
     val context = LocalContext.current
@@ -68,6 +61,8 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
 
     var attempt by remember(camera.fingerprint) { mutableIntStateOf(0) }
     var tab by remember(camera.fingerprint) { mutableStateOf(CameraTab.LIVE) }
+    var showingDevices by remember(camera.fingerprint) { mutableStateOf(false) }
+    var playerOpen by remember(camera.fingerprint) { mutableStateOf(false) }
     var state by remember(camera.fingerprint, attempt) {
         mutableStateOf<LiveState>(LiveState.Locating(camera.alias))
     }
@@ -92,6 +87,17 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         )
     }
 
+    var editingRemote by remember { mutableStateOf(false) }
+    val saveRemoteAddress: (String) -> Unit = { entered ->
+        val host = entered.substringBefore(':').trim()
+        val port = entered.substringAfter(':', "").toIntOrNull() ?: 0
+        remoteAddress = entered
+        scope.launch { node.setRemoteAddress(camera.fingerprint, host, port) }
+    }
+    if (editingRemote) {
+        RemoteAddressSheet(remoteAddress, { saveRemoteAddress(it); attempt++ }) { editingRemote = false }
+    }
+
     // Captured, not read from state inside onDispose: when session changes from null to the
     // new connection, the old effect's disposal would otherwise close the new one.
     val sessionToClose = session
@@ -109,6 +115,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                 null,
                 runCatching { client.link.runtimeStatus() }.getOrNull(),
                 null,
+                via = if (address.host == camera.remoteHost) "Remote" else "Home network",
             )
             settings = runCatching { client.link.settings() }.getOrNull()
             capabilities = client.link.capabilities()
@@ -144,20 +151,38 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
         }.getOrNull()
     }
 
-    Column(Modifier.fillMaxSize()) {
-        if (open != null) {
-            PrimaryTabRow(selectedTabIndex = tab.ordinal) {
-                CameraTab.entries.forEach { entry ->
-                    Tab(
-                        selected = tab == entry,
-                        onClick = { tab = entry },
-                        // Five tabs at a large system font size leave no room to wrap.
-                        text = { Text(entry.label, maxLines = 1, autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = LocalTextStyle.current.fontSize)) },
-                    )
-                }
-            }
+    // The paired-devices list is a screen of its own, reached from Settings.
+    if (showingDevices) {
+        BackHandler { showingDevices = false }
+        LaunchedEffect(open) {
+            viewers = open?.let { runCatching { it.link.viewers().viewersList }.getOrNull() }
         }
+        RemoteRosterScreen(
+            viewers = viewers,
+            selfFingerprint = graph.identity.identity.shortFingerprint,
+            onRevoke = { fingerprint ->
+                edit(scope, open) {
+                    it.link.revoke(fingerprint)
+                    viewers = runCatching { it.link.viewers().viewersList }.getOrNull()
+                }
+            },
+            onBack = { showingDevices = false },
+        )
+        return
+    }
 
+    BackHandler(enabled = !playerOpen) { if (tab == CameraTab.LIVE) onExit() else tab = CameraTab.LIVE }
+
+    CameraShell(
+        alias = settings?.alias ?: camera.alias,
+        fingerprint = camera.fingerprint,
+        armed = settings?.armed,
+        tab = tab,
+        onTab = { tab = it },
+        onBack = onExit,
+        tabsEnabled = open != null,
+        chrome = !playerOpen,
+    ) {
         when (tab) {
             CameraTab.LIVE -> LiveScreen(
                 state = state,
@@ -180,13 +205,15 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                         onSiren = { on -> siren = on; scope.launch { it.link.setSiren(on) } },
                     )
                 },
-                onBack = onExit,
                 onRetry = { attempt++ },
+                onSetRemoteAddress = { editingRemote = true },
             )
 
             CameraTab.CLIPS -> {
                 var clips by remember(open) { mutableStateOf<List<com.homecam.proto.Clip>?>(null) }
                 var playing by remember(open) { mutableStateOf<java.io.File?>(null) }
+                var playingId by remember(open) { mutableStateOf<String?>(null) }
+                playerOpen = playing != null
                 var downloading by remember(open) { mutableStateOf<String?>(null) }
                 var buckets by remember(open) {
                     mutableStateOf<List<com.homecam.proto.TimelineCount.Bucket>>(emptyList())
@@ -234,8 +261,8 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                         edit(scope, open) {
                             downloading = clip.id
                             val file = java.io.File(context.cacheDir, "clips/${clip.id}.mp4")
-                            runCatching { it.link.downloadClip(clip.id, file) }
-                                .onSuccess { playing = file }
+                            runCatching { if (!file.exists()) it.link.downloadClip(clip.id, file) }
+                                .onSuccess { playing = file; playingId = clip.id }
                             downloading = null
                         }
                     },
@@ -246,6 +273,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                         edit(scope, open) { it.link.deleteClip(clip.id); refresh() }
                     },
                     onClosePlayer = { playing = null },
+                    playingId = playingId,
                 )
             }
 
@@ -304,31 +332,10 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit) {
                     }
                 },
                 remoteAddress = remoteAddress,
-                onRemoteAddress = { entered ->
-                    val host = entered.substringBefore(':').trim()
-                    val port = entered.substringAfter(':', "").toIntOrNull() ?: 0
-                    remoteAddress = entered
-                    scope.launch { node.setRemoteAddress(camera.fingerprint, host, port) }
-                },
-                onBack = { tab = CameraTab.LIVE },
+                onRemoteAddress = saveRemoteAddress,
+                onDevices = { showingDevices = true },
+                verificationPhrase = (state as? LiveState.Connected)?.phrase.orEmpty(),
             )
-
-            CameraTab.ACCESS -> {
-                LaunchedEffect(open) {
-                    viewers = open?.let { runCatching { it.link.viewers().viewersList }.getOrNull() }
-                }
-                RemoteRosterScreen(
-                    viewers = viewers,
-                    selfFingerprint = graph.identity.identity.shortFingerprint,
-                    onRevoke = { fingerprint ->
-                        edit(scope, open) {
-                            it.link.revoke(fingerprint)
-                            viewers = runCatching { it.link.viewers().viewersList }.getOrNull()
-                        }
-                    },
-                    onBack = { tab = CameraTab.LIVE },
-                )
-            }
 
             CameraTab.LOG -> {
                 var remote by remember(open) { mutableStateOf<com.homecam.proto.AuditQuery?>(null) }
