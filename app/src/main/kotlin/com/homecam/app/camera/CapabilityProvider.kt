@@ -53,6 +53,8 @@ object CapabilityProvider {
             .setContinuousRecording(true)
             .setHardwareEncoderTier(encoderTier())
             .addAllResolutions(resolutions(cameraManager))
+            .setHardwareProtection(true)
+            .setThermalStatusSupported(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
             .build()
     }
 

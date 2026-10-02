@@ -110,6 +110,7 @@ class ClipStore(context: Context, private val dao: ClipDao) {
         )
         plan.delete.forEach { delete(it.id) }
         removeOrphanFiles()
+        lastPlan = plan
         plan
     }
 
@@ -152,12 +153,16 @@ class ClipStore(context: Context, private val dao: ClipDao) {
         }
     }
 
-    private companion object {
-        const val TAG = "ClipStore"
-        const val THUMBNAIL_WIDTH = 320
-        const val THUMBNAIL_QUALITY = 75
+    companion object {
+        /** The most recent prune in this process, whichever store ran it; health reads it. */
+        @Volatile var lastPlan: PrunePlan? = null
+            private set
+
+        private const val TAG = "ClipStore"
+        private const val THUMBNAIL_WIDTH = 320
+        private const val THUMBNAIL_QUALITY = 75
         // Longer than any clip stays open: a segment is two minutes, a manual clip five.
-        const val ORPHAN_GRACE_MS = 15 * 60_000L
+        private const val ORPHAN_GRACE_MS = 15 * 60_000L
     }
 }
 

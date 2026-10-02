@@ -145,6 +145,58 @@ message RuntimeStatus {
   string camera_alias = 10;
   float detector_fps = 11;
   bool thermal_throttled = 12;
+
+  // Phase 11. Readings the camera protects itself with, and what it is doing about them.
+  Thermal thermal_status = 13;
+  // NaN when the platform cannot say (below API 30).
+  float thermal_headroom = 14;
+  // Never negative; zero while charging or before there are enough samples.
+  float drain_percent_per_hour = 15;
+  // BatteryManager.EXTRA_HEALTH as the platform reports it; zero when absent.
+  int32 battery_health = 16;
+  Level thermal_level = 17;
+  Level battery_level = 18;
+  Level storage_level = 19;
+  Cap cap = 20;
+  CapReason cap_reason = 21;
+  int64 cap_since_ms = 22;
+  // The requested recording_mode with the cap applied; the setting itself is never rewritten.
+  RecordingMode effective_recording_mode = 23;
+  int64 pinned_bytes = 24;
+  int64 floor_bytes = 25;
+  bool floor_held = 26;
+
+  // THERMAL_UNKNOWN is below API 29, where only battery_temp_c speaks for heat.
+  enum Thermal {
+    THERMAL_UNKNOWN = 0;
+    THERMAL_NONE = 1;
+    THERMAL_LIGHT = 2;
+    THERMAL_MODERATE = 3;
+    THERMAL_SEVERE = 4;
+    THERMAL_CRITICAL = 5;
+    THERMAL_EMERGENCY = 6;
+    THERMAL_SHUTDOWN = 7;
+  }
+
+  enum Level {
+    LEVEL_OK = 0;
+    LEVEL_WARN = 1;
+    LEVEL_PAUSE = 2;
+    LEVEL_CRITICAL = 3;
+  }
+
+  enum Cap {
+    CAP_NONE = 0;
+    CAP_NO_CONTINUOUS = 1;
+    CAP_NO_RECORDING = 2;
+  }
+
+  enum CapReason {
+    REASON_NONE = 0;
+    REASON_THERMAL = 1;
+    REASON_STORAGE = 2;
+    REASON_BATTERY = 3;
+  }
 }
 
 message SessionStatus {
@@ -357,6 +409,10 @@ message Capabilities {
   EncoderTier hardware_encoder_tier = 10;
   // The resolutions the camera can actually produce, best first.
   repeated Resolution resolutions = 11;
+  // Phase 11: the camera watches its own heat, battery and storage and caps recording.
+  bool hardware_protection = 12;
+  // The platform reports a thermal status (API 29+); otherwise only battery temperature.
+  bool thermal_status_supported = 13;
 
   enum EncoderTier {
     ENCODER_NONE = 0;  // software encode only

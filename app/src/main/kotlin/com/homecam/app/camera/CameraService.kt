@@ -62,6 +62,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private var mdns: MdnsAdvertiser? = null
     private lateinit var capture: ContinuousCapture
     private lateinit var recorder: Recorder
+    private lateinit var hardware: HardwareMonitor
     private lateinit var detection: DetectionPipeline
     private lateinit var audioDetection: AudioDetectionPipeline
     private lateinit var alerts: Alerts
@@ -116,12 +117,14 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 }
             },
         ).also { capture.addSink(it) }
+        hardware = HardwareMonitor(graph, recorder.clips).also { it.start() }
         startClipRollover()
 
         server = SignalingServer(graph, node).also {
             it.listener = this
             it.mediaController = this
             it.clipStore = recorder.clips
+            it.statusProvider.hardware = hardware
             it.start()
         }
         alerts = Alerts(graph)
@@ -169,6 +172,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             withTimeoutOrNull(SHUTDOWN_GRACE_MS.toLong()) { endLive(Bye.Reason.CAMERA_DISABLED, "camera stopped") }
         }
         mdns?.stop()
+        hardware.stop()
         siren.stop()
         WebRtc.capturedAudio = null
         audioDetection.close()
@@ -262,6 +266,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 recorder.tick()
                 capture.setPowerSaving(live == null && !recorder.eventInProgress)
                 statusFromPipeline()
+                if (ticks % HARDWARE_SAMPLE_EVERY_TICKS == 0) sampleHardware()
                 maintainResponses()
                 // Blindness is fifteen seconds without a frame, so the rollover tick
                 // already wakes often enough to notice it.
@@ -281,6 +286,13 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 recording = recorder.recording,
                 mode = graph.settings.current.recordingMode.name,
             )
+        }
+    }
+
+    private suspend fun sampleHardware() {
+        runCatching { hardware.sample() }.onFailure {
+            Log.w(TAG, "hardware sample failed", it)
+            graph.diagnostics.error("hardware_sample", it.message)
         }
     }
 
@@ -697,6 +709,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         private const val TAG = "CameraService"
         private const val CHANNEL_ID = "homecam.camera"
         private const val ROLLOVER_TICK_MS = 2_000L
+
+        // 15 ticks of 2 s: a reading every 30 s is plenty for a trend measured in minutes.
+        private const val HARDWARE_SAMPLE_EVERY_TICKS = 15
         private const val STATS_TIMEOUT_MS = 2_000L
         private const val NOTIFICATION_ID = 1
         private const val REMINDER_NOTIFICATION_ID = 2

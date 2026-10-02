@@ -19,7 +19,7 @@ class RuntimeStatusProvider(private val graph: AppGraph, private val node: Camer
 
     var captureFps: Float = 0f
     var detectorFps: Float = 0f
-    var thermalThrottled: Boolean = false
+    var hardware: HardwareMonitor? = null
 
     fun snapshot(clipBytes: Long): RuntimeStatus {
         val battery = graph.app.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -42,7 +42,7 @@ class RuntimeStatusProvider(private val graph: AppGraph, private val node: Camer
             .setArmed(graph.settings.current.armed)
             .setViewersWithAccess(node.accessCount.value)
             .setCameraAlias(graph.settings.current.alias)
-            .setThermalThrottled(thermalThrottled)
+            .also { hardware?.fill(it) }
             .build()
     }
 }
