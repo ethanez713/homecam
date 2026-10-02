@@ -20,6 +20,7 @@ object ControlGating {
         val siren: Boolean,
         val spotlight: Boolean,
         val soundDetection: Boolean,
+        val hardwareProtection: Boolean,
     )
 
     fun gatesFor(capabilities: Capabilities): Gates = Gates(
@@ -29,6 +30,7 @@ object ControlGating {
         siren = capabilities.siren,
         spotlight = capabilities.spotlight,
         soundDetection = capabilities.soundDetection,
+        hardwareProtection = capabilities.hardwareProtection,
     )
 
     /** One short line for a disabled control, so it says why rather than vanishing. */
@@ -39,7 +41,8 @@ object ControlGating {
         Control.SIREN -> "This camera has no siren."
         Control.SPOTLIGHT -> "This camera has no spotlight."
         Control.SOUND_DETECTION -> "This camera cannot detect sound."
+        Control.HARDWARE_PROTECTION -> "This camera cannot watch its own heat and battery."
     }
 
-    enum class Control { TORCH, PUSH_TO_TALK, LENS_SWITCH, SIREN, SPOTLIGHT, SOUND_DETECTION }
+    enum class Control { TORCH, PUSH_TO_TALK, LENS_SWITCH, SIREN, SPOTLIGHT, SOUND_DETECTION, HARDWARE_PROTECTION }
 }

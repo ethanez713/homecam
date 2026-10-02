@@ -145,6 +145,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         ClipPruneWorker.schedule(this)
         observeArming()
         observeRecordingMode()
+        observeHardwareProtection()
         observeSoundSettings()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
         running.value = true
@@ -446,6 +447,14 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         lifecycleScope.launch {
             graph.settings.settings.map { it.armed }.distinctUntilChanged().collect {
                 recorder.setArmed(it)
+            }
+        }
+    }
+
+    private fun observeHardwareProtection() {
+        lifecycleScope.launch {
+            graph.settings.settings.map { HealthProtocol.configOf(it) }.distinctUntilChanged().collect {
+                hardware.configure(it)
             }
         }
     }

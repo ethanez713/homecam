@@ -58,6 +58,7 @@ message SettingsSnapshot {
   bool auto_spotlight = 26;
   RetentionPolicy retention = 32;
   RecordingMode recording_mode = 33;
+  HardwareProtection hardware_protection = 35;
 }
 
 // The decibel half of sound detection (Phase 6): a loud noise above [threshold_db] fires,
@@ -83,6 +84,15 @@ enum RecordingMode {
 }
 
 message RecordingModeSetting { RecordingMode mode = 1; }
+
+// Whether the camera may cap its own recording to protect the phone (Phase 11). Absent from
+// a snapshot means the defaults: both rungs on, pausing at 30 %. Past CRITICAL the camera
+// caps regardless, because the risk there is the battery, not the footage.
+message HardwareProtection {
+  bool thermal_auto_pause = 1;
+  bool battery_auto_pause = 2;
+  uint32 battery_pause_percent = 3;
+}
 
 message Armed { bool armed = 1; }
 message Alias { string alias = 1; }

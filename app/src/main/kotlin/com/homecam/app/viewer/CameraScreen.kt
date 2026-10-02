@@ -42,6 +42,7 @@ import com.homecam.app.viewer.ui.RemoteAddressSheet
 import com.homecam.app.viewer.ui.RemoteRosterScreen
 import com.homecam.app.data.toRetentionLimits
 import com.homecam.core.audit.AuditChain
+import com.homecam.core.health.HealthProtocol
 import com.homecam.core.rpc.ControlGating
 import com.homecam.core.retention.ClipRef
 import com.homecam.core.retention.RetentionPlanner
@@ -336,6 +337,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                     edit(scope, open, say) { settings = it.link.setRecordingMode(mode) }
                 },
                 projectedDays = projectedDays,
+                protection = settings?.takeIf { capabilities?.hardwareProtection == true }
+                    ?.let { HealthProtocol.configOf(it) },
+                onProtection = { protection ->
+                    edit(scope, open, say) { settings = it.link.setHardwareProtection(protection) }
+                },
                 autoSpotlightSupported = capabilities?.spotlight ?: true,
                 autoSpotlight = settings?.autoSpotlight ?: false,
                 onAutoSpotlight = { on ->

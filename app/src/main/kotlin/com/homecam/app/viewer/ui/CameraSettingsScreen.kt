@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.homecam.app.ui.HardwareProtectionControl
 import com.homecam.app.ui.RecordingModeControl
 import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.Chevron
@@ -40,6 +41,8 @@ import com.homecam.app.ui.kit.SwitchRow
 import com.homecam.app.ui.kit.Tag
 import com.homecam.app.ui.kit.Tone
 import com.homecam.app.ui.theme.Ethan
+import com.homecam.core.health.HealthConfig
+import com.homecam.proto.HardwareProtection
 import com.homecam.proto.RecordingMode
 import com.homecam.proto.SettingsSnapshot
 
@@ -67,6 +70,8 @@ fun CameraSettingsScreen(
     remoteAddress: String,
     onRemoteAddress: (String) -> Unit,
     onDevices: () -> Unit,
+    protection: HealthConfig? = null,
+    onProtection: (HardwareProtection) -> Unit = {},
     onLog: () -> Unit = {},
     onForget: () -> Unit = {},
     verificationPhrase: String = "",
@@ -93,6 +98,11 @@ fun CameraSettingsScreen(
 
         Eyebrow("Recording")
         PaperCard(padding = 0.dp) { RecordingModeControl(settings.recordingMode, projectedDays, onRecordingMode) }
+
+        if (protection != null) {
+            Eyebrow("Protection")
+            PaperCard(padding = 0.dp) { HardwareProtectionControl(protection, onProtection) }
+        }
 
         val mode = settings.detectionMode
         Eyebrow("Detect")

@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString
 import com.homecam.app.AppGraph
 import com.homecam.app.data.ClipStore
 import com.homecam.app.data.toProto
+import com.homecam.core.health.HealthProtocol
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcException
 import com.homecam.core.rpc.RpcPeer
@@ -27,6 +28,7 @@ import com.homecam.proto.DetectionMode
 import com.homecam.proto.DetectionReminder
 import com.homecam.proto.DetectionSchedule
 import com.homecam.proto.DetectionZone
+import com.homecam.proto.HardwareProtection
 import com.homecam.proto.Lens
 import com.homecam.proto.LowLight
 import com.homecam.proto.ManualRecord
@@ -315,6 +317,11 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.RECORDING_MODE) {
             setRecordingMode(RecordingModeSetting.parseFrom(it).mode)
         }
+        settingSetter(peer, Controls.Settings.HARDWARE_PROTECTION) {
+            setHardwareProtection(HealthProtocol.protectionOf(HealthProtocol.configOf(
+                SettingsSnapshot.newBuilder().setHardwareProtection(HardwareProtection.parseFrom(it)).build(),
+            )))
+        }
         settingSetter(peer, Controls.Settings.AUTO_SPOTLIGHT) {
             setAutoSpotlight(AutoSpotlight.parseFrom(it).enabled)
         }
@@ -437,6 +444,7 @@ class CameraServices(
         Controls.Settings.BOUNDING_BOX_OVERLAY -> "bounding boxes"
         Controls.Settings.RETENTION -> "retention"
         Controls.Settings.RECORDING_MODE -> "recording mode"
+        Controls.Settings.HARDWARE_PROTECTION -> "hardware protection"
         Controls.Settings.AUTO_SPOTLIGHT -> "auto spotlight"
         Controls.Settings.DETECTION_REMINDER -> "detection reminder"
         Controls.Settings.SOUND_DETECTION -> "sound detection"

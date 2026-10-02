@@ -227,6 +227,7 @@ private fun Settings(snapshot: SettingsSnapshot, remote: String) {
         soundDetectionEnabled = snapshot.soundDetection.enabled, onSoundDetection = {},
         soundClasses = snapshot.soundRecognition.classesList.toSet(), onSoundClass = { _, _ -> },
         alertsEnabled = true, onAlerts = {}, remoteAddress = remote, onRemoteAddress = {}, onDevices = {},
+        protection = com.homecam.core.health.HealthConfig(),
         verificationPhrase = "amber-otter-seven", fingerprint = "Y1TM-4JVY-9K8F",
     )
 }
@@ -236,7 +237,8 @@ private fun CameraHome(watcher: String?) {
     CameraHomeScreen(
         alias = "Living room", accessCount = 2, liveViewerLabel = watcher, serving = true, armed = true,
         hardwareBacked = true, recordingMode = RecordingMode.CONTINUOUS, projectedDays = 14.0,
-        onArmedChange = {}, onRecordingMode = {}, onManage = {}, onPair = {}, onLog = {}, onNetwork = {},
+        onArmedChange = {}, onRecordingMode = {}, protection = com.homecam.core.health.HealthConfig(), onProtection = {},
+        onManage = {}, onPair = {}, onLog = {}, onNetwork = {},
         canDrawOverlays = watcher == null,
     )
 }

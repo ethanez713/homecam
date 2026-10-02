@@ -19,6 +19,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.homecam.app.AppGraph
+import com.homecam.core.health.HealthProtocol
 import com.homecam.app.camera.ui.AuditScreen
 import com.homecam.app.camera.ui.CameraHomeScreen
 import com.homecam.app.camera.ui.PairingScreen
@@ -120,6 +121,13 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
                 scope.launch {
                     graph.settings.update { setRecordingMode(mode) }
                     graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = "recording ${mode.name.lowercase()}")
+                }
+            },
+            protection = HealthProtocol.configOf(settings),
+            onProtection = { protection ->
+                scope.launch {
+                    graph.settings.update { setHardwareProtection(protection) }
+                    graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = "hardware protection")
                 }
             },
             onManage = { screen = CameraScreen.ROSTER },

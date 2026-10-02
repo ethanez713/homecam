@@ -1,7 +1,9 @@
 package com.homecam.core.health
 
+import com.homecam.proto.HardwareProtection
 import com.homecam.proto.RecordingMode
 import com.homecam.proto.RuntimeStatus
+import com.homecam.proto.SettingsSnapshot
 
 object HealthProtocol {
 
@@ -12,6 +14,24 @@ object HealthProtocol {
             if (requested == RecordingMode.CONTINUOUS) RecordingMode.DETECTION else requested
         Cap.NO_RECORDING -> RecordingMode.OFF
     }
+
+    /** A snapshot that never had the setting written reads as the defaults, not as everything off. */
+    fun configOf(settings: SettingsSnapshot): HealthConfig {
+        if (!settings.hasHardwareProtection()) return HealthConfig()
+        val protection = settings.hardwareProtection
+        val percent = protection.batteryPausePercent.takeIf { it > 0 } ?: HealthConfig.DEFAULT_BATTERY_PAUSE_PERCENT
+        return HealthConfig(
+            thermalAutoPause = protection.thermalAutoPause,
+            batteryAutoPause = protection.batteryAutoPause,
+            batteryPausePercent = HealthConfig.clampBatteryPausePercent(percent),
+        )
+    }
+
+    fun protectionOf(config: HealthConfig): HardwareProtection = HardwareProtection.newBuilder()
+        .setThermalAutoPause(config.thermalAutoPause)
+        .setBatteryAutoPause(config.batteryAutoPause)
+        .setBatteryPausePercent(HealthConfig.clampBatteryPausePercent(config.batteryPausePercent))
+        .build()
 
     fun RuntimeStatus.Builder.setHealth(state: HealthState, requested: RecordingMode): RuntimeStatus.Builder =
         setThermalLevel(state.thermal.level.toProto())

@@ -75,6 +75,15 @@ class CameraLink(private val peer: RpcPeer) {
         )
     )
 
+    suspend fun setHardwareProtection(protection: com.homecam.proto.HardwareProtection): SettingsSnapshot =
+        SettingsSnapshot.parseFrom(
+            peer.request(
+                RpcMessage.Service.SETTINGS,
+                Controls.Settings.HARDWARE_PROTECTION,
+                protection.toByteString(),
+            )
+        )
+
     suspend fun setMicrophone(enabled: Boolean): SettingsSnapshot = SettingsSnapshot.parseFrom(
         peer.request(
             RpcMessage.Service.SETTINGS,

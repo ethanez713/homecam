@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.homecam.app.R
+import com.homecam.app.ui.HardwareProtectionControl
 import com.homecam.app.ui.RecordingModeControl
 import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.Chevron
@@ -35,6 +36,8 @@ import com.homecam.app.ui.kit.Tone
 import com.homecam.app.ui.kit.TopBar
 import com.homecam.app.ui.theme.Ethan
 import com.homecam.app.ui.theme.EthanRadius
+import com.homecam.core.health.HealthConfig
+import com.homecam.proto.HardwareProtection
 import com.homecam.proto.RecordingMode
 
 /**
@@ -54,6 +57,8 @@ fun CameraHomeScreen(
     projectedDays: Double?,
     onArmedChange: (Boolean) -> Unit,
     onRecordingMode: (RecordingMode) -> Unit,
+    protection: HealthConfig,
+    onProtection: (HardwareProtection) -> Unit,
     onManage: () -> Unit,
     onPair: () -> Unit,
     onLog: () -> Unit,
@@ -86,6 +91,9 @@ fun CameraHomeScreen(
 
             Eyebrow("Recording")
             PaperCard(padding = 0.dp) { RecordingModeControl(recordingMode, projectedDays, onRecordingMode) }
+
+            Eyebrow("Protection")
+            PaperCard(padding = 0.dp) { HardwareProtectionControl(protection, onProtection) }
 
             Eyebrow("Access")
             PaperCard(padding = 0.dp) {
