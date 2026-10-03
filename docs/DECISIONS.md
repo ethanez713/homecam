@@ -285,7 +285,7 @@ told, and the session is in the audit log either way.
 
 The `recording_mode` setting is the user's request and only the user changes it: from a
 viewer or the camera's own screen (both audited), or by a timed revert the camera enforces
-itself. `HealthPolicy` (`:core` `health/`) turns heat, charge and storage into a cap, and
+itself. `HealthPolicy` (`:core` `health/`) turns heat, charge and storage into a cap (after heat has first been met by throttling, D17), and
 the recorder applies `effective = min(requested, cap)` through `RecordingGate`. When the
 cap lifts the requested mode resumes on the next tick, because a camera that paused itself
 at 3 a.m. must not wait for someone to notice and re-enable it.
@@ -314,18 +314,30 @@ same session established. A real independent commitment would declare the finger
 the signed handshake before any SDP; it was not built because nothing reachable without
 authentication can inject an SDP, and it would change the handshake transcript.
 
-## D17 — The thermal pause limit is 36 °C battery temperature, set to be watched
+## D17 — Heat is met by throttling at 36 °C, then pausing, and the limit is set to be watched
 
-Samsung advises keeping a phone under 35 °C. The thermal axis of `HealthPolicy` (D15)
-pauses continuous recording at 36 °C battery temperature, warns at 34 °C, caps recording
-outright at 50 °C, and releases only after ten minutes at 34 °C or below. The limit is one
-degree above the advice on purpose: liberal enough not to fight a phone that sits near 35 °C
-while charging, tight enough to act well before the platform's own `SEVERE` status.
+Throttling and pausing are different things. **Throttling sheds load and leaves recording
+as asked**: a lower capture and detector frame rate, a lower live bitrate, a lower
+resolution and recorder tier, the camera's own screen off, and holding the charger off until
+the battery has fallen to a fixed level (50 %, subject to whether Android allows it at all).
+Each is reversible and none of them changes what is kept. **Pausing is the recording cap of
+D15**: continuous recording falls back to detection clips. Throttling comes first and
+pausing only if throttling has not been enough.
 
-It applies on every device, together with the platform thermal status where there is one,
-and the worse of the two sets the level; a temperature rung that only runs when the
-platform gives no status never acts on a modern phone. The limit is an observed guess, not a
-measured one: an unattended 18-hour soak plugged in reached 39 °C, so a continuous recorder
-on a charger will pause often at 36. What would show it is too low, and the conditions that
-reopen it, are in the roadmap's *Observation* section. Do not raise it without those logs.
+Samsung advises keeping a phone under 35 °C. The thermal axis of `HealthPolicy` warns at
+34 °C, throttles at 36 °C battery temperature, pauses at 40 °C, caps recording outright at
+50 °C, and releases a level only after ten minutes at least 2 °C below it. 36 is one degree
+above the advice on purpose: liberal enough not to fight a phone that sits near 35 °C while
+charging, tight enough to act well before the platform's own `SEVERE` status. The platform
+status maps the same way: `MODERATE` throttles, `SEVERE` pauses, `CRITICAL` caps. The 40 °C
+pause point is a starting value to retune from observation.
 
+The temperature rungs apply on every device together with the platform status, and the worse
+of the two sets the level; a temperature rung that only runs when the platform gives no
+status never acts on a modern phone. `RuntimeStatus.thermal_throttled` is true while the
+axis is at the throttle rung or above, and the recording cap is reported separately.
+
+The limit is an observed guess, not a measured one: an unattended 18-hour soak plugged in
+reached 39 °C, so a continuous recorder on a charger will throttle often at 36. What would
+show it is too low or that throttling itself hurts, and the conditions that reopen it, are in
+the roadmap's *Observation* section. Do not raise the limit without those logs.
