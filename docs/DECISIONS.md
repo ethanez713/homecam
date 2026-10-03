@@ -313,3 +313,19 @@ that `DtlsCommitment` refuses a fingerprint that differs from the one an earlier
 same session established. A real independent commitment would declare the fingerprint in
 the signed handshake before any SDP; it was not built because nothing reachable without
 authentication can inject an SDP, and it would change the handshake transcript.
+
+## D17 — The thermal pause limit is 36 °C battery temperature, set to be watched
+
+Samsung advises keeping a phone under 35 °C. The thermal axis of `HealthPolicy` (D15)
+pauses continuous recording at 36 °C battery temperature, warns at 34 °C, caps recording
+outright at 50 °C, and releases only after ten minutes at 34 °C or below. The limit is one
+degree above the advice on purpose: liberal enough not to fight a phone that sits near 35 °C
+while charging, tight enough to act well before the platform's own `SEVERE` status.
+
+It applies on every device, together with the platform thermal status where there is one,
+and the worse of the two sets the level; a temperature rung that only runs when the
+platform gives no status never acts on a modern phone. The limit is an observed guess, not a
+measured one: an unattended 18-hour soak plugged in reached 39 °C, so a continuous recorder
+on a charger will pause often at 36. What would show it is too low, and the conditions that
+reopen it, are in the roadmap's *Observation* section. Do not raise it without those logs.
+
