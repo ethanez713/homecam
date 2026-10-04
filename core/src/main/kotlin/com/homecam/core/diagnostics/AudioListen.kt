@@ -18,7 +18,8 @@ object AudioListen {
 object PowerSavingReason {
     const val IDLE = "idle"
     const val VIEWER = "viewer"
-    const val EVENT = "event"
     const val DETECTION = "detection"
     const val MOTION = "motion"
+    const val SOUND = "sound"
+    const val MANUAL_CLIP = "manual_clip"
 }

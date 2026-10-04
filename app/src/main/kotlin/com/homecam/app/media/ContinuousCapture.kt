@@ -22,7 +22,8 @@ import kotlin.math.roundToInt
  * privacy mask sits here — upstream of every consumer, so masked pixels are never
  * available to be streamed or written (§2.8).
  */
-class ContinuousCapture(
+/** Open so a restart can be tested with a capturer that never binds the camera. */
+open class ContinuousCapture(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
 ) {
@@ -52,10 +53,25 @@ class ContinuousCapture(
         this.format = format
         maskProcessor.mask = mask
 
+        val videoCapturer = createCapturer()
+        val (textureHelper, videoSource) = attachCapturer(videoCapturer, format)
+        if (thermalThrottle) videoCapturer.setThermalThrottle(true)
+        if (powerSaving) videoCapturer.setPowerSaving(true)
+
+        helper = textureHelper
+        source = videoSource
+        capturer = videoCapturer
+    }
+
+    protected open fun createCapturer(): CameraXVideoCapturer =
+        CameraXVideoCapturer(context, lifecycleOwner)
+
+    protected open fun attachCapturer(
+        videoCapturer: CameraXVideoCapturer,
+        format: Format,
+    ): Pair<SurfaceTextureHelper?, VideoSource?> {
         val textureHelper = SurfaceTextureHelper.create("homecam-capture", WebRtc.eglBase.eglBaseContext)
         val videoSource = factory.createVideoSource(false)
-
-        val videoCapturer = CameraXVideoCapturer(context, lifecycleOwner)
         val downstream = maskedObserver(videoSource, maskProcessor)
         videoCapturer.initialize(textureHelper, context, object : CapturerObserver {
             override fun onCapturerStarted(success: Boolean) = downstream.onCapturerStarted(success)
@@ -66,11 +82,7 @@ class ContinuousCapture(
             }
         })
         videoCapturer.startCapture(format.width, format.height, format.framerate)
-        if (thermalThrottle) videoCapturer.setThermalThrottle(true)
-
-        helper = textureHelper
-        source = videoSource
-        capturer = videoCapturer
+        return textureHelper to videoSource
     }
 
     /** A track per media session; they all draw from the one capture. */
@@ -122,8 +134,17 @@ class ContinuousCapture(
 
     fun setTorch(on: Boolean) = capturer?.setTorch(on)
 
-    /** True when the sensor rate changed. False when capture is not running or the state was already set. */
-    fun setPowerSaving(saving: Boolean): Boolean = capturer?.setPowerSaving(saving) ?: false
+    /**
+     * True when the sensor rate changed. False when capture is not running or the state
+     * was already set. The request is kept either way: a restart builds a new capturer
+     * whose own flag starts off.
+     */
+    fun setPowerSaving(saving: Boolean): Boolean {
+        powerSaving = saving
+        return capturer?.setPowerSaving(saving) ?: false
+    }
+
+    private var powerSaving = false
 
     private var thermalThrottle = false
 

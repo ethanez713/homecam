@@ -40,6 +40,9 @@ class AudioDetectionPipeline(
 
     var onListen: (feed: String, started: Boolean, reason: String) -> Unit = { _, _, _ -> }
 
+    /** The decibel gate just opened, before classification and before any clip. */
+    var onSound: () -> Unit = {}
+
     private val tap = AudioTap(windowSamples) { waveform, levelDb, nowMs ->
         onWindow(waveform, levelDb, nowMs)
     }
@@ -129,6 +132,7 @@ class AudioDetectionPipeline(
         }
         if (!gate.accept(levelDb, nowMs)) return
 
+        onSound()
         onEvent(categorise(waveform, snapshot), levelDb)
     }
 

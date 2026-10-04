@@ -27,6 +27,13 @@ class DetectionPipeline(
     context: Context,
     private val settings: () -> SettingsSnapshot,
     /**
+     * The motion gate accepted this frame and no object class did. Movement releases
+     * power saving on its own, including when the detector does not run or accepts nothing.
+     */
+    private val onMotion: () -> Unit = {},
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    detect: ((Bitmap) -> List<Detection>)? = null,
+    /**
      * [thumbnailJpeg] is a small still of the frame that fired, bounded for the alert path
      * and null for a motion-only event that carries no labels. It comes off the masked
      * capture, so it can never show a region the owner masked out.
@@ -36,7 +43,10 @@ class DetectionPipeline(
 
     data class LabelledDetection(val category: String, val detection: Detection)
 
-    private val detector = ObjectDetector.create(context)
+    private val detector = if (detect == null) ObjectDetector.create(context) else null
+    private val detectFrame: (Bitmap) -> List<Detection> = detect ?: { bitmap ->
+        detector?.detect(bitmap).orEmpty()
+    }
     private val gate = MotionGate()
     private val busy = AtomicBoolean(false)
     private val inference = Any()
@@ -70,7 +80,7 @@ class DetectionPipeline(
         private set
 
     override fun onFrame(frame: VideoFrame) {
-        val now = System.currentTimeMillis()
+        val now = nowMs()
         if (now - lastGridAtMs < GRID_INTERVAL_MS) return
         lastGridAtMs = now
 
@@ -92,19 +102,31 @@ class DetectionPipeline(
             frame.buffer.also { it.retain() }
         }
         val i420 = small.toI420().also { small.release() } ?: return
+        var classifying = false
         try {
             val grid = lumaGrid(i420)
             averageLuma = grid.average().toFloat()
             if (!gate.accept(grid, now)) return
-            if (now - lastDetectAtMs < detectIntervalMs) return
-            if (!busy.compareAndSet(false, true)) return
+            // Wait for the detector only when this frame will be classified, so an accepted
+            // class owns the release. Any other open of the gate is movement, and a detector
+            // that throws still counts as movement: no class was accepted.
+            if (now - lastDetectAtMs < detectIntervalMs || !busy.compareAndSet(false, true)) {
+                onMotion()
+                return
+            }
+            classifying = true
             val previousDetectAtMs = lastDetectAtMs
             lastDetectAtMs = now
 
             val bitmap = upright(toBitmap(i420), frame.rotation)
             val detections = synchronized(inference) {
-                if (closed) null else detector?.detect(bitmap).orEmpty()
-            } ?: run { bitmap.recycle(); return }
+                if (closed) null else detectFrame(bitmap)
+            } ?: run {
+                bitmap.recycle()
+                classifying = false
+                onMotion()
+                return
+            }
 
             val accepted = detections.mapNotNull { detection ->
                 DetectionPolicy.accepts(snapshot.detectionMode, snapshot.detectionZone, detection)
@@ -114,13 +136,16 @@ class DetectionPipeline(
                 measuredFps = 1000f / (now - previousDetectAtMs).coerceAtLeast(1)
                 measuredAtMs = now
             }
+            classifying = false
             if (accepted.isNotEmpty()) {
                 onEvent(accepted, boundedJpeg(bitmap, AlertLimits.MAX_THUMBNAIL_BYTES))
-            } else if (snapshot.detectionMode.motionOnly) {
-                onEvent(accepted, null)
+            } else {
+                onMotion()
+                if (snapshot.detectionMode.motionOnly) onEvent(accepted, null)
             }
             bitmap.recycle()
         } catch (e: Exception) {
+            if (classifying) onMotion()
             Log.w(TAG, "detection frame dropped", e)
         } finally {
             busy.set(false)

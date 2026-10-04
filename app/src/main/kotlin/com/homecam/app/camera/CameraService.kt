@@ -29,6 +29,7 @@ import com.homecam.app.media.ContinuousCapture
 import com.homecam.app.media.WebRtc
 import com.homecam.core.diagnostics.PowerSavingReason
 import com.homecam.core.health.Axis
+import com.homecam.core.media.PowerSaving
 import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.HealthSample
 import com.homecam.core.health.HealthState
@@ -67,6 +68,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private var server: SignalingServer? = null
     private var mdns: MdnsAdvertiser? = null
     private lateinit var capture: ContinuousCapture
+    private lateinit var powerSaving: PowerSaving
     private lateinit var recorder: Recorder
     private lateinit var hardware: HardwareMonitor
     private lateinit var detection: DetectionPipeline
@@ -111,6 +113,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             it.setOrientation(capturePrefs().getInt(KEY_ORIENTATION, 0))
             it.start(mask = graph.settings.current.privacyMask)
         }
+        powerSaving = PowerSaving(
+            setSaving = capture::setPowerSaving,
+            log = { engaged, reason -> graph.diagnostics.powerSaving(engaged, reason) },
+        )
         recorder = Recorder(graph, capture, ClipStore(this, graph.database.clips())).also {
             it.start()
             it.setArmed(graph.settings.current.armed)
@@ -120,10 +126,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         detection = DetectionPipeline(
             context = this,
             settings = { graph.settings.current },
+            onMotion = { powerSaving.release(PowerSavingReason.MOTION) },
             onEvent = { detections, thumbnailJpeg ->
+                if (detections.isNotEmpty()) powerSaving.release(PowerSavingReason.DETECTION)
                 recorder.onDetection(detections, System.currentTimeMillis())
-                val reason = if (detections.isNotEmpty()) PowerSavingReason.DETECTION else PowerSavingReason.MOTION
-                releasePowerSaving(reason)
                 if (detections.isNotEmpty()) {
                     alerts.onDetection(detections.map { it.category }, clipId = "", thumbnailJpeg = thumbnailJpeg)
                     maybeAutoSpotlight()
@@ -164,6 +170,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 graph.diagnostics.soundEvent(category, levelDb)
             },
         ).also {
+            it.onSound = { powerSaving.release(PowerSavingReason.SOUND) }
             it.onListen = { feed, started, reason -> graph.diagnostics.audioListen(feed, started, reason) }
             it.sync()
         }
@@ -298,13 +305,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             while (true) {
                 kotlinx.coroutines.delay(ROLLOVER_TICK_MS)
                 recorder.tick()
-                val saving = live == null && !recorder.eventInProgress
-                val reason = when {
-                    saving -> PowerSavingReason.IDLE
-                    live != null -> PowerSavingReason.VIEWER
-                    else -> PowerSavingReason.EVENT
-                }
-                if (capture.setPowerSaving(saving)) graph.diagnostics.powerSaving(saving, reason)
+                powerSaving.tick(sceneIdle = live == null && !recorder.eventInProgress)
                 statusFromPipeline()
                 if (ticks % HARDWARE_SAMPLE_EVERY_TICKS == 0) sampleHardware()
                 revertTimedRecording()
@@ -583,7 +584,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         live = LiveSession(peer, media)
         media.start(throttle.bitrateCapBps)
         throttle.onSessionOpen()
-        releasePowerSaving(PowerSavingReason.VIEWER)
+        powerSaving.release(PowerSavingReason.VIEWER)
         audioDetection.setLive(true)
         showLive(peer.label)
         alerts.onSessionStarted(peer.label, viewerFingerprint)
@@ -673,7 +674,12 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 "Recording is paused: ${HealthProtocol.describeCause(hardware.state.capReason)}",
             )
         }
-        if (start) recorder.recordManually(seconds) else recorder.stopManual()
+        if (start) {
+            powerSaving.release(PowerSavingReason.MANUAL_CLIP)
+            recorder.recordManually(seconds)
+        } else {
+            recorder.stopManual()
+        }
     }
 
     override fun setSiren(on: Boolean, seconds: Int, by: Actor?) {
@@ -746,10 +752,6 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             )
         }
         if (alert) alerts.onResponseAction(detail)
-    }
-
-    private fun releasePowerSaving(reason: String) {
-        if (capture.setPowerSaving(false)) graph.diagnostics.powerSaving(engaged = false, reason = reason)
     }
 
     /** Logs only when the light, or whether it is the automatic one, changes. */
