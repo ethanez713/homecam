@@ -7,6 +7,9 @@ import com.homecam.core.pairing.CameraPairingSession
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcPeer
 import com.homecam.core.signaling.ViewerHandshake
+import com.google.protobuf.ByteString
+import com.homecam.proto.AlertRegistration
+import com.homecam.proto.AuditQuery
 import com.homecam.proto.Bye
 import com.homecam.proto.PairingInvite
 import com.homecam.proto.RevokeViewer
@@ -14,6 +17,7 @@ import com.homecam.proto.RpcMessage
 import com.homecam.proto.SessionConfig
 import com.homecam.proto.SessionStatus
 import com.homecam.proto.SignalMessage
+import com.homecam.proto.ViewerList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,7 +41,7 @@ import java.util.Base64
  *
  * `adb exec-out run-as com.homecam.app cat files/gate-sec-invite.txt`
  *
- * `./gradlew :core:deviceTest -Pdevice.host=… -Pdevice.port=… -Pdevice.inviteFile=…`
+ * `./gradlew :core:deviceTest -Pdevice.host=… -Pdevice.port=… -Pdevice.serial=… -Pdevice.inviteFile=…`
  *
  * A pin that is not in the invite is `-Pdevice.pin` (standard or URL-safe base64 of the
  * camera identity SPKI). The receiver is debug-only; after `./gradlew assembleRelease`
@@ -114,6 +118,40 @@ class HarnessClient(
         }
     }
 
+    fun isConnected(): Boolean = live != null
+
+    suspend fun viewers(): ViewerList = ViewerList.parseFrom(
+        rpc(RpcMessage.Service.ACCESS, Controls.Access.VIEWER_LIST),
+    )
+
+    /** The live session this connection owns, or the default instance when it does not. */
+    suspend fun sessionStatus(): SessionStatus = SessionStatus.parseFrom(
+        rpc(RpcMessage.Service.STATUS, Controls.Status.SESSION),
+    )
+
+    suspend fun registerAlerts(registration: AlertRegistration) {
+        rpc(
+            RpcMessage.Service.ACCESS,
+            Controls.Access.ALERT_REGISTRATION,
+            registration.toByteString(),
+        )
+    }
+
+    /**
+     * One page of the audit log. [untilMs] of 0 asks the camera for its clock, which is
+     * what the query handler already treats as "now".
+     */
+    suspend fun audit(sinceMs: Long, untilMs: Long, limit: Int): AuditQuery {
+        val query = AuditQuery.newBuilder()
+            .setSinceMs(sinceMs)
+            .setUntilMs(untilMs)
+            .setLimit(limit)
+            .build()
+        return AuditQuery.parseFrom(
+            rpc(RpcMessage.Service.AUDIT, Controls.Audit.QUERY, query.toByteString(), AUDIT_TIMEOUT_MS),
+        )
+    }
+
     fun drop() {
         val session = live ?: return
         live = null
@@ -166,6 +204,16 @@ class HarnessClient(
         }
     }
 
+    private suspend fun rpc(
+        service: RpcMessage.Service,
+        control: Int,
+        payload: ByteString = ByteString.EMPTY,
+        timeoutMs: Long = RPC_TIMEOUT_MS,
+    ): ByteString {
+        val session = live ?: error("not connected")
+        return session.rpc.request(service, control, payload, timeoutMs)
+    }
+
     private suspend fun next(session: Live): SignalMessage {
         val message = withTimeout(HANDSHAKE_TIMEOUT_MS) { session.signals.receive() }
         if (message.bodyCase == SignalMessage.BodyCase.BYE) throw HarnessRefused(message.bye.reason)
@@ -214,6 +262,8 @@ class HarnessClient(
     private companion object {
         const val HANDSHAKE_TIMEOUT_MS = 10_000L
         const val SESSION_TIMEOUT_MS = 20_000L
+        const val RPC_TIMEOUT_MS = 10_000L
+        const val AUDIT_TIMEOUT_MS = 20_000L
     }
 }
 
@@ -223,13 +273,19 @@ object DeviceConfig {
 
     fun port(): Int = property("device.port").toInt()
 
+    fun serial(): String = property("device.serial")
+
     fun invite(): PairingInvite {
         val inline = System.getProperty("device.invite")?.trim()?.takeIf { it.isNotEmpty() }
         val text = inline ?: System.getProperty("device.inviteFile")?.trim()?.takeIf { it.isNotEmpty() }
             ?.let { File(it).readText().trim() }
             ?: error("pass -Pdevice.invite or -Pdevice.inviteFile (files/gate-sec-invite.txt from the camera)")
-        return CameraPairingSession.decodeInvite(text) ?: error("invite did not decode")
+        return decodeInvite(text)
     }
+
+    /** The same decoder [invite] uses, for an invite the harness just pulled off the camera. */
+    fun decodeInvite(text: String): PairingInvite =
+        CameraPairingSession.decodeInvite(text.trim()) ?: error("invite did not decode")
 
     fun pin(invite: PairingInvite? = null): ByteArray {
         val property = System.getProperty("device.pin")?.trim()?.takeIf { it.isNotEmpty() }

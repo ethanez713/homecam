@@ -26,11 +26,12 @@ dependencies {
 }
 
 // GATE-SEC talks to a real camera, so this source set is not created — and therefore
-// not compiled, tested, or packaged — unless the address is passed in. :core:test and
-// the assemble tasks do not depend on it.
+// not compiled, tested, or packaged — unless the camera address and adb serial are
+// passed in. :core:test and the assemble tasks do not depend on it.
 val deviceHost = findProperty("device.host") as String?
 val devicePort = findProperty("device.port") as String?
-if (deviceHost != null && devicePort != null) {
+val deviceSerial = findProperty("device.serial") as String?
+if (deviceHost != null && devicePort != null && deviceSerial != null) {
     val mainSource = sourceSets.getByName("main")
     sourceSets.create("deviceTest") {
         compileClasspath += mainSource.output
@@ -50,6 +51,7 @@ if (deviceHost != null && devicePort != null) {
         testLogging { events("passed", "skipped", "failed") }
         systemProperty("device.host", deviceHost)
         systemProperty("device.port", devicePort)
+        systemProperty("device.serial", deviceSerial)
         // HttpClient latches this when its internal Utils class loads, so it has to be
         // set on the JVM, not from a test method after the first connection.
         systemProperty("jdk.internal.httpclient.disableHostnameVerification", "true")

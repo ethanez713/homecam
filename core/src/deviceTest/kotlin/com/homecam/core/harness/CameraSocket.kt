@@ -2,6 +2,8 @@ package com.homecam.core.harness
 
 import com.homecam.core.crypto.ConstantTime
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
 import java.net.ProxySelector
 import java.nio.ByteBuffer
@@ -14,6 +16,7 @@ import java.util.concurrent.CompletionStage
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLEngine
@@ -38,12 +41,18 @@ import java.io.ByteArrayOutputStream
  * Each [open] builds its own client. `HttpClient` pools idle TLS sessions, and a reused
  * session would not be a new connection or a new negotiated protocol.
  */
-internal class CameraSocket(
+internal class CameraSocket private constructor(
     private val webSocket: WebSocket,
     val incoming: Channel<ByteArray>,
     val servedCertificateHash: ByteArray,
+    private val closeState: CloseState,
 ) {
     private val closed = AtomicBoolean(false)
+
+    /** First peer close code, or -1 when the peer has not closed. Our own close does not count. */
+    val peerCloseCode: Int get() = if (closeState.peer.get()) closeState.code.get() else -1
+
+    val closedByPeer: Boolean get() = closeState.peer.get()
 
     fun send(bytes: ByteArray) {
         webSocket.sendBinary(ByteBuffer.wrap(bytes.copyOf()), true).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -51,6 +60,8 @@ internal class CameraSocket(
 
     fun close() {
         if (!closed.compareAndSet(false, true)) return
+        // Set before sendClose so the close frame we generate is not recorded as the peer's.
+        closeState.local.set(true)
         incoming.close()
         runCatching { webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "").get(2, TimeUnit.SECONDS) }
         runCatching { webSocket.abort() }
@@ -70,6 +81,7 @@ internal class CameraSocket(
                 if (tlsProtocol != null) protocols = arrayOf(tlsProtocol)
             }
             val incoming = Channel<ByteArray>(INBOUND_CAPACITY)
+            val closeState = CloseState()
             val http = HttpClient.newBuilder()
                 .sslContext(context)
                 .sslParameters(parameters)
@@ -79,7 +91,7 @@ internal class CameraSocket(
             val socket = try {
                 http.newWebSocketBuilder()
                     .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
-                    .buildAsync(signalingUri(host, port), Frames(incoming))
+                    .buildAsync(signalingUri(host, port), Frames(incoming, closeState))
                     .get(CONNECT_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS)
             } catch (e: Exception) {
                 incoming.close()
@@ -91,7 +103,7 @@ internal class CameraSocket(
                 runCatching { socket.abort() }
                 error("pin check did not see a certificate")
             }
-            return CameraSocket(socket, incoming, hash)
+            return CameraSocket(socket, incoming, hash, closeState)
         }
 
         private fun sslContext(pin: ByteArray, onCertificate: (X509Certificate) -> Unit): SSLContext {
@@ -161,28 +173,83 @@ internal class CameraSocket(
  */
 class RawConnection internal constructor(private val socket: CameraSocket) : AutoCloseable {
 
-    fun send(bytes: ByteArray) = socket.send(bytes)
+    private val sent = AtomicInteger(0)
 
-    /** The next binary frame, or null when the peer closes or [timeoutMs] elapses. */
-    fun receive(timeoutMs: Long): ByteArray? = kotlinx.coroutines.runBlocking {
-        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
-            try {
-                socket.incoming.receive()
-            } catch (e: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
-                null
+    /** Application messages handed to [send]. The TLS handshake is not one of them. */
+    val messagesSent: Int get() = sent.get()
+
+    fun send(bytes: ByteArray) {
+        sent.incrementAndGet()
+        sentTotal.incrementAndGet()
+        socket.send(bytes)
+    }
+
+    val closeCode: Int get() = socket.peerCloseCode
+
+    val closedByPeer: Boolean get() = socket.closedByPeer
+
+    /**
+     * The next binary frame, or null when the peer closes or [timeoutMs] elapses.
+     * Suspends instead of blocking a thread: a flood holds one of these per connection.
+     */
+    suspend fun receive(timeoutMs: Long): ByteArray? = withTimeoutOrNull(timeoutMs) {
+        try {
+            socket.incoming.receive()
+        } catch (e: ClosedReceiveChannelException) {
+            null
+        }
+    }
+
+    /** Waits until the peer closes. Frames received along the way are counted and discarded. */
+    suspend fun awaitPeerClose(timeoutMs: Long): PeerClose {
+        var frames = 0
+        withTimeoutOrNull(timeoutMs) {
+            while (!socket.closedByPeer) {
+                try {
+                    socket.incoming.receive()
+                    frames++
+                } catch (e: ClosedReceiveChannelException) {
+                    break
+                }
             }
         }
+        return PeerClose(
+            code = socket.peerCloseCode,
+            frames = frames,
+            byPeer = socket.closedByPeer,
+        )
     }
 
     override fun close() = socket.close()
 
     companion object {
+        private val sentTotal = AtomicInteger(0)
+
+        /** How many times [send] has been called in this process. A pin failure never increments it. */
+        fun applicationMessagesSent(): Int = sentTotal.get()
+
         fun open(host: String, port: Int, pin: ByteArray, tlsProtocol: String? = null): RawConnection =
             RawConnection(CameraSocket.open(host, port, pin, tlsProtocol))
     }
 }
 
-private class Frames(private val incoming: Channel<ByteArray>) : WebSocket.Listener {
+/** What the peer did, as opposed to a close this process initiated. */
+class PeerClose(val code: Int, val frames: Int, val byPeer: Boolean)
+
+/**
+ * [code] keeps the first peer status. A later close of our own must not replace a 1009.
+ * [local] is set before we send our own close, so that frame is not mistaken for the peer.
+ */
+private class CloseState {
+    val code = AtomicInteger(-1)
+    val local = AtomicBoolean(false)
+    val peer = AtomicBoolean(false)
+}
+
+private class Frames(
+    private val incoming: Channel<ByteArray>,
+    private val closeState: CloseState,
+) : WebSocket.Listener {
     private val partial = ByteArrayOutputStream()
 
     override fun onOpen(webSocket: WebSocket) {
@@ -218,11 +285,16 @@ private class Frames(private val incoming: Channel<ByteArray>) : WebSocket.Liste
     }
 
     override fun onClose(webSocket: WebSocket, statusCode: Int, reason: String): CompletionStage<*>? {
+        if (!closeState.local.get()) {
+            closeState.peer.set(true)
+            closeState.code.compareAndSet(-1, statusCode)
+        }
         incoming.close()
         return null
     }
 
     override fun onError(webSocket: WebSocket, error: Throwable) {
+        if (!closeState.local.get()) closeState.peer.set(true)
         incoming.close(error)
     }
 
