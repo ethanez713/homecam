@@ -95,9 +95,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     override fun onCreate() {
         super.onCreate()
+        val sirenInterrupted = Siren.recoverInterrupted(this)
         graph = AppGraph.get(this)
         node = graph.cameraNode
-        graph.diagnostics.start(startReason)
+        graph.diagnostics.start(startReason, sirenInterrupted = sirenInterrupted)
         startReason = "restart"
         createChannel()
         startForegroundWithNotification(idleNotification())
@@ -183,6 +184,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     override fun onDestroy() {
         running.value = false
         blind.value = false
+        // First, so a later teardown failure cannot skip putting the alarm volume back.
+        siren.stop()
         if (::throttle.isInitialized) throttle.forceRelease()
         ScreenDimmer.detach(screen)
         cancelCameraPausedNotification()
@@ -193,7 +196,6 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
         mdns?.stop()
         hardware.stop()
-        siren.stop()
         WebRtc.capturedAudio = null
         audioDetection.close()
         capture.removeSink(detection)

@@ -38,9 +38,10 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
 
     val run: String = DiagnosticsLines.newRunId()
 
-    fun start(reason: String) = event("service_start") {
+    fun start(reason: String, sirenInterrupted: Boolean = false) = event("service_start") {
         put("reason", reason)
         put("prev_run_unclean", lastRunWasKilled())
+        put("siren_interrupted", sirenInterrupted)
     }
 
     fun stop(reason: String) = event("service_stop") { put("reason", reason) }
