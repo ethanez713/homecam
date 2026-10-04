@@ -2,6 +2,8 @@ package com.homecam.app.camera
 
 import android.content.Context
 import android.util.Log
+import com.homecam.core.diagnostics.DiagnosticsLines
+import com.homecam.core.diagnostics.DiagnosticsLog
 import com.homecam.core.health.Axis
 import com.homecam.core.health.HealthSample
 import com.homecam.core.health.HealthState
@@ -11,7 +13,6 @@ import com.homecam.proto.RecordingMode
 import com.homecam.proto.RuntimeStatus
 import org.json.JSONObject
 import java.io.File
-import java.security.SecureRandom
 
 /**
  * A persistent, restart-surviving diagnostics log for the camera role, written for the
@@ -33,11 +34,9 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
 
     private val dir = directory.apply { mkdirs() }
     private val file = File(dir, "camera.jsonl")
-    private val rotated = File(dir, "camera.1.jsonl")
-    private val lock = Any()
+    private val log = DiagnosticsLog(file) { Log.w(TAG, "diagnostics write failed", it) }
 
-    val run: String = ByteArray(4).also { SecureRandom().nextBytes(it) }
-        .joinToString("") { "%02x".format(it) }
+    val run: String = DiagnosticsLines.newRunId()
 
     fun start(reason: String) = event("service_start") {
         put("reason", reason)
@@ -150,15 +149,7 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
             .put("event", type)
             .apply(build)
             .toString()
-        synchronized(lock) {
-            runCatching {
-                if (file.length() > MAX_BYTES) {
-                    rotated.delete()
-                    file.renameTo(rotated)
-                }
-                file.appendText(line + "\n")
-            }.onFailure { Log.w(TAG, "diagnostics write failed", it) }
-        }
+        log.append(line)
     }
 
     /** The previous run ended in a kill if the last line written was anything but a clean stop. */
@@ -170,6 +161,5 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
 
     private companion object {
         const val TAG = "CameraDiagnostics"
-        const val MAX_BYTES = 4L * 1024 * 1024
     }
 }

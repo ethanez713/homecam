@@ -1,6 +1,7 @@
 package com.homecam.app
 
 import android.content.Context
+import com.homecam.app.alerts.ViewerDiagnostics
 import com.homecam.app.camera.CameraDiagnostics
 import com.homecam.app.camera.CameraNode
 import com.homecam.app.crypto.DeviceIdentity
@@ -27,6 +28,9 @@ class AppGraph private constructor(context: Context) {
 
     /** Persistent camera diagnostics for the device gates; one run id per process. */
     val diagnostics: CameraDiagnostics by lazy { CameraDiagnostics(app) }
+
+    /** Persistent viewer alert-delivery log; one run id per process. */
+    val viewerDiagnostics: ViewerDiagnostics by lazy { ViewerDiagnostics(app) }
 
     val cameraNode: CameraNode by lazy { CameraNode(this) }
     val viewerNode: ViewerNode by lazy { ViewerNode(this) }

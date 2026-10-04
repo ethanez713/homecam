@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.os.PowerManager
 import android.util.Base64
 import android.util.Log
 import androidx.lifecycle.LifecycleService
@@ -17,6 +18,8 @@ import com.homecam.app.MainActivity
 import com.homecam.app.R
 import com.homecam.core.crypto.AlertCrypto
 import com.homecam.core.crypto.AlertEndpoint
+import com.homecam.core.diagnostics.AlertKind
+import com.homecam.core.diagnostics.DiagnosticsLines
 import com.homecam.core.health.HealthAlertLabels
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.Dispatchers
@@ -62,7 +65,10 @@ class AlertSubscriber : LifecycleService() {
         val topic = keys.topic(this)
         var backoffMs = MIN_BACKOFF_MS
 
+        var reconnecting = false
         while (true) {
+            if (reconnecting) graph.viewerDiagnostics.reconnect(backoffMs)
+            reconnecting = true
             val clean = runCatching { stream(endpoint, topic) }
                 .onFailure { Log.i(TAG, "alert stream dropped", it) }
                 .isSuccess
@@ -70,6 +76,7 @@ class AlertSubscriber : LifecycleService() {
             // reconnected immediately; a failure is a network problem and should not be
             // retried in a tight loop.
             backoffMs = if (clean) MIN_BACKOFF_MS else (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
+            if (!clean) graph.viewerDiagnostics.streamDrop(backoffMs)
             delay(backoffMs)
         }
     }
@@ -95,27 +102,28 @@ class AlertSubscriber : LifecycleService() {
         if (message.optString("event") != "message") return
         val body = message.optString("message").takeIf { it.isNotBlank() } ?: return
 
-        if (seenBefore(message.optString("id"), body)) return
-        logDeliveryDelay(message)
-
+        val repeat = seenBefore(message.optString("id"), body)
         val sealed = runCatching { Base64.decode(body, Base64.DEFAULT) }.getOrNull()
         val opened = sealed?.let { AlertCrypto.open(keys.privateKey, keys.publicKeySpki, it) }
         if (opened == null) {
             // Either the content-free fallback ping, or something we cannot read. Both
             // deserve the same non-committal nudge rather than a guess at the contents.
-            notify("homecam", "Check your camera")
+            record(message, repeat, DiagnosticsLines.alertKind(opened = false, firstLabel = null))
+            if (!repeat) notify("homecam", "Check your camera")
             return
         }
 
         val payload = runCatching { AlertPayload.parseFrom(opened) }.getOrNull() ?: return
-        val first = payload.labelsList.firstOrNull().orEmpty()
-        val isSession = first == SESSION_LABEL || HealthAlertLabels.isHealth(first)
+        val kind = DiagnosticsLines.alertKind(opened = true, firstLabel = payload.labelsList.firstOrNull())
+        record(message, repeat, kind)
+        if (repeat) return
+        val opensLive = kind == AlertKind.SESSION || kind == AlertKind.HEALTH
         notify(
             title = payload.cameraAlias.ifBlank { "homecam" },
             body = describe(payload.labelsList),
             camera = payload.cameraFingerprint,
             // A detection opens on the recording of it; a session opens on the live view.
-            atMs = payload.atMs.takeIf { !isSession } ?: 0,
+            atMs = payload.atMs.takeIf { !opensLive } ?: 0,
             thumbnail = payload.thumbnailJpeg.takeIf { !it.isEmpty }?.toByteArray(),
         )
     }
@@ -156,11 +164,18 @@ class AlertSubscriber : LifecycleService() {
      * the Doze delay GATE-F point 2 is looking for. The server's own `time` is the
      * reference so the two phones' clocks need not agree.
      */
-    private fun logDeliveryDelay(message: JSONObject) {
-        val serverTimeMs = message.optLong("time", 0) * 1000
-        if (serverTimeMs > 0) {
-            Log.i(TAG, "alert surfaced ${System.currentTimeMillis() - serverTimeMs}ms after the server had it")
+    private fun record(message: JSONObject, repeat: Boolean, kind: AlertKind) {
+        val delayMs = DiagnosticsLines.delayMs(message.optLong("time", 0), System.currentTimeMillis())
+        graph.viewerDiagnostics.alert(delayMs, repeat, kind, idleNow())
+        if (!repeat && delayMs != null) {
+            Log.i(TAG, "alert surfaced ${delayMs}ms after the server had it")
         }
+    }
+
+    /** Doze, or the screen off. Sampled at arrival, which is the moment a delay has to explain. */
+    private fun idleNow(): Boolean {
+        val power = getSystemService(PowerManager::class.java) ?: return false
+        return power.isDeviceIdleMode || !power.isInteractive
     }
 
     private fun notify(title: String, body: String, thumbnail: ByteArray? = null, camera: String = "", atMs: Long = 0) {
@@ -221,7 +236,7 @@ class AlertSubscriber : LifecycleService() {
 
     companion object {
         private const val TAG = "AlertSubscriber"
-        const val SESSION_LABEL = "session"
+        const val SESSION_LABEL = DiagnosticsLines.SESSION_LABEL
         private const val ALERT_CHANNEL = "homecam.alerts"
         private const val STATUS_CHANNEL = "homecam.alerts.status"
         private const val NOTIFICATION_ID = 2
