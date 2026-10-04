@@ -2,5 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity android:name=".debug.GalleryActivity" android:exported="true" android:theme="@style/Theme.Homecam" />
+        <activity android:name=".debug.ThrottleProbeActivity" android:exported="false" />
     </application>
 </manifest>

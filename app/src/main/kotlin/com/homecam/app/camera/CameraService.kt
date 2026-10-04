@@ -70,6 +70,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private lateinit var hardware: HardwareMonitor
     private lateinit var detection: DetectionPipeline
     private lateinit var audioDetection: AudioDetectionPipeline
+    private val screen = ScreenDimmer().also { ScreenDimmer.attach(it) }
+    private lateinit var throttle: ThermalThrottle
     private lateinit var alerts: Alerts
     private val siren by lazy { Siren(this) }
     @Volatile private var spotlightOffAtMs = 0L
@@ -122,6 +124,16 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 }
             },
         ).also { capture.addSink(it) }
+        throttle = ThermalThrottle(
+            setCaptureThrottled = { capture.setThermalThrottle(it) },
+            setDetectorThrottled = { detection.setThrottled(it) },
+            live = LiveSessionThrottle(
+                session = { live?.media },
+                format = { capture.format },
+                applyFormat = { capture.setFormat(it) },
+            ),
+            screen = screen,
+        )
         hardware = HardwareMonitor(graph, recorder.clips, ::onHealthChange).also { it.start() }
         startClipRollover()
 
@@ -171,6 +183,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     override fun onDestroy() {
         running.value = false
         blind.value = false
+        if (::throttle.isInitialized) throttle.forceRelease()
+        ScreenDimmer.detach(screen)
         cancelCameraPausedNotification()
         graph.diagnostics.stop("destroy")
         // Before the server stops, or the viewer only ever sees the socket drop.
@@ -306,6 +320,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             val requested = graph.settings.current.recordingMode
             graph.diagnostics.recordingCap(current, requested, HealthProtocol.effectiveMode(requested, current.cap))
         }
+        // The window and the capture request are main-thread objects. A thermal callback
+        // arrives on the IO scope that sampled it.
+        lifecycleScope.launch { throttle.onHealth(current, reading) }
     }
 
     private suspend fun revertTimedRecording() {
@@ -539,9 +556,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             },
         )
         live = LiveSession(peer, media)
+        media.start(throttle.bitrateCapBps)
+        throttle.onSessionOpen()
         capture.setPowerSaving(false)
         audioDetection.setLive(true)
-        media.start()
         showLive(peer.label)
         alerts.onSessionStarted(peer.label, viewerFingerprint)
 
@@ -591,13 +609,13 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     override fun setPushToTalk(active: Boolean) = Unit
 
     override suspend fun setResolution(resolution: com.homecam.proto.Resolution): SessionStatus {
-        capture.setFormat(
-            ContinuousCapture.Format(
-                width = resolution.width.coerceIn(320, 1920),
-                height = resolution.height.coerceIn(240, 1080),
-                framerate = resolution.fps.coerceIn(5, 30),
-            )
+        val next = ContinuousCapture.Format(
+            width = resolution.width.coerceIn(320, 1920),
+            height = resolution.height.coerceIn(240, 1080),
+            framerate = resolution.fps.coerceIn(5, 30),
         )
+        // A throttled live session stays at the lower tier; the request is what release restores.
+        if (!throttle.offerFormat(next)) capture.setFormat(next)
         return sessionStatus(live?.peer?.viewer?.shortFingerprint.orEmpty())
     }
 
@@ -732,6 +750,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val ending = live ?: return
         live = null
         ending.media.close()
+        if (::throttle.isInitialized) throttle.onSessionClose()
         audioDetection.setLive(false)
         showLive(null)
         if (reason == Bye.Reason.FINGERPRINT_MISMATCH) {

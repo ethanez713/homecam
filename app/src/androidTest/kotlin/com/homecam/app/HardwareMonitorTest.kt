@@ -6,7 +6,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.homecam.app.camera.CapabilityProvider
 import com.homecam.app.camera.HardwareMonitor
 import com.homecam.app.data.ClipStore
-import com.homecam.core.health.Level
 import com.homecam.proto.RuntimeStatus
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -40,7 +39,7 @@ class HardwareMonitorTest {
         val status = monitor.fill(RuntimeStatus.newBuilder()).build()
         assertTrue(status.drainPercentPerHour >= 0f)
         assertTrue(status.floorBytes > 0)
-        assertEquals(monitor.state.thermal.level >= Level.PAUSE, status.thermalThrottled)
+        assertEquals(monitor.state.throttled, status.thermalThrottled)
         assertEquals(monitor.thermalStatusSupported, status.thermalStatus != RuntimeStatus.Thermal.THERMAL_UNKNOWN)
     }
 }

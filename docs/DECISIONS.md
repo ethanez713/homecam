@@ -317,10 +317,12 @@ authentication can inject an SDP, and it would change the handshake transcript.
 ## D17 — Heat is met by throttling at 36 °C, then pausing, and the limit is set to be watched
 
 Throttling and pausing are different things. **Throttling sheds load and leaves recording
-as asked**: a lower capture and detector frame rate, a lower live bitrate, a lower
-resolution and recorder tier, the camera's own screen off, and holding the charger off until
-the battery has fallen to a fixed level (50 %, subject to whether Android allows it at all).
-Each is reversible and none of them changes what is kept. **Pausing is the recording cap of
+as asked.** While it is engaged, capture runs at the idle frame rate and the detector
+interval is doubled, in any recording mode; a live session's bitrate cap is lowered, and
+the resolution is lowered while a session is open; the app's own windows are dimmed.
+Each of those is undone when the throttle releases, and none of them
+changes what is kept. A recorder and capture tier drop is not built; it is planned for
+phase 5.1. Charger hold is not built (`SCOPE.md`). **Pausing is the recording cap of
 D15**: continuous recording falls back to detection clips. Throttling comes first and
 pausing only if throttling has not been enough.
 

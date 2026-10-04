@@ -14,6 +14,7 @@ import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.RtpCapabilities
 import org.webrtc.RtpParameters
+import org.webrtc.RtpSender
 import org.webrtc.SessionDescription
 import org.webrtc.VideoTrack
 import java.util.UUID
@@ -44,12 +45,13 @@ class CameraMediaSession(
 
     private var connection: PeerConnection? = null
     private var videoTrack: VideoTrack? = null
+    private var videoSender: RtpSender? = null
     private var audioTrack: AudioTrack? = null
     private var closed = false
     private var lastBytesSent = 0L
     private var lastStatsAtMs = 0L
 
-    fun start() {
+    fun start(maxBitrateBps: Int = MAX_BITRATE_BPS) {
         val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             // No STUN or TURN server is configured, and that is the point: on the LAN and
@@ -64,7 +66,7 @@ class CameraMediaSession(
             return
         }
 
-        addVideo()
+        addVideo(maxBitrateBps)
         if (config.audio) addAudio()
         createOffer()
     }
@@ -73,24 +75,36 @@ class CameraMediaSession(
      * The track draws from the always-on capture rather than starting a camera of its
      * own, so a second viewer costs a track and not a second camera bind.
      */
-    private fun addVideo() {
+    private fun addVideo(maxBitrateBps: Int) {
         val connection = connection ?: return
         val track = capture.newTrack() ?: return
         videoTrack = track
         val sender = connection.addTrack(track, listOf(STREAM_ID))
+        videoSender = sender
         connection.transceivers.firstOrNull { it.sender.id() == sender.id() }
             ?.setCodecPreferences(hardwareH264First())
+        applyBitrateCap(maxBitrateBps)
+    }
+
+    /** Lowers or restores the live cap without rebuilding the session. */
+    fun setBitrateCap(maxBitrateBps: Int) = applyBitrateCap(maxBitrateBps)
+
+    private fun applyBitrateCap(maxBitrateBps: Int) {
+        val connection = connection ?: return
+        val sender = videoSender ?: return
         sender.parameters = sender.parameters.apply {
             // Detail is what a camera feed is for; a jerkier picture you can read beats a
             // smooth one you cannot.
             degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
             // Without a per-encoding cap libwebrtc holds anything above 540p to 2.5 Mbps,
             // whatever setBitrate allows — thin for 1080p.
-            encodings.forEach { it.maxBitrateBps = MAX_BITRATE_BPS }
+            encodings.forEach { it.maxBitrateBps = maxBitrateBps }
         }
+        val start = START_BITRATE_BPS.coerceAtMost(maxBitrateBps)
+        val min = MIN_BITRATE_BPS.coerceAtMost(start)
         // libwebrtc starts every call at 300 kbps and ramps over tens of seconds, which on a
         // LAN means the first half-minute of every live view is 360p for no reason.
-        connection.setBitrate(MIN_BITRATE_BPS, START_BITRATE_BPS, MAX_BITRATE_BPS)
+        connection.setBitrate(min, start, maxBitrateBps)
     }
 
     /** Without this the offer leads with VP8, which the hardware encodes far worse (D6). */
@@ -248,12 +262,13 @@ class CameraMediaSession(
         }
     }
 
-    private companion object {
-        const val TAG = "CameraMediaSession"
-        const val STREAM_ID = "homecam"
-        const val AUDIO_TRACK_ID = "homecam-audio"
-        const val MIN_BITRATE_BPS = 300_000
-        const val START_BITRATE_BPS = 2_500_000
+    companion object {
+        private const val TAG = "CameraMediaSession"
+        private const val STREAM_ID = "homecam"
+        private const val AUDIO_TRACK_ID = "homecam-audio"
+        private const val MIN_BITRATE_BPS = 300_000
+        private const val START_BITRATE_BPS = 2_500_000
         const val MAX_BITRATE_BPS = 8_000_000
+        const val THROTTLED_MAX_BITRATE_BPS = MAX_BITRATE_BPS / 2
     }
 }

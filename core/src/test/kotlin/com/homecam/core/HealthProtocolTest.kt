@@ -12,6 +12,7 @@ import com.homecam.proto.RecordingMode
 import com.homecam.proto.RuntimeStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HealthProtocolTest {
@@ -56,8 +57,29 @@ class HealthProtocolTest {
         assertEquals(RuntimeStatus.Cap.CAP_NO_CONTINUOUS, parsed.cap)
         assertEquals(RuntimeStatus.CapReason.REASON_THERMAL, parsed.capReason)
         assertEquals(RuntimeStatus.Level.LEVEL_PAUSE, parsed.thermalLevel)
+        assertTrue(parsed.thermalThrottled)
         assertEquals(RecordingMode.DETECTION, parsed.effectiveRecordingMode)
         assertEquals(4.5f, parsed.drainPercentPerHour, 0.001f)
+    }
+
+    @Test
+    fun `a throttle level round-trips without capping the recording mode`() {
+        val state = HealthState(
+            thermal = AxisState(Level.THROTTLE, 10),
+            storage = AxisState(Level.OK, 0),
+            battery = AxisState(Level.OK, 0),
+            cap = Cap.NONE,
+            capReason = null,
+            capSinceMs = 0,
+            netPercentPerHour = null,
+        )
+        val status = RuntimeStatus.newBuilder().setHealth(state, RecordingMode.CONTINUOUS).build()
+        val parsed = RuntimeStatus.parseFrom(status.toByteArray())
+        assertEquals(status, parsed)
+        assertTrue(parsed.thermalThrottled)
+        assertEquals(RuntimeStatus.Level.LEVEL_THROTTLE, parsed.thermalLevel)
+        assertEquals(RecordingMode.CONTINUOUS, parsed.effectiveRecordingMode)
+        assertEquals(RuntimeStatus.Cap.CAP_NONE, parsed.cap)
     }
 
     @Test

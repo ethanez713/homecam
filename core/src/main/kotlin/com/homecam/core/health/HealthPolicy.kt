@@ -1,6 +1,6 @@
 package com.homecam.core.health
 
-enum class Level { OK, WARN, PAUSE, CRITICAL }
+enum class Level { OK, WARN, THROTTLE, PAUSE, CRITICAL }
 
 enum class Axis { THERMAL, STORAGE, BATTERY }
 
@@ -31,15 +31,20 @@ data class HealthConfig(
     }
 }
 
-/** Every threshold the policy acts on; GATE-H retunes them here and nowhere else. */
+/** Every threshold the policy acts on; observation retunes them here and nowhere else. */
 object HealthThresholds {
-    val THERMAL_WARN = ThermalStatus.MODERATE
+    val THERMAL_WARN = ThermalStatus.LIGHT
+    val THERMAL_THROTTLE = ThermalStatus.MODERATE
     val THERMAL_PAUSE = ThermalStatus.SEVERE
     val THERMAL_CRITICAL = ThermalStatus.CRITICAL
 
-    const val TEMP_WARN_C = 40f
-    const val TEMP_PAUSE_C = 45f
+    const val TEMP_WARN_C = 34f
+    const val TEMP_THROTTLE_C = 36f
+    const val TEMP_PAUSE_C = 40f
     const val TEMP_CRITICAL_C = 50f
+
+    /** A thermal level releases only once the battery is this far below the threshold that engaged it. */
+    const val TEMP_RELEASE_MARGIN_C = 2f
 
     const val BATTERY_WARN_PERCENT = 40
     const val BATTERY_PLUGGED_PAUSE_PERCENT = 50
@@ -90,6 +95,12 @@ data class HealthState(
     /** Signed charge trend, positive while rising; null until enough samples exist. */
     val netPercentPerHour: Float?,
 ) {
+    /**
+     * True while the thermal axis is at [Level.THROTTLE] or above. This sheds load.
+     * It is not a recording cap: what is kept still depends only on [cap].
+     */
+    val throttled: Boolean get() = thermal.level >= Level.THROTTLE
+
     val drainPercentPerHour: Float get() = maxOf(0f, -(netPercentPerHour ?: 0f))
 
     fun level(axis: Axis): Level = when (axis) {
@@ -115,8 +126,10 @@ data class HealthState(
  * Turns timestamped samples into a [HealthState]. A level rises the moment a reading
  * demands it and falls only after the reading has stayed lower for
  * [HealthThresholds.RELEASE_DWELL_MS], so a value hovering at a threshold makes one
- * transition rather than many. The user's recording mode is never an input or an output:
- * the result is a cap the recorder applies on top of it.
+ * transition rather than many. On the thermal axis that lower reading is
+ * [HealthThresholds.TEMP_RELEASE_MARGIN_C] below the level, or one platform status
+ * lower. The user's recording mode is never an input or an output: the result is a cap
+ * the recorder applies on top of it, plus a throttle flag that does not change what is kept.
  */
 class HealthPolicy(var config: HealthConfig = HealthConfig()) {
     private class Point(val atMs: Long, val percent: Int, val counterUah: Long)
@@ -154,41 +167,87 @@ class HealthPolicy(var config: HealthConfig = HealthConfig()) {
             releasingSince.remove(axis)
             return AxisState(raw, nowMs)
         }
-        if (!releases(current.level, raw)) {
+        if (raw == current.level || !canRelease(axis, current.level, raw)) {
             releasingSince.remove(axis)
             return current
         }
         val since = releasingSince.getOrPut(axis) { nowMs }
         if (nowMs - since < HealthThresholds.RELEASE_DWELL_MS) return current
         releasingSince.remove(axis)
-        return AxisState(if (raw == Level.OK) Level.OK else Level.PAUSE, nowMs)
+        val landed = if (axis == Axis.THERMAL || raw == Level.OK) raw else Level.PAUSE
+        return AxisState(landed, nowMs)
     }
 
-    /** CRITICAL steps down once it is no longer critical; every other level waits for OK. */
-    private fun releases(current: Level, raw: Level): Boolean = when (current) {
-        Level.OK -> false
-        Level.CRITICAL -> raw < Level.CRITICAL
+    /**
+     * Heat can step down through throttle. Battery and storage still drop straight
+     * through a warning: only clear or, from critical, the pause rung counts.
+     */
+    private fun canRelease(axis: Axis, current: Level, raw: Level): Boolean = when {
+        current == Level.OK -> false
+        axis == Axis.THERMAL -> raw < current
+        current == Level.CRITICAL -> raw < Level.CRITICAL
         else -> raw == Level.OK
     }
 
+    /**
+     * Platform status and battery temperature both apply, and the hotter one wins.
+     * A reported [ThermalStatus.NONE] is still a status: ignoring the temperature then
+     * would leave the limits idle on any phone that has a thermal API.
+     */
     private fun thermalRaw(sample: HealthSample): Level {
-        val status = sample.thermalStatus
-        val raw = if (status != null) {
-            when {
-                status >= HealthThresholds.THERMAL_CRITICAL -> Level.CRITICAL
-                status >= HealthThresholds.THERMAL_PAUSE -> Level.PAUSE
-                status >= HealthThresholds.THERMAL_WARN -> Level.WARN
-                else -> Level.OK
-            }
-        } else {
-            when {
-                sample.batteryTempC >= HealthThresholds.TEMP_CRITICAL_C -> Level.CRITICAL
-                sample.batteryTempC >= HealthThresholds.TEMP_PAUSE_C -> Level.PAUSE
-                sample.batteryTempC >= HealthThresholds.TEMP_WARN_C -> Level.WARN
-                else -> Level.OK
-            }
+        val held = state.thermal.level
+        val fromTemperature = thermalBand(temperatureEntry(sample.batteryTempC), held) { candidate ->
+            sample.batteryTempC > temperatureThreshold(candidate) - HealthThresholds.TEMP_RELEASE_MARGIN_C
         }
-        return if (raw == Level.PAUSE && !config.thermalAutoPause) Level.WARN else raw
+        val fromStatus = sample.thermalStatus?.let { status ->
+            thermalBand(statusEntry(status), held) { candidate -> status > statusRelease(candidate) }
+        } ?: Level.OK
+        val raw = maxOf(fromTemperature, fromStatus)
+        // The setting removes the pause rung only. Throttle and critical stay.
+        return if (raw == Level.PAUSE && !config.thermalAutoPause) Level.THROTTLE else raw
+    }
+
+    private fun temperatureEntry(tempC: Float): Level = when {
+        tempC >= HealthThresholds.TEMP_CRITICAL_C -> Level.CRITICAL
+        tempC >= HealthThresholds.TEMP_PAUSE_C -> Level.PAUSE
+        tempC >= HealthThresholds.TEMP_THROTTLE_C -> Level.THROTTLE
+        tempC >= HealthThresholds.TEMP_WARN_C -> Level.WARN
+        else -> Level.OK
+    }
+
+    private fun statusEntry(status: ThermalStatus): Level = when {
+        status >= HealthThresholds.THERMAL_CRITICAL -> Level.CRITICAL
+        status >= HealthThresholds.THERMAL_PAUSE -> Level.PAUSE
+        status >= HealthThresholds.THERMAL_THROTTLE -> Level.THROTTLE
+        status >= HealthThresholds.THERMAL_WARN -> Level.WARN
+        else -> Level.OK
+    }
+
+    private fun temperatureThreshold(level: Level): Float = when (level) {
+        Level.WARN -> HealthThresholds.TEMP_WARN_C
+        Level.THROTTLE -> HealthThresholds.TEMP_THROTTLE_C
+        Level.PAUSE -> HealthThresholds.TEMP_PAUSE_C
+        Level.CRITICAL -> HealthThresholds.TEMP_CRITICAL_C
+        Level.OK -> Float.NEGATIVE_INFINITY
+    }
+
+    /** One status below the status that enters [level]. Held while the reading is above this. */
+    private fun statusRelease(level: Level): ThermalStatus = when (level) {
+        Level.WARN -> ThermalStatus.NONE
+        Level.THROTTLE -> ThermalStatus.LIGHT
+        Level.PAUSE -> ThermalStatus.MODERATE
+        Level.CRITICAL -> ThermalStatus.SEVERE
+        Level.OK -> ThermalStatus.NONE
+    }
+
+    private fun thermalBand(entered: Level, held: Level, stillHeld: (Level) -> Boolean): Level {
+        if (entered >= held) return entered
+        var level = entered
+        for (candidate in Level.entries) {
+            if (candidate == Level.OK || held < candidate) continue
+            if (stillHeld(candidate)) level = maxOf(level, candidate)
+        }
+        return level
     }
 
     private fun storageRaw(sample: HealthSample): Level {
@@ -232,9 +291,9 @@ class HealthPolicy(var config: HealthConfig = HealthConfig()) {
 
     private fun capOf(thermal: Level, storage: Level, battery: Level): Pair<Cap, Axis?> {
         fun capFor(level: Level) = when (level) {
+            Level.OK, Level.WARN, Level.THROTTLE -> Cap.NONE
             Level.PAUSE -> Cap.NO_CONTINUOUS
             Level.CRITICAL -> Cap.NO_RECORDING
-            else -> Cap.NONE
         }
         val worst = listOf(Axis.THERMAL to thermal, Axis.STORAGE to storage, Axis.BATTERY to battery)
             .map { (axis, level) -> axis to capFor(level) }

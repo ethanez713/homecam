@@ -44,6 +44,17 @@ class DetectionPipeline(
 
     private var lastDetectAtMs = 0L
     private var lastGridAtMs = 0L
+    @Volatile private var intervalScale = 1
+
+    /**
+     * Doubles the detector interval while thermally throttled. The motion gate keeps its
+     * own cadence: it still has to see the frames capture is already delivering.
+     */
+    fun setThrottled(throttled: Boolean) {
+        intervalScale = if (throttled) THROTTLE_INTERVAL_SCALE else 1
+    }
+
+    val detectIntervalMs: Long get() = DETECT_INTERVAL_MS * intervalScale
 
     val available: Boolean get() = detector != null
 
@@ -85,7 +96,7 @@ class DetectionPipeline(
             val grid = lumaGrid(i420)
             averageLuma = grid.average().toFloat()
             if (!gate.accept(grid, now)) return
-            if (now - lastDetectAtMs < DETECT_INTERVAL_MS) return
+            if (now - lastDetectAtMs < detectIntervalMs) return
             if (!busy.compareAndSet(false, true)) return
             val previousDetectAtMs = lastDetectAtMs
             lastDetectAtMs = now
@@ -230,6 +241,7 @@ class DetectionPipeline(
         const val GRID_INTERVAL_MS = 200L
         const val ANALYSIS_LONG_EDGE = 640
         const val DETECT_INTERVAL_MS = 400L
+        const val THROTTLE_INTERVAL_SCALE = 2
         const val JPEG_QUALITY = 80
     }
 }

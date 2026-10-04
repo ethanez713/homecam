@@ -6,9 +6,13 @@ import com.homecam.core.health.HealthConfig
 import com.homecam.core.health.HealthPolicy
 import com.homecam.core.health.HealthSample
 import com.homecam.core.health.HealthThresholds
+import com.homecam.core.health.HealthProtocol
+import com.homecam.core.health.HealthState
 import com.homecam.core.health.Level
 import com.homecam.core.health.ThermalStatus
+import com.homecam.proto.RecordingMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -37,31 +41,58 @@ class HealthPolicyTest {
 
     private fun HealthPolicy.feed(vararg samples: HealthSample) = samples.map { update(it) }.last()
 
+    private fun thermal(level: Level, cap: Cap, throttled: Boolean) = Triple(level, cap, throttled)
+
+    private fun thermalOf(state: HealthState) = Triple(state.thermal.level, state.cap, state.throttled)
+
     @Test
     fun `thermal status maps to a level and a cap`() {
         val rows = listOf(
-            ThermalStatus.NONE to (Level.OK to Cap.NONE),
-            ThermalStatus.LIGHT to (Level.OK to Cap.NONE),
-            ThermalStatus.MODERATE to (Level.WARN to Cap.NONE),
-            ThermalStatus.SEVERE to (Level.PAUSE to Cap.NO_CONTINUOUS),
-            ThermalStatus.CRITICAL to (Level.CRITICAL to Cap.NO_RECORDING),
-            ThermalStatus.SHUTDOWN to (Level.CRITICAL to Cap.NO_RECORDING),
+            ThermalStatus.NONE to thermal(Level.OK, Cap.NONE, throttled = false),
+            ThermalStatus.LIGHT to thermal(Level.WARN, Cap.NONE, throttled = false),
+            ThermalStatus.MODERATE to thermal(Level.THROTTLE, Cap.NONE, throttled = true),
+            ThermalStatus.SEVERE to thermal(Level.PAUSE, Cap.NO_CONTINUOUS, throttled = true),
+            ThermalStatus.CRITICAL to thermal(Level.CRITICAL, Cap.NO_RECORDING, throttled = true),
+            ThermalStatus.EMERGENCY to thermal(Level.CRITICAL, Cap.NO_RECORDING, throttled = true),
+            ThermalStatus.SHUTDOWN to thermal(Level.CRITICAL, Cap.NO_RECORDING, throttled = true),
         )
         for ((status, expected) in rows) {
             val state = HealthPolicy().update(sample(thermal = status))
-            assertEquals("$status", expected, state.thermal.level to state.cap)
+            assertEquals("$status", expected, thermalOf(state))
         }
     }
 
     @Test
     fun `without a thermal status the battery temperature stands in`() {
         val rows = listOf(
-            35f to Level.OK, 40f to Level.WARN, 44.9f to Level.WARN,
-            45f to Level.PAUSE, 49.9f to Level.PAUSE, 50f to Level.CRITICAL,
+            33.9f to thermal(Level.OK, Cap.NONE, throttled = false),
+            34f to thermal(Level.WARN, Cap.NONE, throttled = false),
+            35.9f to thermal(Level.WARN, Cap.NONE, throttled = false),
+            36f to thermal(Level.THROTTLE, Cap.NONE, throttled = true),
+            39.9f to thermal(Level.THROTTLE, Cap.NONE, throttled = true),
+            40f to thermal(Level.PAUSE, Cap.NO_CONTINUOUS, throttled = true),
+            49.9f to thermal(Level.PAUSE, Cap.NO_CONTINUOUS, throttled = true),
+            50f to thermal(Level.CRITICAL, Cap.NO_RECORDING, throttled = true),
         )
-        for ((temp, level) in rows) {
+        for ((temp, expected) in rows) {
             val state = HealthPolicy().update(sample(thermal = null, tempC = temp))
-            assertEquals("$temp", level, state.thermal.level)
+            assertEquals("$temp", expected, thermalOf(state))
+        }
+    }
+
+    @Test
+    fun `a reported none status does not suppress the temperature and the worse of the two wins`() {
+        val rows = listOf(
+            sample(thermal = ThermalStatus.NONE, tempC = 33f) to thermal(Level.OK, Cap.NONE, false),
+            sample(thermal = ThermalStatus.NONE, tempC = 36f) to thermal(Level.THROTTLE, Cap.NONE, true),
+            sample(thermal = ThermalStatus.NONE, tempC = 40f) to thermal(Level.PAUSE, Cap.NO_CONTINUOUS, true),
+            sample(thermal = ThermalStatus.LIGHT, tempC = 36f) to thermal(Level.THROTTLE, Cap.NONE, true),
+            sample(thermal = ThermalStatus.SEVERE, tempC = 30f) to thermal(Level.PAUSE, Cap.NO_CONTINUOUS, true),
+            sample(thermal = ThermalStatus.MODERATE, tempC = 50f) to thermal(Level.CRITICAL, Cap.NO_RECORDING, true),
+        )
+        for ((reading, expected) in rows) {
+            val state = HealthPolicy().update(reading)
+            assertEquals("${reading.thermalStatus} @ ${reading.batteryTempC}", expected, thermalOf(state))
         }
     }
 
@@ -87,13 +118,54 @@ class HealthPolicyTest {
     }
 
     @Test
-    fun `moderate heat does not release a pause and a fresh spike restarts the dwell`() {
+    fun `a dip below the pause release that returns restarts the dwell`() {
         val policy = HealthPolicy()
-        policy.update(sample(0, thermal = ThermalStatus.SEVERE))
-        policy.update(sample(1 * minute, thermal = ThermalStatus.LIGHT))
-        policy.update(sample(8 * minute, thermal = ThermalStatus.MODERATE))
-        val state = policy.update(sample(30 * minute, thermal = ThermalStatus.MODERATE))
+        policy.update(sample(0, tempC = 40f, thermal = ThermalStatus.NONE))
+        policy.update(sample(1 * minute, tempC = 37f))
+        policy.update(sample(8 * minute, tempC = 41f))
+        val state = policy.update(sample(30 * minute, tempC = 39f))
         assertEquals(Level.PAUSE, state.thermal.level)
+        assertEquals(Cap.NO_CONTINUOUS, state.cap)
+    }
+
+    @Test
+    fun `a reading that flaps across a release point stays at the level`() {
+        val throttle = HealthPolicy()
+        val throttleLevels = (0..40).map { i ->
+            val temp = if (i % 2 == 0) 36.5f else 35f
+            throttle.update(sample(i * minute, tempC = temp, thermal = ThermalStatus.NONE)).thermal.level
+        }
+        assertEquals(listOf(Level.THROTTLE), throttleLevels.distinct())
+
+        val pause = HealthPolicy()
+        val caps = (0..40).map { i ->
+            val temp = if (i % 2 == 0) 40.5f else 39f
+            pause.update(sample(i * minute, tempC = temp, thermal = ThermalStatus.NONE)).cap
+        }
+        assertEquals(listOf(Cap.NO_CONTINUOUS), caps.distinct())
+    }
+
+    @Test
+    fun `throttle and pause release only at the margin after the dwell`() {
+        val policy = HealthPolicy()
+        assertEquals(Level.THROTTLE, policy.update(sample(0, tempC = 36f, thermal = ThermalStatus.NONE)).thermal.level)
+        assertEquals(Level.THROTTLE, policy.update(sample(1 * minute, tempC = 35f)).thermal.level)
+        policy.update(sample(2 * minute, tempC = 34f))
+        assertEquals(Level.THROTTLE, policy.update(sample(11 * minute, tempC = 34f)).thermal.level)
+        val released = policy.update(sample(12 * minute, tempC = 34f))
+        assertEquals(Level.WARN, released.thermal.level)
+        assertFalse(released.throttled)
+        assertEquals(Cap.NONE, released.cap)
+
+        val pausing = HealthPolicy()
+        assertEquals(Level.PAUSE, pausing.update(sample(0, tempC = 40f, thermal = ThermalStatus.NONE)).thermal.level)
+        assertEquals(Level.PAUSE, pausing.update(sample(1 * minute, tempC = 39f)).thermal.level)
+        pausing.update(sample(2 * minute, tempC = 38f))
+        assertEquals(Cap.NO_CONTINUOUS, pausing.update(sample(11 * minute, tempC = 38f)).cap)
+        val stepped = pausing.update(sample(12 * minute, tempC = 38f))
+        assertEquals(Level.THROTTLE, stepped.thermal.level)
+        assertEquals(Cap.NONE, stepped.cap)
+        assertTrue(stepped.throttled)
     }
 
     @Test
@@ -103,14 +175,45 @@ class HealthPolicyTest {
         policy.update(sample(1 * minute, thermal = ThermalStatus.SEVERE))
         assertEquals(Level.PAUSE, policy.update(sample(12 * minute, thermal = ThermalStatus.SEVERE)).thermal.level)
         policy.update(sample(13 * minute, thermal = ThermalStatus.LIGHT))
-        assertEquals(Level.OK, policy.update(sample(24 * minute, thermal = ThermalStatus.LIGHT)).thermal.level)
+        val warned = policy.update(sample(23 * minute, thermal = ThermalStatus.LIGHT))
+        assertEquals(Level.WARN, warned.thermal.level)
+        assertEquals(Cap.NONE, warned.cap)
+        assertFalse(warned.throttled)
+        policy.update(sample(24 * minute, thermal = ThermalStatus.NONE))
+        assertEquals(Level.OK, policy.update(sample(34 * minute, thermal = ThermalStatus.NONE)).thermal.level)
+    }
+
+    @Test
+    fun `throttling never changes the effective recording mode`() {
+        val policy = HealthPolicy()
+        val throttled = policy.update(sample(tempC = 36f, thermal = ThermalStatus.NONE))
+        assertEquals(Level.THROTTLE, throttled.thermal.level)
+        assertTrue(throttled.throttled)
+        assertEquals(Cap.NONE, throttled.cap)
+        for (mode in listOf(RecordingMode.CONTINUOUS, RecordingMode.DETECTION, RecordingMode.OFF)) {
+            assertEquals(mode, HealthProtocol.effectiveMode(mode, throttled.cap))
+        }
+        val paused = policy.update(sample(atMs = 1, tempC = 30f, thermal = ThermalStatus.SEVERE))
+        assertEquals(Cap.NO_CONTINUOUS, paused.cap)
+        assertEquals(RecordingMode.DETECTION, HealthProtocol.effectiveMode(RecordingMode.CONTINUOUS, paused.cap))
     }
 
     @Test
     fun `thermal auto-pause off disables only the pause rung`() {
         val policy = HealthPolicy(HealthConfig(thermalAutoPause = false))
-        assertEquals(Cap.NONE, policy.update(sample(0, thermal = ThermalStatus.SEVERE)).cap)
-        assertEquals(Cap.NO_RECORDING, policy.update(sample(1, thermal = ThermalStatus.CRITICAL)).cap)
+        val severe = policy.update(sample(0, thermal = ThermalStatus.SEVERE))
+        assertEquals(Level.THROTTLE, severe.thermal.level)
+        assertTrue(severe.throttled)
+        assertEquals(Cap.NONE, severe.cap)
+        val critical = policy.update(sample(1, thermal = ThermalStatus.CRITICAL))
+        assertEquals(Level.CRITICAL, critical.thermal.level)
+        assertEquals(Cap.NO_RECORDING, critical.cap)
+
+        val hot = HealthPolicy(HealthConfig(thermalAutoPause = false))
+            .update(sample(thermal = ThermalStatus.NONE, tempC = 42f))
+        assertEquals(Level.THROTTLE, hot.thermal.level)
+        assertTrue(hot.throttled)
+        assertEquals(Cap.NONE, hot.cap)
     }
 
     @Test
@@ -281,7 +384,17 @@ class HealthPolicyTest {
 
     @Test
     fun `thresholds keep their documented order`() {
-        assertTrue(HealthThresholds.TEMP_WARN_C < HealthThresholds.TEMP_PAUSE_C)
+        assertEquals(34f, HealthThresholds.TEMP_WARN_C, 0f)
+        assertEquals(36f, HealthThresholds.TEMP_THROTTLE_C, 0f)
+        assertEquals(40f, HealthThresholds.TEMP_PAUSE_C, 0f)
+        assertEquals(50f, HealthThresholds.TEMP_CRITICAL_C, 0f)
+        assertEquals(2f, HealthThresholds.TEMP_RELEASE_MARGIN_C, 0f)
+        assertEquals(ThermalStatus.LIGHT, HealthThresholds.THERMAL_WARN)
+        assertEquals(ThermalStatus.MODERATE, HealthThresholds.THERMAL_THROTTLE)
+        assertEquals(ThermalStatus.SEVERE, HealthThresholds.THERMAL_PAUSE)
+        assertEquals(ThermalStatus.CRITICAL, HealthThresholds.THERMAL_CRITICAL)
+        assertTrue(HealthThresholds.TEMP_WARN_C < HealthThresholds.TEMP_THROTTLE_C)
+        assertTrue(HealthThresholds.TEMP_THROTTLE_C < HealthThresholds.TEMP_PAUSE_C)
         assertTrue(HealthThresholds.TEMP_PAUSE_C < HealthThresholds.TEMP_CRITICAL_C)
         assertEquals(ThermalStatus.SEVERE, ThermalStatus.fromPlatform(3))
         assertEquals(ThermalStatus.SHUTDOWN, ThermalStatus.fromPlatform(99))

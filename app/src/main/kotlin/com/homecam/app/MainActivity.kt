@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import com.homecam.app.camera.CameraRoot
 import com.homecam.app.camera.CameraService
+import com.homecam.app.camera.ScreenDimmer
 import com.homecam.app.ui.RolePickerScreen
 import com.homecam.app.viewer.ViewerRoot
 import com.homecam.app.ui.theme.HomecamTheme
@@ -61,6 +62,16 @@ class MainActivity : ComponentActivity() {
     private fun requestFrom(intent: Intent?): OpenRequest? {
         val camera = intent?.getStringExtra(EXTRA_CAMERA)?.takeIf { it.isNotBlank() } ?: return null
         return OpenRequest(camera, intent.getLongExtra(EXTRA_AT_MS, 0).takeIf { it > 0 })
+    }
+
+    override fun onStart() {
+        super.onStart()
+        ScreenDimmer.register(window)
+    }
+
+    override fun onStop() {
+        ScreenDimmer.unregister(window)
+        super.onStop()
     }
 
     override fun onResume() {

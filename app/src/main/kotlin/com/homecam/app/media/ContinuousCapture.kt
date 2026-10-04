@@ -66,6 +66,7 @@ class ContinuousCapture(
             }
         })
         videoCapturer.startCapture(format.width, format.height, format.framerate)
+        if (thermalThrottle) videoCapturer.setThermalThrottle(true)
 
         helper = textureHelper
         source = videoSource
@@ -122,6 +123,14 @@ class ContinuousCapture(
     fun setTorch(on: Boolean) = capturer?.setTorch(on)
 
     fun setPowerSaving(saving: Boolean) = capturer?.setPowerSaving(saving)
+
+    private var thermalThrottle = false
+
+    /** Kept across a capture restart, which builds a new capturer. */
+    fun setThermalThrottle(on: Boolean) {
+        thermalThrottle = on
+        capturer?.setThermalThrottle(on)
+    }
 
     fun setZoom(ratio: Float) = capturer?.setZoom(ratio)
 

@@ -15,7 +15,6 @@ import com.homecam.core.health.HealthProtocol.setHealth
 import com.homecam.core.health.HealthProtocol.toProto
 import com.homecam.core.health.HealthSample
 import com.homecam.core.health.HealthState
-import com.homecam.core.health.Level
 import com.homecam.core.health.ThermalStatus
 import com.homecam.proto.RuntimeStatus
 import kotlinx.coroutines.launch
@@ -108,7 +107,6 @@ class HardwareMonitor(
         .setPinnedBytes(storage.pinnedBytes)
         .setFloorBytes(storage.floorBytes)
         .setFloorHeld(storage.floorHeld)
-        .setThermalThrottled(state.thermal.level >= Level.PAUSE)
         .setHealth(state, graph.settings.current.recordingMode)
         .apply {
             val revert = graph.settings.current.recordingRevert

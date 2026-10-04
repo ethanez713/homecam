@@ -49,6 +49,7 @@ class CameraXVideoCapturer(
     private var lensFacing = initialLensFacing
     private var format = Triple(1920, 1080, 30)
     @Volatile private var powerSaving = false
+    @Volatile private var thermalThrottle = false
 
     private var helper: SurfaceTextureHelper? = null
     private var observer: CapturerObserver? = null
@@ -165,12 +166,29 @@ class CameraXVideoCapturer(
     }
 
     /**
-     * Half rate while nothing is happening and nobody is watching: the sensor, the HAL and
+     * Idle rate while nothing is happening and nobody is watching: the sensor, the HAL and
      * both encoders all scale with frames delivered.
      */
     fun setPowerSaving(saving: Boolean) {
         if (saving == powerSaving) return
         powerSaving = saving
+        reapplyFrameRate()
+    }
+
+    /**
+     * Idle rate in any recording mode, including while a viewer is watching or a clip is
+     * open. Power saving turns back off in those cases; throttling must not.
+     */
+    fun setThermalThrottle(on: Boolean) {
+        if (on == thermalThrottle) return
+        thermalThrottle = on
+        reapplyFrameRate()
+    }
+
+    /** The rate asked of the sensor. [IDLE_FPS] while saving power or thermally throttled. */
+    val targetFps: Int get() = if (powerSaving || thermalThrottle) IDLE_FPS else format.third
+
+    private fun reapplyFrameRate() {
         ContextCompat.getMainExecutor(context).execute { camera?.let(::applyFrameRate) }
     }
 
@@ -180,7 +198,7 @@ class CameraXVideoCapturer(
             .getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             .orEmpty()
         val fixed = { fps: Int -> supported.firstOrNull { it.lower == fps && it.upper == fps } }
-        val range = (if (powerSaving) fixed(POWER_SAVING_FPS) else null) ?: fixed(format.third) ?: return
+        val range = fixed(targetFps) ?: fixed(format.third) ?: return
         Camera2CameraControl.from(bound.cameraControl).setCaptureRequestOptions(
             CaptureRequestOptions.Builder()
                 .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range)
@@ -249,7 +267,7 @@ class CameraXVideoCapturer(
     override fun isScreencast(): Boolean = false
 
     companion object {
-        private const val POWER_SAVING_FPS = 15
+        const val IDLE_FPS = 15
 
         fun errorName(code: Int): String = when (code) {
             CameraState.ERROR_MAX_CAMERAS_IN_USE -> "MAX_CAMERAS_IN_USE"

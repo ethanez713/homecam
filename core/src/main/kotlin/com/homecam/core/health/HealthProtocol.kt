@@ -51,6 +51,7 @@ object HealthProtocol {
             .setDrainPercentPerHour(state.drainPercentPerHour)
             .setRequestedRecordingMode(requested)
             .setEffectiveRecordingMode(effectiveMode(requested, state.cap))
+            .setThermalThrottled(state.throttled)
 
     fun ThermalStatus?.toProto(): RuntimeStatus.Thermal = when (this) {
         null -> RuntimeStatus.Thermal.THERMAL_UNKNOWN
@@ -66,6 +67,7 @@ object HealthProtocol {
     fun Level.toProto(): RuntimeStatus.Level = when (this) {
         Level.OK -> RuntimeStatus.Level.LEVEL_OK
         Level.WARN -> RuntimeStatus.Level.LEVEL_WARN
+        Level.THROTTLE -> RuntimeStatus.Level.LEVEL_THROTTLE
         Level.PAUSE -> RuntimeStatus.Level.LEVEL_PAUSE
         Level.CRITICAL -> RuntimeStatus.Level.LEVEL_CRITICAL
     }

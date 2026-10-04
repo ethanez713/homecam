@@ -212,6 +212,8 @@ message RuntimeStatus {
     LEVEL_WARN = 1;
     LEVEL_PAUSE = 2;
     LEVEL_CRITICAL = 3;
+    // 4, not between WARN and PAUSE: those two values are already on the wire.
+    LEVEL_THROTTLE = 4;
   }
 
   enum Cap {
