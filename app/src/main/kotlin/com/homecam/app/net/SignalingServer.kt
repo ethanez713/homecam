@@ -171,15 +171,18 @@ class SignalingServer(
 
     override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {
         if (handshake.resourceDescriptor != Signaling.PATH) {
+            logTls(conn, accepted = false, reason = "path")
             conn.close()
             return
         }
         val address = conn.remoteSocketAddress?.address?.hostAddress ?: "unknown"
         if (!limiter.tryAdmit(address)) {
             noteRefusal(address, "limit", "too many connections")
+            logTls(conn, accepted = false, reason = "limit")
             conn.close()
             return
         }
+        logTls(conn, accepted = true)
         val session = PeerSession(conn)
         sessions[conn] = session
         session.pump = scope.launch {
@@ -195,6 +198,7 @@ class SignalingServer(
 
     override fun onMessage(conn: WebSocket, message: String) {
         // The protocol is binary protobuf; a text frame is not something a real peer sends.
+        logTls(conn, accepted = false, reason = "text")
         conn.close()
     }
 
@@ -208,6 +212,7 @@ class SignalingServer(
         if (session.inbox.trySend(parsed).isFailure) {
             // A peer sending faster than the handler drains is not behaving like a viewer.
             noteRefusal(session.sourceIp, "flood", "inbox full")
+            logTls(session.socket, accepted = false, reason = "flood")
             session.socket.close()
         }
     }
@@ -311,7 +316,10 @@ class SignalingServer(
     }
 
     private suspend inline fun ifAuthenticated(session: PeerSession, block: (PeerSession) -> Unit) {
-        if (session.authenticated) block(session) else session.sendBye(Bye.Reason.ACCESS_DENIED)
+        if (session.authenticated) block(session) else {
+            logTls(session.socket, accepted = false, reason = "access_denied")
+            session.sendBye(Bye.Reason.ACCESS_DENIED)
+        }
     }
 
     /**
@@ -321,7 +329,26 @@ class SignalingServer(
      */
     private fun reject(session: PeerSession, reason: Bye.Reason, stage: String) {
         noteRefusal(session.sourceIp, stage, reason.name, session.viewer?.shortFingerprint.orEmpty())
+        logTls(session.socket, accepted = false, reason = tlsReason(stage, reason))
         session.sendBye(reason, stage)
+    }
+
+    /** A fixed token. The audit row keeps the stage text; this line does not copy it. */
+    private fun tlsReason(stage: String, reason: Bye.Reason): String = when (stage) {
+        "timeout" -> "timeout"
+        "unparseable frame" -> "unparseable"
+        "hello" -> "hello:${reason.name.lowercase()}"
+        "auth" -> "auth:${reason.name.lowercase()}"
+        else -> "refused"
+    }
+
+    private fun logTls(socket: WebSocket, accepted: Boolean, reason: String? = null) {
+        val protocol = if (socket.hasSSLSupport()) {
+            runCatching { socket.sslSession.protocol }.getOrDefault("unknown")
+        } else {
+            "unknown"
+        }
+        graph.diagnostics.tls(protocol, socket.remoteSocketAddress?.address?.hostAddress, accepted, reason)
     }
 
     private fun noteRefusal(sourceIp: String, stage: String, reason: String, fingerprint: String = "") {

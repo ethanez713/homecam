@@ -322,7 +322,12 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.RECORDING_MODE) {
             val (mode, revert) = RecordingTimer.applyRequest(RecordingModeSetting.parseFrom(it), System.currentTimeMillis())
             setRecordingMode(mode)
-            if (revert != null) setRecordingRevert(revert) else clearRecordingRevert()
+            if (revert != null) {
+                setRecordingRevert(revert)
+                graph.diagnostics.recordingTimerSet(mode, revert.to, revert.atMs, viewerIp)
+            } else {
+                clearRecordingRevert()
+            }
         }
         settingSetter(peer, Controls.Settings.HARDWARE_PROTECTION) {
             setHardwareProtection(HealthProtocol.protectionOf(HealthProtocol.configOf(

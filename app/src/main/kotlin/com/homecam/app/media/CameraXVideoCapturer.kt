@@ -169,10 +169,12 @@ class CameraXVideoCapturer(
      * Idle rate while nothing is happening and nobody is watching: the sensor, the HAL and
      * both encoders all scale with frames delivered.
      */
-    fun setPowerSaving(saving: Boolean) {
-        if (saving == powerSaving) return
+    /** True when the sensor rate changed. A repeat of the current state does not. */
+    fun setPowerSaving(saving: Boolean): Boolean {
+        if (saving == powerSaving) return false
         powerSaving = saving
         reapplyFrameRate()
+        return true
     }
 
     /**

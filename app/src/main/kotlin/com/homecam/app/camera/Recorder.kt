@@ -62,7 +62,9 @@ class Recorder(
             graph.scope.launch {
                 val entity = clips.index(written, labels)
                 Log.i(TAG, "clip ${entity.id} ${entity.durationMs}ms ${entity.sizeBytes}B")
-                graph.diagnostics.segment(entity.id, entity.durationMs, entity.sizeBytes, gapMs)
+                graph.diagnostics.segment(
+                    entity.id, entity.durationMs, entity.sizeBytes, gapMs, cap, effectiveMode,
+                )
                 graph.diagnostics.prune(clips.prune(graph.settings.current.retention))
                 if (shouldKeepRecording()) beginClip()
             }

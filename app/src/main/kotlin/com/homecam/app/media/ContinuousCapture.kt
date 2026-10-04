@@ -122,7 +122,8 @@ class ContinuousCapture(
 
     fun setTorch(on: Boolean) = capturer?.setTorch(on)
 
-    fun setPowerSaving(saving: Boolean) = capturer?.setPowerSaving(saving)
+    /** True when the sensor rate changed. False when capture is not running or the state was already set. */
+    fun setPowerSaving(saving: Boolean): Boolean = capturer?.setPowerSaving(saving) ?: false
 
     private var thermalThrottle = false
 

@@ -4,10 +4,15 @@ import android.content.Context
 import android.util.Log
 import com.homecam.core.diagnostics.DiagnosticsLines
 import com.homecam.core.diagnostics.DiagnosticsLog
+import com.homecam.core.diagnostics.PeerPath
+import com.homecam.core.diagnostics.RefusalLogLimiter
 import com.homecam.core.health.Axis
+import com.homecam.core.health.Cap
+import com.homecam.core.health.HealthAlertLabels
 import com.homecam.core.health.HealthSample
 import com.homecam.core.health.HealthState
 import com.homecam.core.health.Level
+import com.homecam.core.health.ThermalStatus
 import com.homecam.core.retention.PrunePlan
 import com.homecam.proto.RecordingMode
 import com.homecam.proto.RuntimeStatus
@@ -35,6 +40,7 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
     private val dir = directory.apply { mkdirs() }
     private val file = File(dir, "camera.jsonl")
     private val log = DiagnosticsLog(file) { Log.w(TAG, "diagnostics write failed", it) }
+    private val refusalLog = RefusalLogLimiter()
 
     val run: String = DiagnosticsLines.newRunId()
 
@@ -47,11 +53,20 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
     fun stop(reason: String) = event("service_stop") { put("reason", reason) }
 
     /** [gapMs] is the wall-clock gap since the previous segment ended — a large one is a hole in the record. */
-    fun segment(id: String, durationMs: Int, sizeBytes: Long, gapMs: Long) = event("segment") {
+    fun segment(
+        id: String,
+        durationMs: Int,
+        sizeBytes: Long,
+        gapMs: Long,
+        cap: Cap,
+        effectiveMode: RecordingMode,
+    ) = event("segment") {
         put("id", id)
         put("duration_ms", durationMs)
         put("size_bytes", sizeBytes)
         put("gap_ms", gapMs)
+        put("cap", cap.name.lowercase())
+        put("effective_mode", effectiveMode.name)
     }
 
     fun prune(plan: PrunePlan) = event("prune") {
@@ -64,7 +79,13 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
         put("pinned_near_ceiling", plan.pinnedNearCeiling)
     }
 
-    fun heartbeat(status: RuntimeStatus, recording: Boolean, mode: String) = event("heartbeat") {
+    fun heartbeat(
+        status: RuntimeStatus,
+        recording: Boolean,
+        mode: String,
+        batteryPausePct: Int,
+        chargeCounterUah: Long,
+    ) = event("heartbeat") {
         put("uptime_ms", status.uptimeMs)
         put("free_bytes", status.freeBytes)
         put("clip_bytes", status.clipBytes)
@@ -81,11 +102,19 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
         put("drain_pct_per_h", status.drainPercentPerHour)
         put("cap", status.cap.name.removePrefix("CAP_").lowercase())
         put("effective_mode", status.effectiveRecordingMode.name)
+        put("battery_pause_pct", batteryPausePct)
+        put("charge_counter_uah", chargeCounterUah)
     }
 
     /** One line per axis that changed level, with the reading that moved it. */
-    fun healthState(axis: Axis, from: Level, to: Level, reading: HealthSample, state: HealthState) =
-        event("health_state") {
+    fun healthState(
+        axis: Axis,
+        from: Level,
+        to: Level,
+        reading: HealthSample,
+        state: HealthState,
+        batteryPausePct: Int,
+    ) = event("health_state") {
             put("axis", axis.name.lowercase())
             put("from", from.name.lowercase())
             put("to", to.name.lowercase())
@@ -97,6 +126,8 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
             put("free_bytes", reading.freeBytes)
             put("floor_bytes", reading.floorBytes)
             put("floor_held", reading.floorHeld)
+            put("battery_pause_pct", batteryPausePct)
+            put("charge_counter_uah", reading.chargeCounterUah)
         }
 
     fun recordingReverted(from: RecordingMode, to: RecordingMode, dueAtMs: Long) = event("recording_revert") {
@@ -106,12 +137,17 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
         put("late_ms", System.currentTimeMillis() - dueAtMs)
     }
 
-    fun recordingCap(state: HealthState, requested: RecordingMode, effective: RecordingMode) =
-        event("recording_cap") {
+    fun recordingCap(
+        state: HealthState,
+        requested: RecordingMode,
+        effective: RecordingMode,
+        batteryTempC: Float,
+    ) = event("recording_cap") {
             put("cap", state.cap.name.lowercase())
             put("reason", state.capReason?.name?.lowercase() ?: "none")
             put("requested_mode", requested.name)
             put("effective_mode", effective.name)
+            put("battery_temp_c", batteryTempC.toDouble())
         }
 
     fun soundEvent(category: String, levelDb: Float) = event("sound_event") {
@@ -124,10 +160,82 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
         put("seconds", seconds)
     }
 
-    fun alert(kind: String, recipients: Int, delivered: Int) = event("alert") {
+    fun alert(kind: String, recipients: Int, delivered: Int, healthLabel: String? = null) = event("alert") {
         put("kind", kind)
         put("recipients", recipients)
         put("delivered", delivered)
+        if (kind == "health" && !healthLabel.isNullOrEmpty()) {
+            put("label", healthLabel.removePrefix(HealthAlertLabels.PREFIX))
+        }
+    }
+
+    fun throttle(step: String, engaged: Boolean, batteryTempC: Float, thermalStatus: ThermalStatus?) {
+        log.append(DiagnosticsLines.throttle(
+            ts = System.currentTimeMillis(),
+            run = run,
+            step = step,
+            engaged = engaged,
+            batteryTempC = batteryTempC.toDouble(),
+            thermalStatus = thermalStatus?.name?.lowercase() ?: "unknown",
+        ))
+    }
+
+    fun powerSaving(engaged: Boolean, reason: String) {
+        log.append(DiagnosticsLines.powerSaving(System.currentTimeMillis(), run, engaged, reason))
+    }
+
+    fun audioListen(feed: String, started: Boolean, reason: String) {
+        log.append(DiagnosticsLines.audioListen(System.currentTimeMillis(), run, feed, started, reason))
+    }
+
+    /**
+     * The peer address is classified and dropped. The line says lan, tailnet or other.
+     * A refused line over the per-key budget is counted instead of written.
+     */
+    fun tls(protocol: String, peerAddress: String?, accepted: Boolean, reason: String?) {
+        val now = System.currentTimeMillis()
+        val peer = PeerPath.classify(peerAddress)
+        val suppressed = if (accepted) {
+            null
+        } else {
+            when (val decision = refusalLog.onRefusal(peer, reason, now)) {
+                RefusalLogLimiter.Decision.Drop -> return
+                is RefusalLogLimiter.Decision.Record -> decision.suppressed.takeIf { it > 0 }
+            }
+        }
+        log.append(DiagnosticsLines.tls(
+            ts = now,
+            run = run,
+            protocol = protocol,
+            peer = peer,
+            accepted = accepted,
+            reason = reason,
+            suppressed = suppressed,
+        ))
+    }
+
+    /** The peer address is classified and dropped. The line says lan, tailnet or other. */
+    fun recordingTimerSet(mode: RecordingMode, revertTo: RecordingMode, dueAtMs: Long, peerAddress: String?) {
+        log.append(DiagnosticsLines.recordingTimerSet(
+            ts = System.currentTimeMillis(),
+            run = run,
+            mode = mode.name,
+            revertTo = revertTo.name,
+            dueAtMs = dueAtMs,
+            via = PeerPath.classify(peerAddress),
+        ))
+    }
+
+    /** [durationMs] is how long the light was on. It is recorded on the off only. */
+    fun spotlight(on: Boolean, auto: Boolean, luma: Float, durationMs: Long?) {
+        log.append(DiagnosticsLines.spotlight(
+            ts = System.currentTimeMillis(),
+            run = run,
+            on = on,
+            auto = auto,
+            luma = luma.toDouble(),
+            durationMs = if (on) null else durationMs,
+        ))
     }
 
     fun error(where: String, message: String?) = event("error") {

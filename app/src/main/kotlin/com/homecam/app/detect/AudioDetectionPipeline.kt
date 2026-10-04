@@ -2,6 +2,7 @@ package com.homecam.app.detect
 
 import android.content.Context
 import com.homecam.core.detect.DetectionPolicy
+import com.homecam.core.diagnostics.AudioListen
 import com.homecam.core.sound.PcmWindower
 import com.homecam.core.sound.SoundGate
 import com.homecam.proto.SettingsSnapshot
@@ -37,6 +38,8 @@ class AudioDetectionPipeline(
     /** Whether a microphone path is actually feeding detection — the privacy check for GATE-E. */
     val listening: Boolean get() = tap.running || (live && shouldListen(settings()))
 
+    var onListen: (feed: String, started: Boolean, reason: String) -> Unit = { _, _, _ -> }
+
     private val tap = AudioTap(windowSamples) { waveform, levelDb, nowMs ->
         onWindow(waveform, levelDb, nowMs)
     }
@@ -44,24 +47,19 @@ class AudioDetectionPipeline(
     // While a viewer is live, WebRTC's VOICE_COMMUNICATION recorder holds the microphone and
     // Android silences the tap, so detection listens to WebRTC's own capture instead.
     @Volatile private var live = false
+    @Volatile private var liveFeed = false
     private val liveWindower = PcmWindower(windowSamples) { waveform, levelDb ->
         onWindow(waveform, levelDb, System.currentTimeMillis())
     }
 
     /** Starts or stops the microphone tap to match the current settings. Call on any change. */
-    fun sync() {
-        val shouldListen = shouldListen(settings())
-        val tapWanted = shouldListen && !live
-        if (tapWanted && !tap.running) tap.start()
-        else if (!tapWanted && tap.running) tap.stop()
-        if (!shouldListen) gate.reset()
-    }
+    fun sync() = apply(AudioListen.ENABLED)
 
     /** Switches between the tap and WebRTC's capture as a session starts and ends. */
     fun setLive(active: Boolean) {
         live = active
         liveWindower.reset()
-        sync()
+        apply(AudioListen.VIEWER_LIVE)
     }
 
     /** Called on WebRTC's audio thread with whatever its recorder captured. */
@@ -76,11 +74,42 @@ class AudioDetectionPipeline(
 
     /** The tap thread may be mid-classification; see [DetectionPipeline.close]. */
     fun close() {
-        tap.stop()
+        if (tap.running) {
+            tap.stop()
+            onListen(AudioListen.TAP, false, AudioListen.SERVICE_STOP)
+        }
+        if (liveFeed) {
+            liveFeed = false
+            onListen(AudioListen.LIVE, false, AudioListen.SERVICE_STOP)
+        }
         synchronized(inference) {
             closed = true
             classifier?.close()
         }
+    }
+
+    private fun apply(trigger: String) {
+        val snapshot = settings()
+        val shouldListen = shouldListen(snapshot)
+        val reason = when {
+            !snapshot.microphone -> AudioListen.MIC_OFF
+            !snapshot.soundDetection.enabled -> AudioListen.SOUND_DETECTION_OFF
+            else -> trigger
+        }
+        val tapWanted = shouldListen && !live
+        val liveWanted = shouldListen && live
+        if (tapWanted && !tap.running) {
+            tap.start()
+            if (tap.running) onListen(AudioListen.TAP, true, reason)
+        } else if (!tapWanted && tap.running) {
+            tap.stop()
+            onListen(AudioListen.TAP, false, reason)
+        }
+        if (liveWanted != liveFeed) {
+            liveFeed = liveWanted
+            onListen(AudioListen.LIVE, liveWanted, reason)
+        }
+        if (!shouldListen) gate.reset()
     }
 
     private fun onWindow(waveform: FloatArray, levelDb: Float, nowMs: Long) {

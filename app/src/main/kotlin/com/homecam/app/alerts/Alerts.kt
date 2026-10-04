@@ -80,10 +80,14 @@ class Alerts(private val graph: AppGraph) {
             val delivered = recipients.count { publisher.publish(it, payload) }
             // The camera's half of GATE-F: whether it managed to post the alert at all. The
             // viewer arriving while locked (Doze) is checked on the receiving side.
+            // A health label is a fixed token. Session and detection labels name people and
+            // classes, and stay out of this line.
+            val healthLabel = if (kind == Kind.HEALTH) payload.labelsList.firstOrNull() else null
             graph.diagnostics.alert(
                 kind = kind.label,
                 recipients = recipients.size,
                 delivered = delivered,
+                healthLabel = healthLabel,
             )
         }
     }

@@ -40,6 +40,10 @@ class HardwareMonitor(
         private set
     @Volatile var batteryHealth: Int = 0
         private set
+
+    /** Last `BATTERY_PROPERTY_CHARGE_COUNTER` reading, in µAh. Zero until the first sample. */
+    @Volatile var chargeCounterUah: Long = 0L
+        private set
     @Volatile private var storage = Storage()
 
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
@@ -85,6 +89,7 @@ class HardwareMonitor(
             storageProjectionDays = reading.projectionDays,
         )
         batteryHealth = battery?.getIntExtra(BatteryManager.EXTRA_HEALTH, 0) ?: 0
+        chargeCounterUah = sample.chargeCounterUah
         thermalHeadroom = headroom
         storage = reading.storage
 

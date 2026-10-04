@@ -13,7 +13,7 @@ fun interface ThrottleStepListener {
  * Applies the thermal throttle and undoes it. Recording mode is not an input: the cap
  * is the only thing that changes what is kept.
  *
- * [listener] is how a later step logs each engage and release. This class does not.
+ * [listener] is told on each engage and release. This class does not log them.
  */
 class ThermalThrottle(
     private val setCaptureThrottled: (Boolean) -> Unit,

@@ -27,6 +27,7 @@ import com.homecam.app.media.CameraMediaSession
 import com.homecam.app.media.CameraXVideoCapturer
 import com.homecam.app.media.ContinuousCapture
 import com.homecam.app.media.WebRtc
+import com.homecam.core.diagnostics.PowerSavingReason
 import com.homecam.core.health.Axis
 import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.HealthSample
@@ -76,6 +77,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private val siren by lazy { Siren(this) }
     @Volatile private var spotlightOffAtMs = 0L
     @Volatile private var autoSpotlightOn = false
+    private var spotlightLoggedOn = false
+    private var spotlightLoggedAuto = false
+    private var spotlightSinceMs = 0L
     @Volatile private var lastReminderMs = 0L
     private val watchdog = CaptureWatchdog()
     private var lastResumeAtMs: Long? = null
@@ -118,7 +122,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             settings = { graph.settings.current },
             onEvent = { detections, thumbnailJpeg ->
                 recorder.onDetection(detections, System.currentTimeMillis())
-                capture.setPowerSaving(false)
+                val reason = if (detections.isNotEmpty()) PowerSavingReason.DETECTION else PowerSavingReason.MOTION
+                releasePowerSaving(reason)
                 if (detections.isNotEmpty()) {
                     alerts.onDetection(detections.map { it.category }, clipId = "", thumbnailJpeg = thumbnailJpeg)
                     maybeAutoSpotlight()
@@ -134,7 +139,11 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 applyFormat = { capture.setFormat(it) },
             ),
             screen = screen,
-        )
+        ).also { created ->
+            created.listener = ThrottleStepListener { step, engaged, _, reading ->
+                graph.diagnostics.throttle(step, engaged, reading.batteryTempC, reading.thermalStatus)
+            }
+        }
         hardware = HardwareMonitor(graph, recorder.clips, ::onHealthChange).also { it.start() }
         startClipRollover()
 
@@ -154,7 +163,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 alerts.onDetection(listOf(category), clipId = "", thumbnailJpeg = null)
                 graph.diagnostics.soundEvent(category, levelDb)
             },
-        ).also { it.sync() }
+        ).also {
+            it.onListen = { feed, started, reason -> graph.diagnostics.audioListen(feed, started, reason) }
+            it.sync()
+        }
         WebRtc.capturedAudio = { audioDetection.onLiveSamples(it) }
         ClipPruneWorker.schedule(this)
         observeArming()
@@ -286,7 +298,13 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             while (true) {
                 kotlinx.coroutines.delay(ROLLOVER_TICK_MS)
                 recorder.tick()
-                capture.setPowerSaving(live == null && !recorder.eventInProgress)
+                val saving = live == null && !recorder.eventInProgress
+                val reason = when {
+                    saving -> PowerSavingReason.IDLE
+                    live != null -> PowerSavingReason.VIEWER
+                    else -> PowerSavingReason.EVENT
+                }
+                if (capture.setPowerSaving(saving)) graph.diagnostics.powerSaving(saving, reason)
                 statusFromPipeline()
                 if (ticks % HARDWARE_SAMPLE_EVERY_TICKS == 0) sampleHardware()
                 revertTimedRecording()
@@ -308,19 +326,24 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 status = server?.statusProvider?.snapshot(clipBytes) ?: return@launch,
                 recording = recorder.recording,
                 mode = graph.settings.current.recordingMode.name,
+                batteryPausePct = HealthProtocol.configOf(graph.settings.current).batteryPausePercent,
+                chargeCounterUah = hardware.chargeCounterUah,
             )
         }
     }
 
     private fun onHealthChange(previous: HealthState, current: HealthState, reading: HealthSample) {
+        val batteryPausePct = HealthProtocol.configOf(graph.settings.current).batteryPausePercent
         Axis.entries.filter { previous.level(it) != current.level(it) }.forEach {
-            graph.diagnostics.healthState(it, previous.level(it), current.level(it), reading, current)
+            graph.diagnostics.healthState(it, previous.level(it), current.level(it), reading, current, batteryPausePct)
         }
         if (previous.cap != current.cap) recorder.setCap(current.cap)
         if (::alerts.isInitialized) alerts.onHealth(current, previous)
         if (previous.cap != current.cap || previous.capReason != current.capReason) {
             val requested = graph.settings.current.recordingMode
-            graph.diagnostics.recordingCap(current, requested, HealthProtocol.effectiveMode(requested, current.cap))
+            graph.diagnostics.recordingCap(
+                current, requested, HealthProtocol.effectiveMode(requested, current.cap), reading.batteryTempC,
+            )
         }
         // The window and the capture request are main-thread objects. A thermal callback
         // arrives on the IO scope that sampled it.
@@ -560,7 +583,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         live = LiveSession(peer, media)
         media.start(throttle.bitrateCapBps)
         throttle.onSessionOpen()
-        capture.setPowerSaving(false)
+        releasePowerSaving(PowerSavingReason.VIEWER)
         audioDetection.setLive(true)
         showLive(peer.label)
         alerts.onSessionStarted(peer.label, viewerFingerprint)
@@ -666,8 +689,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     /** The spotlight is the torch used deliberately as a light; manual use is audited but not alerted. */
     override fun setSpotlight(on: Boolean, by: Actor?) {
         capture.setTorch(on)
+        val wasAuto = autoSpotlightOn
         autoSpotlightOn = false
         recordResponseAction(if (on) "spotlight on" else "spotlight off", by = by)
+        noteSpotlight(on = on, auto = if (on) false else wasAuto)
     }
 
     private fun maybeAutoSpotlight() {
@@ -678,6 +703,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             capture.setTorch(true)
             autoSpotlightOn = true
             recordResponseAction("spotlight (auto)")
+            noteSpotlight(on = true, auto = true)
         }
         spotlightOffAtMs = System.currentTimeMillis() + AUTO_SPOTLIGHT_MS
     }
@@ -688,6 +714,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         if (autoSpotlightOn && now > spotlightOffAtMs) {
             capture.setTorch(false)
             autoSpotlightOn = false
+            noteSpotlight(on = false, auto = true)
         }
         val settings = graph.settings.current
         val reminder = settings.detectionReminder
@@ -719,6 +746,22 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             )
         }
         if (alert) alerts.onResponseAction(detail)
+    }
+
+    private fun releasePowerSaving(reason: String) {
+        if (capture.setPowerSaving(false)) graph.diagnostics.powerSaving(engaged = false, reason = reason)
+    }
+
+    /** Logs only when the light, or whether it is the automatic one, changes. */
+    private fun noteSpotlight(on: Boolean, auto: Boolean) {
+        if (on == spotlightLoggedOn && auto == spotlightLoggedAuto) return
+        val durationMs = if (!on && spotlightSinceMs != 0L) System.currentTimeMillis() - spotlightSinceMs else null
+        if (on && !spotlightLoggedOn) spotlightSinceMs = System.currentTimeMillis()
+        if (!on) spotlightSinceMs = 0L
+        spotlightLoggedOn = on
+        spotlightLoggedAuto = auto
+        val luma = if (::detection.isInitialized) detection.averageLuma else 0f
+        graph.diagnostics.spotlight(on, auto, luma, durationMs)
     }
 
     private fun hasFlash(): Boolean =
