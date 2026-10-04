@@ -3,5 +3,18 @@
     <application>
         <activity android:name=".debug.GalleryActivity" android:exported="true" android:theme="@style/Theme.Homecam" />
         <activity android:name=".debug.ThrottleProbeActivity" android:exported="false" />
+        <!--
+            GATE-SEC arms pairing from adb. DUMP is a signature permission the shell
+            holds, so exported does not open this to other apps. This manifest is the
+            debug source set; a release merge must not contain the receiver.
+        -->
+        <receiver
+            android:name=".debug.PairingArmReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.homecam.app.debug.ARM_PAIRING" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
