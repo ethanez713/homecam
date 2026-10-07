@@ -36,7 +36,8 @@ internal class CameraAdb(private val serial: String) {
         shell("run-as", PACKAGE, "rm", "-f", INVITE)
     }
 
-    fun invitePresent(): Boolean = catBytes(INVITE) != null
+    fun invitePresent(): Boolean =
+        shell("run-as", PACKAGE, "ls", INVITE.substringBeforeLast('/')).lines().any { it.trim() == INVITE.substringAfterLast('/') }
 
     fun serviceStartCount(): Int = countEvent(cameraJsonl(), "service_start")
 
