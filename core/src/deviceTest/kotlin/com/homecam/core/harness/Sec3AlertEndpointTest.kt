@@ -87,9 +87,18 @@ class Sec3AlertEndpointTest {
                     val jsonl = adb.cameraJsonl()
                     val delivered = linesAfter(jsonl, marker).mapNotNull { line ->
                         val json = JsonLine(line)
-                        if (json.field("event") == "alert" && json.field("kind") == "session") json.field("delivered") else null
+                        if (json.field("event") == "alert" && json.field("kind") == "session") {
+                            "${json.field("delivered")}/${json.field("recipients")}"
+                        } else {
+                            null
+                        }
                     }
-                    published = opened != null && opened.bucket && delivered.any { it == "1" }
+                    // Every real roster member with alerts on is a recipient too, so the
+                    // runbook's delivered=1 is "everyone it tried", not a literal 1.
+                    published = opened != null && opened.bucket && delivered.any { pair ->
+                        val (sent, wanted) = pair.split("/")
+                        sent != "null" && sent != "0" && sent == wanted
+                    }
                     evidence = "subscribed=true bodyBytes=${body?.trim()?.length} " +
                         "serialized=${opened?.serialized} padding=${opened?.padding} " +
                         "sealedBody=${opened?.sealedBody} bucket=${opened?.bucket} delivered=$delivered"
