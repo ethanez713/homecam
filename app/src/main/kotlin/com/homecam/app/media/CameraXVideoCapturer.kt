@@ -215,9 +215,11 @@ class CameraXVideoCapturer(
         source.observe(lifecycleOwner, stateObserver)
     }
 
+    /** LiveData rejects removeObserver off the main thread, and a format change can arrive from any coroutine. */
     private fun unwatchCameraState() {
-        stateSource?.removeObserver(stateObserver)
+        val source = stateSource ?: return
         stateSource = null
+        ContextCompat.getMainExecutor(context).execute { source.removeObserver(stateObserver) }
     }
 
     fun setLensFacing(front: Boolean) {
