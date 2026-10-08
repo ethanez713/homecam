@@ -1,22 +1,23 @@
 package com.homecam.app.alerts
 
 import com.homecam.app.AppGraph
-import com.homecam.core.detect.AlertThrottle
+import com.homecam.core.detect.DetectionAlertBatch
 import com.homecam.core.health.HealthAlertPolicy
 import com.homecam.core.health.HealthState
 import com.homecam.proto.AlertPayload
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
  * The camera's alert fan-out. §2.7 wants a push to every paired viewer when a session
  * starts — the point being that if a device you don't recognise starts watching, your
  * phone buzzes. The viewer that started it is left out (D14). Detection alerts go to all,
- * once per visit.
+ * once per visit, and one moment's detections share one alert ([DetectionAlertBatch]).
  */
 class Alerts(private val graph: AppGraph) {
 
     private val publisher = AlertPublisher()
-    private val detectionThrottle = AlertThrottle()
+    private val detectionBatch = DetectionAlertBatch()
     private val healthPolicy = HealthAlertPolicy()
 
     private enum class Kind(val label: String) { SESSION("session"), DETECTION("detection"), HEALTH("health") }
@@ -31,17 +32,21 @@ class Alerts(private val graph: AppGraph) {
     }
 
     fun onDetection(labels: List<String>, clipId: String, thumbnailJpeg: ByteArray?) {
-        if (!detectionThrottle.shouldAlert(labels, System.currentTimeMillis())) return
-        send(Kind.DETECTION) {
-            base()
-                .addAllLabels(labels)
-                .setClipId(clipId)
-                .apply {
-                    if (thumbnailJpeg != null) {
-                        setThumbnailJpeg(com.google.protobuf.ByteString.copyFrom(thumbnailJpeg))
+        if (!detectionBatch.add(labels, thumbnailJpeg, System.currentTimeMillis())) return
+        graph.scope.launch {
+            delay(DetectionAlertBatch.HOLD_MS)
+            val held = detectionBatch.flush() ?: return@launch
+            send(Kind.DETECTION) {
+                base()
+                    .addAllLabels(held.labels)
+                    .setClipId(clipId)
+                    .apply {
+                        if (held.thumbnail != null) {
+                            setThumbnailJpeg(com.google.protobuf.ByteString.copyFrom(held.thumbnail))
+                        }
                     }
-                }
-                .build()
+                    .build()
+            }
         }
     }
 
