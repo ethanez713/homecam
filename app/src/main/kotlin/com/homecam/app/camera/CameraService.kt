@@ -52,6 +52,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -561,6 +562,23 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val peer = server?.sessionOf(viewerFingerprint)
             ?: throw IllegalStateException("no authenticated connection for $viewerFingerprint")
 
+        // Re-checked and audited in one step with revoke: setup below takes long enough for a
+        // revoke to land in the middle, and a row written after it would claim a revoked viewer
+        // opened a session.
+        val admitted = node.admission.withLock {
+            val key = peer.viewer
+            if (key == null || !node.isAllowed(key)) return@withLock false
+            graph.audit.record(
+                AuditEvent.Kind.SESSION_OPENED,
+                viewerFingerprint = viewerFingerprint,
+                viewerLabel = peer.label,
+                sourceIp = peer.sourceIp,
+                detail = "live video",
+            )
+            true
+        }
+        if (!admitted) throw IllegalStateException("viewer $viewerFingerprint is not admitted")
+
         endLive(Bye.Reason.SESSION_REPLACED, "replaced by $viewerFingerprint")
 
         val media = CameraMediaSession(
@@ -582,20 +600,17 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             },
         )
         live = LiveSession(peer, media)
+        // A revoke during setup closed the socket before this session was visible to its teardown.
+        if (!peer.socket.isOpen) {
+            endLive(Bye.Reason.REVOKED, "viewer gone during setup")
+            throw IllegalStateException("viewer $viewerFingerprint disconnected during setup")
+        }
         media.start(throttle.bitrateCapBps)
         throttle.onSessionOpen()
         powerSaving.release(PowerSavingReason.VIEWER)
         audioDetection.setLive(true)
         showLive(peer.label)
         alerts.onSessionStarted(peer.label, viewerFingerprint)
-
-        graph.audit.record(
-            AuditEvent.Kind.SESSION_OPENED,
-            viewerFingerprint = viewerFingerprint,
-            viewerLabel = peer.label,
-            sourceIp = peer.sourceIp,
-            detail = "live video",
-        )
         return sessionStatus(viewerFingerprint)
     }
 

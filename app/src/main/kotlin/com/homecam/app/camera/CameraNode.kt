@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Everything the camera role owns that outlives a screen: the allowlist, the pairing
@@ -119,31 +121,42 @@ class CameraNode(private val graph: AppGraph) {
         )
     }
 
+    /**
+     * Held while a connection is admitted and while a viewer is revoked, so an authentication
+     * that finished just before a revoke cannot be recorded or marked authenticated after it.
+     */
+    val admission = Mutex()
+
     suspend fun revoke(fingerprint: String) {
-        val row = viewers.byFingerprint(fingerprint) ?: return
-        allowed.revoked(IdentityKey(row.publicKey))
-        viewers.delete(fingerprint)
-        graph.audit.record(
-            AuditEvent.Kind.VIEWER_REVOKED,
-            viewerFingerprint = fingerprint,
-            viewerLabel = row.label,
-        )
+        admission.withLock {
+            val row = viewers.byFingerprint(fingerprint) ?: return
+            allowed.revoked(IdentityKey(row.publicKey))
+            viewers.delete(fingerprint)
+            graph.audit.record(
+                AuditEvent.Kind.VIEWER_REVOKED,
+                viewerFingerprint = fingerprint,
+                viewerLabel = row.label,
+            )
+        }
         onRevoked?.invoke(fingerprint)
     }
 
     suspend fun revokeAll() {
-        val rows = viewers.all()
-        allowed.revokedAll()
-        viewers.deleteAll()
-        rows.forEach {
-            graph.audit.record(
-                AuditEvent.Kind.VIEWER_REVOKED,
-                viewerFingerprint = it.fingerprint,
-                viewerLabel = it.label,
-                detail = "revoke all",
-            )
-            onRevoked?.invoke(it.fingerprint)
+        val rows = admission.withLock {
+            val rows = viewers.all()
+            allowed.revokedAll()
+            viewers.deleteAll()
+            rows.forEach {
+                graph.audit.record(
+                    AuditEvent.Kind.VIEWER_REVOKED,
+                    viewerFingerprint = it.fingerprint,
+                    viewerLabel = it.label,
+                    detail = "revoke all",
+                )
+            }
+            rows
         }
+        rows.forEach { onRevoked?.invoke(it.fingerprint) }
     }
 
     suspend fun sessionsIn30d(fingerprint: String): Int =

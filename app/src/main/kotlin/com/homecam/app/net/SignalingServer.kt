@@ -23,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import org.java_websocket.WebSocket
 import org.java_websocket.drafts.Draft_6455
 import org.java_websocket.extensions.DefaultExtension
@@ -89,9 +90,9 @@ class SignalingServer(
             nowMs = System::currentTimeMillis,
         )
 
-        var viewer: IdentityKey? = null
+        @Volatile var viewer: IdentityKey? = null
             private set
-        var label: String = ""
+        @Volatile var label: String = ""
             private set
         val authenticated: Boolean get() = viewer != null
 
@@ -273,21 +274,32 @@ class SignalingServer(
     private suspend fun onAuth(session: PeerSession, message: SignalMessage) {
         when (val outcome = session.handshake.onAuth(message.auth)) {
             is CameraHandshake.Outcome.Accepted -> {
-                if (outcome.pairedNow) {
-                    node.completePairing(
-                        outcome.viewer, outcome.label, session.sourceIp, outcome.verificationPhrase,
-                    )
-                } else {
-                    graph.database.viewers()
-                        .touch(outcome.viewer.shortFingerprint, System.currentTimeMillis())
-                    graph.audit.record(
-                        AuditEvent.Kind.SESSION_OPENED,
-                        viewerFingerprint = outcome.viewer.shortFingerprint,
-                        viewerLabel = outcome.label,
-                        sourceIp = session.sourceIp,
-                    )
+                // The handshake checked the allowlist some steps ago. A revoke that landed since
+                // must win, and one that lands after this block finds the connection accepted
+                // and disconnects it, so the check, the audit row and the accept are one step.
+                val admitted = node.admission.withLock {
+                    if (!outcome.pairedNow && !node.isAllowed(outcome.viewer)) return@withLock false
+                    if (outcome.pairedNow) {
+                        node.completePairing(
+                            outcome.viewer, outcome.label, session.sourceIp, outcome.verificationPhrase,
+                        )
+                    } else {
+                        graph.database.viewers()
+                            .touch(outcome.viewer.shortFingerprint, System.currentTimeMillis())
+                        graph.audit.record(
+                            AuditEvent.Kind.SESSION_OPENED,
+                            viewerFingerprint = outcome.viewer.shortFingerprint,
+                            viewerLabel = outcome.label,
+                            sourceIp = session.sourceIp,
+                        )
+                    }
+                    session.accept(outcome.viewer, outcome.label)
+                    true
                 }
-                session.accept(outcome.viewer, outcome.label)
+                if (!admitted) {
+                    reject(session, Bye.Reason.ACCESS_DENIED, "auth")
+                    return
+                }
                 session.send(SignalMessage.newBuilder().setAuthResult(outcome.result).build())
                 session.send(
                     SignalMessage.newBuilder()
