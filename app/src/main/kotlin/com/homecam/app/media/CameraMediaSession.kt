@@ -1,6 +1,8 @@
 package com.homecam.app.media
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.homecam.core.signaling.DtlsCommitment
 import com.homecam.core.signaling.DtlsFingerprint
@@ -125,6 +127,7 @@ class CameraMediaSession(
         connection.createOffer(
             object : SdpObserverAdapter() {
                 override fun onCreateSuccess(description: SessionDescription) {
+                    if (closed) return
                     connection.setLocalDescription(
                         object : SdpObserverAdapter() {
                             override fun onSetSuccess() = publishOffer(description)
@@ -143,6 +146,7 @@ class CameraMediaSession(
     }
 
     private fun publishOffer(description: SessionDescription) {
+        if (closed) return
         val fingerprint = DtlsFingerprint.parse(description.description)
         if (fingerprint == null) {
             // Refusing to offer an SDP we cannot commit to is the only safe answer: the
@@ -232,10 +236,19 @@ class CameraMediaSession(
     fun close() {
         if (closed) return
         closed = true
-        runCatching { videoTrack?.dispose() }
-        runCatching { audioTrack?.dispose() }
-        runCatching { connection?.close(); connection?.dispose() }
+        val closing = connection
+        val video = videoTrack
+        val audio = audioTrack
         connection = null
+        runCatching { closing?.close() }
+        // Offer and description callbacks already queued on WebRTC's signaling thread still hold
+        // this connection; freeing it under them is a SIGSEGV in libjingle when a viewer drops
+        // within milliseconds of connecting. Closed is safe to call into, disposed is not.
+        Handler(Looper.getMainLooper()).postDelayed({
+            runCatching { video?.dispose() }
+            runCatching { audio?.dispose() }
+            runCatching { closing?.dispose() }
+        }, DISPOSE_DELAY_MS)
     }
 
     private val observer = object : PeerConnectionObserverAdapter() {
@@ -265,6 +278,7 @@ class CameraMediaSession(
     companion object {
         private const val TAG = "CameraMediaSession"
         private const val STREAM_ID = "homecam"
+        private const val DISPOSE_DELAY_MS = 2_000L
         private const val AUDIO_TRACK_ID = "homecam-audio"
         private const val MIN_BITRATE_BPS = 300_000
         private const val START_BITRATE_BPS = 2_500_000
