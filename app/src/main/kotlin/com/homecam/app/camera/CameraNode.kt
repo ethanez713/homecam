@@ -1,6 +1,7 @@
 package com.homecam.app.camera
 
 import com.homecam.app.AppGraph
+import com.homecam.app.HarnessIdentities
 import com.homecam.app.data.ViewerEntity
 import com.homecam.app.net.LocalAddress
 import com.homecam.core.crypto.IdentityKey
@@ -111,6 +112,7 @@ class CameraNode(private val graph: AppGraph) {
             )
         )
         allowed.added(viewer)
+        HarnessIdentities.onPaired(graph.app, viewer.shortFingerprint)
         _pairing.value = null
         _pairingPhrase.value = verificationPhrase
         graph.audit.record(

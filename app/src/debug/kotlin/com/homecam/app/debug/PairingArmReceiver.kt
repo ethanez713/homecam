@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.homecam.app.AppGraph
+import com.homecam.app.HarnessIdentities
 import com.homecam.app.Role
 import com.homecam.app.RoleStore
 import com.homecam.app.net.Signaling
@@ -47,6 +48,7 @@ class PairingArmReceiver : BroadcastReceiver() {
             return
         }
 
+        HarnessIdentities.arm()
         val invite = session.invite()
         val tmp = File(context.filesDir, "$INVITE_FILE.tmp")
         tmp.writeText(session.inviteText())

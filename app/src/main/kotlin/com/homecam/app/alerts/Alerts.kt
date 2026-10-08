@@ -1,6 +1,7 @@
 package com.homecam.app.alerts
 
 import com.homecam.app.AppGraph
+import com.homecam.app.HarnessIdentities
 import com.homecam.core.detect.DetectionAlertBatch
 import com.homecam.core.health.HealthAlertPolicy
 import com.homecam.core.health.HealthState
@@ -23,6 +24,7 @@ class Alerts(private val graph: AppGraph) {
     private enum class Kind(val label: String) { SESSION("session"), DETECTION("detection"), HEALTH("health") }
 
     fun onSessionStarted(viewerLabel: String, viewerFingerprint: String) {
+        if (HarnessIdentities.isHarness(graph.app, viewerFingerprint)) return
         send(Kind.SESSION, except = viewerFingerprint) {
             base()
                 .addLabels(AlertSubscriber.SESSION_LABEL)
