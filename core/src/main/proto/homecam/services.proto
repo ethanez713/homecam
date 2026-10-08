@@ -67,8 +67,9 @@ message SettingsSnapshot {
 // no model required. Independent of the vision pipeline, as it is in Alfred.
 message SoundDetection { bool enabled = 1; float threshold_db = 2; }
 
-// Which recognised sound classes count, when the classifier is enabled. Empty means the
-// decibel trigger only. Class names are the small user-facing set from models/README.md.
+// Which recognised sound classes are pushed to the viewer. A loud sound that matches none of
+// them is still recorded but not pushed. Absent means SoundClasses.DEFAULT_PUSH; present and
+// empty means no sound is pushed. Class names are the user-facing set from models/README.md.
 message SoundRecognition { repeated string classes = 1; }
 
 // Periodically reminds the owner the camera is armed and detecting, so a camera quietly

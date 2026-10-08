@@ -31,7 +31,7 @@ class YamnetTest {
         val waveform = FloatArray(classifier.windowSamples) {
             (sin(2.0 * PI * 440.0 * it / 16_000) * 0.5).toFloat()
         }
-        val event = classifier.classify(waveform, threshold = 0f)
+        val event = classifier.classify(waveform, SoundClasses.ALL.toSet(), threshold = 0f)
         if (event != null) {
             assertTrue("returned category ${event.category} is not one we ship", event.category in SoundClasses.ALL)
         }

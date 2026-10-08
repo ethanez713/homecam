@@ -52,4 +52,26 @@ class SoundDetectionTest {
         assertEquals(SoundClasses.GLASS, SoundClasses.categoryFor("Shatter"))
         assertNull("an unmapped class is not reported", SoundClasses.categoryFor("Piano"))
     }
+
+    @Test
+    fun `speech maps to voice and voice is not pushed by default`() {
+        assertEquals(SoundClasses.VOICE, SoundClasses.categoryFor("Conversation"))
+        assertTrue(SoundClasses.VOICE in SoundClasses.ALL)
+        assertFalse(SoundClasses.VOICE in SoundClasses.pushSelection(null))
+        assertFalse(SoundClasses.DOG in SoundClasses.pushSelection(null))
+    }
+
+    @Test
+    fun `an unset selection pushes the concerning classes and an empty one pushes none`() {
+        assertEquals(setOf("alarm", "doorbell", "glass", "shout", "knock"), SoundClasses.pushSelection(null))
+        assertEquals(emptySet<String>(), SoundClasses.pushSelection(emptyList()))
+        assertEquals(setOf("voice"), SoundClasses.pushSelection(listOf("voice")))
+    }
+
+    @Test
+    fun `a sound matching no selected class is not pushed, but is pushed generically without a classifier`() {
+        assertNull(SoundClasses.pushCategory(classifierAvailable = true, recognised = null))
+        assertEquals("glass", SoundClasses.pushCategory(classifierAvailable = true, recognised = "glass"))
+        assertEquals("sound", SoundClasses.pushCategory(classifierAvailable = false, recognised = null))
+    }
 }

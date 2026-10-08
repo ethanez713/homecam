@@ -130,7 +130,7 @@ fun CameraSettingsScreen(
             if (soundDetectionEnabled) {
                 Rule()
                 Column(Modifier.padding(12.dp)) {
-                    Text("Name these when heard", style = Ethan.type.bodySmall, color = Ethan.colors.textMuted)
+                    Text("Notify for these sounds", style = Ethan.type.bodySmall, color = Ethan.colors.textMuted)
                     Spacer(Modifier.height(8.dp))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         com.homecam.core.sound.SoundClasses.ALL.forEach { soundClass ->

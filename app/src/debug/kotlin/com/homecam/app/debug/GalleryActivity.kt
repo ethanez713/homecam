@@ -245,7 +245,7 @@ private fun Settings(snapshot: SettingsSnapshot, remote: String) {
         projectedDays = 14.0, onDetectionMode = { _, _, _, _ -> }, autoSpotlightSupported = true,
         autoSpotlight = false, onAutoSpotlight = {}, reminderEnabled = false, onDetectionReminder = {},
         soundDetectionEnabled = snapshot.soundDetection.enabled, onSoundDetection = {},
-        soundClasses = snapshot.soundRecognition.classesList.toSet(), onSoundClass = { _, _ -> },
+        soundClasses = com.homecam.core.sound.SoundClasses.pushSelection(snapshot.soundRecognition.classesList).toSet(), onSoundClass = { _, _ -> },
         alertsEnabled = true, onAlerts = {}, remoteAddress = remote, onRemoteAddress = {}, onDevices = {},
         protection = com.homecam.core.health.HealthConfig(),
         verificationPhrase = "amber-otter-seven", fingerprint = "Y1TM-4JVY-9K8F",

@@ -49,6 +49,7 @@ import com.homecam.app.ui.formatStamp
 import com.homecam.core.rpc.ControlGating
 import com.homecam.core.retention.ClipRef
 import com.homecam.core.retention.RetentionPlanner
+import com.homecam.core.sound.SoundClasses
 import com.homecam.proto.Capabilities
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Viewer
@@ -389,10 +390,10 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 onSoundDetection = { on ->
                     edit(scope, open, say) { settings = it.link.setSoundDetection(on) }
                 },
-                soundClasses = settings?.soundRecognition?.classesList?.toSet() ?: emptySet(),
+                soundClasses = SoundClasses.pushSelection(settings?.takeIf { it.hasSoundRecognition() }?.soundRecognition?.classesList),
                 onSoundClass = { soundClass, on ->
                     edit(scope, open, say) {
-                        val next = (settings?.soundRecognition?.classesList ?: emptyList()).toMutableSet()
+                        val next = SoundClasses.pushSelection(settings?.takeIf { it.hasSoundRecognition() }?.soundRecognition?.classesList).toMutableSet()
                         if (on) next.add(soundClass) else next.remove(soundClass)
                         settings = it.link.setSoundRecognition(next.toList())
                     }

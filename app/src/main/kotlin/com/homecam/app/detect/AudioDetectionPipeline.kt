@@ -2,6 +2,7 @@ package com.homecam.app.detect
 
 import android.content.Context
 import com.homecam.core.detect.DetectionPolicy
+import com.homecam.core.sound.SoundClasses
 import com.homecam.core.diagnostics.AudioListen
 import com.homecam.core.sound.PcmWindower
 import com.homecam.core.sound.SoundGate
@@ -23,7 +24,7 @@ import org.webrtc.audio.JavaAudioDeviceModule
 class AudioDetectionPipeline(
     context: Context,
     private val settings: () -> SettingsSnapshot,
-    private val onEvent: (category: String, levelDb: Float) -> Unit,
+    private val onEvent: (category: String, levelDb: Float, push: Boolean) -> Unit,
 ) {
     private val classifier = YamnetClassifier.create(context)
     private val windowSamples = classifier?.windowSamples ?: SECOND_SAMPLES
@@ -133,15 +134,14 @@ class AudioDetectionPipeline(
         if (!gate.accept(levelDb, nowMs)) return
 
         onSound()
-        onEvent(categorise(waveform, snapshot), levelDb)
-    }
-
-    private fun categorise(waveform: FloatArray, snapshot: SettingsSnapshot): String {
-        val selected = snapshot.soundRecognition.classesList
-        if (selected.isEmpty()) return GENERIC
-        val event = synchronized(inference) { if (closed) null else classifier?.classify(waveform) }
-            ?: return GENERIC
-        return if (event.category in selected) event.category else GENERIC
+        val wanted = SoundClasses.pushSelection(
+            snapshot.soundRecognition.classesList.takeIf { snapshot.hasSoundRecognition() },
+        )
+        val recognised = synchronized(inference) {
+            if (closed) null else classifier?.classify(waveform, wanted)?.category
+        }
+        val push = SoundClasses.pushCategory(classifierAvailable, recognised)
+        onEvent(push ?: SoundClasses.GENERIC, levelDb, push != null)
     }
 
     private fun withinSchedule(snapshot: SettingsSnapshot, nowMs: Long): Boolean {
@@ -156,6 +156,5 @@ class AudioDetectionPipeline(
     private companion object {
         const val SECOND_SAMPLES = 16_000
         const val DEFAULT_THRESHOLD_DB = -24f
-        const val GENERIC = "sound"
     }
 }

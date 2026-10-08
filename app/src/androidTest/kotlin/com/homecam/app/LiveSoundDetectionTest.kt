@@ -40,7 +40,7 @@ class LiveSoundDetectionTest {
                 .setSoundDetection(SoundDetection.newBuilder().setEnabled(sound))
                 .build()
         },
-        onEvent = { _, _ -> events.incrementAndGet() },
+        onEvent = { _, _, _ -> events.incrementAndGet() },
     ).also { underTest = it }
 
     /** 10 ms chunks, like WebRTC delivers them. */

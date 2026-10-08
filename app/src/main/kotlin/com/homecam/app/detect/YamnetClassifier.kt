@@ -32,11 +32,11 @@ class YamnetClassifier private constructor(
     data class Event(val category: String, val confidence: Float)
 
     /**
-     * The strongest mapped sound in [waveform] (16 kHz mono, [-1, 1]) above [threshold], or
-     * null. Shorter windows are zero-padded, longer ones truncated to what the model wants.
+     * The strongest sound in [waveform] (16 kHz mono, [-1, 1]) above [threshold] whose
+     * category is in [wanted], or null; a louder class outside [wanted] does not hide one inside. Shorter windows are zero-padded, longer ones truncated to what the model wants.
      */
     @Synchronized
-    fun classify(waveform: FloatArray, threshold: Float = DEFAULT_THRESHOLD): Event? = try {
+    fun classify(waveform: FloatArray, wanted: Set<String>, threshold: Float = DEFAULT_THRESHOLD): Event? = try {
         input.rewind()
         for (i in 0 until windowSamples) input.putFloat(if (i < waveform.size) waveform[i] else 0f)
         input.rewind()
@@ -44,7 +44,7 @@ class YamnetClassifier private constructor(
 
         var best: Event? = null
         for (i in 0 until classCount) {
-            val category = labels.getOrNull(i)?.let { SoundClasses.categoryFor(it) } ?: continue
+            val category = labels.getOrNull(i)?.let { SoundClasses.categoryFor(it) }?.takeIf { it in wanted } ?: continue
             val score = scores[0][i]
             if (score >= threshold && (best == null || score > best.confidence)) {
                 best = Event(category, score)

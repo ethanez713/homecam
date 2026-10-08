@@ -81,7 +81,7 @@ class PowerSavingReleaseTest {
         val pipeline = AudioDetectionPipeline(
             context,
             { soundSettings() },
-            onEvent = { _, _ ->
+            onEvent = { _, _, _ ->
                 events++
                 releasedBeforeClip = !fixture.saving.isEngaged
             },

@@ -30,7 +30,7 @@ class AudioTapPrivacyTest {
     }
 
     private fun pipeline(settings: SettingsSnapshot): AudioDetectionPipeline =
-        AudioDetectionPipeline(context, { settings }, onEvent = { _, _ -> })
+        AudioDetectionPipeline(context, { settings }, onEvent = { _, _, _ -> })
 
     private fun settings(mic: Boolean, sound: Boolean) = SettingsSnapshot.newBuilder()
         .setMicrophone(mic)

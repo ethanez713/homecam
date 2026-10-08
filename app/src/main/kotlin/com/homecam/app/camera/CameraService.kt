@@ -165,9 +165,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         audioDetection = AudioDetectionPipeline(
             context = this,
             settings = { graph.settings.current },
-            onEvent = { category, levelDb ->
+            onEvent = { category, levelDb, push ->
                 recorder.onSoundEvent(category, System.currentTimeMillis())
-                alerts.onDetection(listOf(category), clipId = "", thumbnailJpeg = null)
+                if (push) alerts.onDetection(listOf(category), clipId = "", thumbnailJpeg = null)
                 graph.diagnostics.soundEvent(category, levelDb)
             },
         ).also {
