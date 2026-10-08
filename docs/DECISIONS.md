@@ -358,3 +358,16 @@ Do not add a per-source ban or tarpit to shave that cost without new evidence th
 camera: it adds state, and a viewer retrying after a failed pairing would be locked out of its own
 camera. The per-source and total connection limits (`ConnectionLimiter`) and the coalesced
 `CONNECTION_REJECTED` rows are the bound.
+
+## D19 — The default alert endpoint has a budget of 250 messages a day per public IP
+
+Anonymous ntfy.sh counts every publish against the sender's public IP: 250 messages, shared by
+every device behind it. Both phones and the dev box share one home address, so the camera's
+alerts, a viewer's health pushes and any harness run draw on the same budget. Past it, publishes
+return 429 (`code 42908`) and alerts stop until the counter resets. `GET https://ntfy.sh/v1/account`
+reports `messages_remaining`.
+
+The camera's `alert` line carries `status` (the first non-2xx answer) when a push is refused, so a
+429 is visible in `camera.jsonl` rather than only as `delivered` below `recipients`. If normal use
+approaches the budget, point the alert endpoint at a self-hosted https server (`AlertEndpoint`
+accepts any https host); do not add retries, which spend the same budget.

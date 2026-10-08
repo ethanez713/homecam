@@ -77,7 +77,9 @@ class Alerts(private val graph: AppGraph) {
                 .filter { it.fingerprint != except }
             if (recipients.isEmpty()) return@launch
             val payload = build()
-            val delivered = recipients.count { publisher.publish(it, payload) }
+            val statuses = recipients.map { publisher.publish(it, payload) }
+            val delivered = statuses.count(AlertPublisher::delivered)
+            val failure = statuses.firstOrNull { it != AlertPublisher.NOT_SENT && !AlertPublisher.delivered(it) }
             // The camera's half of GATE-F: whether it managed to post the alert at all. The
             // viewer arriving while locked (Doze) is checked on the receiving side.
             // A health label is a fixed token. Session and detection labels name people and
@@ -88,6 +90,7 @@ class Alerts(private val graph: AppGraph) {
                 recipients = recipients.size,
                 delivered = delivered,
                 healthLabel = healthLabel,
+                failureStatus = failure,
             )
         }
     }

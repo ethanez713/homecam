@@ -23,13 +23,14 @@ import java.net.URL
  */
 class AlertPublisher {
 
-    suspend fun publish(viewer: ViewerEntity, payload: AlertPayload): Boolean {
+    /** The provider's HTTP status, [NOT_SENT] when nothing was posted, or [FAILED] when the post threw. */
+    suspend fun publish(viewer: ViewerEntity, payload: AlertPayload): Int {
         val key = viewer.alertPublicKey
-        if (!viewer.alertsEnabled || viewer.alertTopic.isBlank()) return false
+        if (!viewer.alertsEnabled || viewer.alertTopic.isBlank()) return NOT_SENT
         // Checked again here because a row written before the policy existed can hold anything.
         val endpoint = AlertEndpoint.validOrNull(viewer.alertEndpoint) ?: run {
             Log.w(TAG, "alert endpoint refused for a registered viewer: ${AlertEndpoint.hostOf(viewer.alertEndpoint)}")
-            return false
+            return NOT_SENT
         }
 
         val body = if (key == null) null else sealWithinLimit(key, payload)
@@ -63,7 +64,7 @@ class AlertPublisher {
         endpoint: String,
         topic: String,
         body: ByteArray,
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): Int = withContext(Dispatchers.IO) {
         runCatching {
             val connection = (URL("$endpoint/$topic").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -77,16 +78,20 @@ class AlertPublisher {
             connection.outputStream.use { it.write(body) }
             val code = connection.responseCode
             connection.disconnect()
-            code in 200..299
+            code
         }.getOrElse {
             Log.w(TAG, "alert delivery failed", it)
-            false
+            FAILED
         }
     }
 
-    private companion object {
-        const val TAG = "AlertPublisher"
-        const val TIMEOUT_MS = 10_000
-        const val CONTENT_FREE_PING = "check your camera"
+    companion object {
+        const val NOT_SENT = 0
+        const val FAILED = -1
+        fun delivered(status: Int) = status in 200..299
+
+        private const val TAG = "AlertPublisher"
+        private const val TIMEOUT_MS = 10_000
+        private const val CONTENT_FREE_PING = "check your camera"
     }
 }

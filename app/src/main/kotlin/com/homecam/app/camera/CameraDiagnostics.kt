@@ -160,10 +160,11 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
         put("seconds", seconds)
     }
 
-    fun alert(kind: String, recipients: Int, delivered: Int, healthLabel: String? = null) = event("alert") {
+    fun alert(kind: String, recipients: Int, delivered: Int, healthLabel: String? = null, failureStatus: Int? = null) = event("alert") {
         put("kind", kind)
         put("recipients", recipients)
         put("delivered", delivered)
+        if (failureStatus != null) put("status", failureStatus)
         if (kind == "health" && !healthLabel.isNullOrEmpty()) {
             put("label", healthLabel.removePrefix(HealthAlertLabels.PREFIX))
         }
