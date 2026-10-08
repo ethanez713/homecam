@@ -118,8 +118,10 @@ class AlertSubscriber : LifecycleService() {
         record(message, repeat, kind)
         if (repeat) return
         val opensLive = kind == AlertKind.SESSION || kind == AlertKind.HEALTH
+        val alias = payload.cameraAlias.ifBlank { "homecam" }
         notify(
-            title = payload.cameraAlias.ifBlank { "homecam" },
+            title = if (payload.urgent) "Urgent — $alias" else alias,
+            urgent = payload.urgent,
             body = describe(payload.labelsList),
             camera = payload.cameraFingerprint,
             // A detection opens on the recording of it; a session opens on the live view.
@@ -178,7 +180,14 @@ class AlertSubscriber : LifecycleService() {
         return power.isDeviceIdleMode || !power.isInteractive
     }
 
-    private fun notify(title: String, body: String, thumbnail: ByteArray? = null, camera: String = "", atMs: Long = 0) {
+    private fun notify(
+        title: String,
+        body: String,
+        thumbnail: ByteArray? = null,
+        camera: String = "",
+        atMs: Long = 0,
+        urgent: Boolean = false,
+    ) {
         val id = System.currentTimeMillis().toInt()
         val open = PendingIntent.getActivity(
             // Each alert keeps its own extras, so the request code has to differ too.
@@ -189,10 +198,11 @@ class AlertSubscriber : LifecycleService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, ALERT_CHANNEL)
+            Notification.Builder(this, if (urgent) URGENT_CHANNEL else ALERT_CHANNEL)
         } else {
             @Suppress("DEPRECATION") Notification.Builder(this)
         }
+        if (urgent) builder.setCategory(Notification.CATEGORY_ALARM)
         builder.setContentTitle(title)
             .setContentText(body)
             .setSmallIcon(R.drawable.ic_stat_camera)
@@ -230,6 +240,9 @@ class AlertSubscriber : LifecycleService() {
             NotificationChannel(ALERT_CHANNEL, "Alerts", NotificationManager.IMPORTANCE_HIGH)
         )
         manager.createNotificationChannel(
+            NotificationChannel(URGENT_CHANNEL, "Urgent alerts", NotificationManager.IMPORTANCE_HIGH)
+        )
+        manager.createNotificationChannel(
             NotificationChannel(STATUS_CHANNEL, "Alert listener", NotificationManager.IMPORTANCE_MIN)
         )
     }
@@ -238,6 +251,7 @@ class AlertSubscriber : LifecycleService() {
         private const val TAG = "AlertSubscriber"
         const val SESSION_LABEL = DiagnosticsLines.SESSION_LABEL
         private const val ALERT_CHANNEL = "homecam.alerts"
+        private const val URGENT_CHANNEL = "homecam.alerts.urgent"
         private const val STATUS_CHANNEL = "homecam.alerts.status"
         private const val NOTIFICATION_ID = 2
         private const val CONNECT_TIMEOUT_MS = 15_000

@@ -2,6 +2,9 @@ package com.homecam.app.alerts
 
 import com.homecam.app.AppGraph
 import com.homecam.app.HarnessIdentities
+import com.homecam.app.data.ViewerEntity
+import com.homecam.core.crypto.AlertEndpoint
+import com.homecam.core.crypto.AlertReserve
 import com.homecam.core.detect.DetectionAlertBatch
 import com.homecam.core.health.HealthAlertPolicy
 import com.homecam.core.health.HealthState
@@ -14,6 +17,8 @@ import kotlinx.coroutines.launch
  * starts — the point being that if a device you don't recognise starts watching, your
  * phone buzzes. The viewer that started it is left out (D14). Detection alerts go to all,
  * once per visit, and one moment's detections share one alert ([DetectionAlertBatch]).
+ * Ordinary detection alerts leave the last [AlertReserve.RESERVE] messages of a provider's
+ * budget to urgent, session and health alerts (D20).
  */
 class Alerts(private val graph: AppGraph) {
 
@@ -38,8 +43,9 @@ class Alerts(private val graph: AppGraph) {
         graph.scope.launch {
             delay(DetectionAlertBatch.HOLD_MS)
             val held = detectionBatch.flush() ?: return@launch
-            send(Kind.DETECTION) {
+            send(Kind.DETECTION, urgent = held.urgent) {
                 base()
+                    .setUrgent(held.urgent)
                     .addAllLabels(held.labels)
                     .setClipId(clipId)
                     .apply {
@@ -71,7 +77,8 @@ class Alerts(private val graph: AppGraph) {
         .setCameraAlias(graph.settings.current.alias)
         .setCameraFingerprint(graph.identity.identity.shortFingerprint)
 
-    private fun send(kind: Kind, except: String? = null, build: () -> AlertPayload) {
+    private fun send(kind: Kind, except: String? = null, urgent: Boolean = false, build: () -> AlertPayload) {
+        val ordinary = kind == Kind.DETECTION && !urgent
         graph.scope.launch {
             val recipients = graph.database.viewers().alertable()
                 .filter {
@@ -84,7 +91,8 @@ class Alerts(private val graph: AppGraph) {
                 .filter { it.fingerprint != except }
             if (recipients.isEmpty()) return@launch
             val payload = build()
-            val statuses = recipients.map { publisher.publish(it, payload) }
+            val withinReserve = if (ordinary) applyReserve(recipients) else Reserve(recipients, 0, null)
+            val statuses = withinReserve.allowed.map { publisher.publish(it, payload) }
             val delivered = statuses.count(AlertPublisher::delivered)
             val failure = statuses.firstOrNull { it != AlertPublisher.NOT_SENT && !AlertPublisher.delivered(it) }
             // The camera's half of GATE-F: whether it managed to post the alert at all. The
@@ -98,7 +106,24 @@ class Alerts(private val graph: AppGraph) {
                 delivered = delivered,
                 healthLabel = healthLabel,
                 failureStatus = failure,
+                urgent = urgent,
+                held = withinReserve.held,
+                remaining = withinReserve.remaining,
             )
         }
+    }
+
+    private class Reserve(val allowed: List<ViewerEntity>, val held: Int, val remaining: Int?)
+
+    /** Asks each endpoint once; an endpoint whose budget cannot be read is not held back. */
+    private suspend fun applyReserve(recipients: List<ViewerEntity>): Reserve {
+        val allowed = mutableListOf<ViewerEntity>()
+        var lowest: Int? = null
+        recipients.groupBy { AlertEndpoint.validOrNull(it.alertEndpoint) }.forEach { (endpoint, group) ->
+            val remaining = endpoint?.let { AlertQuota.remaining(it) }
+            if (remaining != null) lowest = minOf(lowest ?: remaining, remaining)
+            if (AlertReserve.allowsOrdinary(remaining, cost = group.size)) allowed += group
+        }
+        return Reserve(allowed, recipients.size - allowed.size, lowest)
     }
 }

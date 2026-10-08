@@ -409,6 +409,8 @@ message AlertPayload {
   repeated string labels = 4;
   string clip_id = 5;
   bytes thumbnail_jpeg = 6;
+  // Independent signals coincided (AlertUrgency); the viewer surfaces it louder.
+  bool urgent = 7;
   // Zeros that bring the serialised message to a size bucket, so the push provider sees a
   // handful of body sizes instead of one per alert. Readers ignore it.
   bytes padding = 15;

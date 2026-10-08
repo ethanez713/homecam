@@ -371,3 +371,17 @@ The camera's `alert` line carries `status` (the first non-2xx answer) when a pus
 429 is visible in `camera.jsonl` rather than only as `delivered` below `recipients`. If normal use
 approaches the budget, point the alert endpoint at a self-hosted https server (`AlertEndpoint`
 accepts any https host); do not add retries, which spend the same budget.
+
+## D20 — Urgent alerts spend a reserve of the push budget that ordinary detections cannot
+
+A detection alert is urgent when two independent signals agree within a short window: a person
+and a distress sound, or two different distress sounds (`AlertUrgency`). A lone shout or a
+person in view stays ordinary. Urgency travels as `AlertPayload.urgent` inside the sealed body;
+it is never a provider-visible priority, so the push provider learns nothing it did not before.
+
+The last `AlertReserve.RESERVE` messages of an endpoint's budget (D19) are for urgent, session
+and health alerts. Before an ordinary detection or response-action push the camera reads the
+provider's own counter (`GET /v1/account`, which does not spend it) and holds the push back when
+it would cut into the reserve; `held` and `remaining` on the `alert` line in `camera.jsonl` say
+when that happened. An unreadable counter, or a server that reports no limit, holds nothing:
+dropping an alert on a guess is worse than spending the reserve.
