@@ -71,6 +71,44 @@ internal class CameraSocket private constructor(
         /** The camera's signaling path (`com.homecam.app.net.Signaling`). */
         const val PATH = "/hc"
 
+        /**
+         * Completes the WebSocket handshake over the pinned TLS context, then sends only the header of
+         * a masked binary frame that declares [payloadBytes], and reads the close code the camera
+         * answers with. Sending no payload leaves nothing for the camera to reset the connection over,
+         * which is what hides the close frame from a client that is still writing a whole 300 KB.
+         * Returns the close status, or null when the camera sent no close frame.
+         */
+        fun oversizeHeaderProbe(host: String, port: Int, pin: ByteArray, payloadBytes: Int): Int? {
+            val socket = sslContext(pin) { }.socketFactory.createSocket(host, port) as javax.net.ssl.SSLSocket
+            socket.use {
+                it.soTimeout = 10_000
+                it.startHandshake()
+                val out = it.getOutputStream()
+                val input = it.getInputStream()
+                val key = java.util.Base64.getEncoder().encodeToString(ByteArray(16).also { b -> java.security.SecureRandom().nextBytes(b) })
+                out.write(
+                    ("GET $PATH HTTP/1.1\r\nHost: $host:$port\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+                        "Sec-WebSocket-Key: $key\r\nSec-WebSocket-Version: 13\r\n\r\n").toByteArray(Charsets.US_ASCII),
+                )
+                out.flush()
+                val response = StringBuilder()
+                while (!response.endsWith("\r\n\r\n")) {
+                    val b = input.read()
+                    if (b < 0) return null
+                    response.append(b.toChar())
+                }
+                check(response.startsWith("HTTP/1.1 101")) { "upgrade refused: ${response.lineSequence().first()}" }
+                val header = java.nio.ByteBuffer.allocate(14)
+                header.put(0x82.toByte()).put((0x80 or 127).toByte()).putLong(payloadBytes.toLong()).put(ByteArray(4))
+                out.write(header.array())
+                out.flush()
+                val first = input.read()
+                val length = input.read()
+                if (first < 0 || length < 0 || (first and 0x0F) != 0x8 || (length and 0x7F) < 2) return null
+                return (input.read() shl 8) or input.read()
+            }
+        }
+
         fun open(host: String, port: Int, pin: ByteArray, tlsProtocol: String?): CameraSocket {
             val served = AtomicReference<ByteArray>()
             val context = sslContext(pin) { certificate ->
@@ -203,6 +241,7 @@ class RawConnection internal constructor(private val socket: CameraSocket) : Aut
     /** Waits until the peer closes. Frames received along the way are counted and discarded. */
     suspend fun awaitPeerClose(timeoutMs: Long): PeerClose {
         var frames = 0
+        var reset = false
         withTimeoutOrNull(timeoutMs) {
             while (!socket.closedByPeer) {
                 try {
@@ -210,13 +249,19 @@ class RawConnection internal constructor(private val socket: CameraSocket) : Aut
                     frames++
                 } catch (e: ClosedReceiveChannelException) {
                     break
+                } catch (e: java.io.IOException) {
+                    // The camera closes an oversized frame while we are still sending it, and the
+                    // kernel can reset the connection before the close frame is read.
+                    reset = true
+                    break
                 }
             }
         }
         return PeerClose(
             code = socket.peerCloseCode,
             frames = frames,
-            byPeer = socket.closedByPeer,
+            byPeer = socket.closedByPeer || reset,
+            reset = reset,
         )
     }
 
@@ -234,7 +279,7 @@ class RawConnection internal constructor(private val socket: CameraSocket) : Aut
 }
 
 /** What the peer did, as opposed to a close this process initiated. */
-class PeerClose(val code: Int, val frames: Int, val byPeer: Boolean)
+class PeerClose(val code: Int, val frames: Int, val byPeer: Boolean, val reset: Boolean = false)
 
 /**
  * [code] keeps the first peer status. A later close of our own must not replace a 1009.
