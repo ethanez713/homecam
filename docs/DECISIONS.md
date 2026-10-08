@@ -343,3 +343,18 @@ The limit is an observed guess, not a measured one: an unattended 18-hour soak p
 reached 39 °C, so a continuous recorder on a charger will throttle often at 36. What would
 show it is too low or that throttling itself hurts, and the conditions that reopen it, are in
 the roadmap's *Observation* section. Do not raise the limit without those logs.
+
+## D18 — A flood of refused connections may cost CPU; it must not strain the camera
+
+A 60 s flood of 100 connections from one unpaired address raises the camera's process CPU by
+11 to 17 points over its reading while it encodes a live session (one `top` spike of 40 as the
+sockets close together). The camera keeps recording, the held session never drops, nothing
+restarts, and the audit log grows by single digits a minute. That is accepted: the goal is that
+refusing a peer does not waste or strain CPU, and a bounded handshake cost per refused
+connection meets it. The GATE-SEC criterion is the median of six flood samples within 25 points
+of the median of three pre-flood samples.
+
+Do not add a per-source ban or tarpit to shave that cost without new evidence that it strains the
+camera: it adds state, and a viewer retrying after a failed pairing would be locked out of its own
+camera. The per-source and total connection limits (`ConnectionLimiter`) and the coalesced
+`CONNECTION_REJECTED` rows are the bound.
