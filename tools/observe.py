@@ -32,7 +32,10 @@ LATE_REVERT_MS = 2 * 60 * 1000  # later than 2 minutes
 # release bound is two frames at that rate.
 IDLE_FPS = 15
 TWO_FRAMES_MS = 2 / IDLE_FPS * 1000
-POWER_SAVING_PER_HOUR = 20  # flapping more than 20 times an hour
+# Each power_saving line counts. At the 240 s cap a short engagement is two lines
+# at most every 240 s, and the ramp to the cap peaks at 34 in one hour. 40 sits
+# above that; a quiet period stuck under 2 min (60 lines) still flags.
+POWER_SAVING_PER_HOUR = 40  # flapping more than 40 times an hour
 SOUND_EVENTS_PER_DAY = 20  # more than 20 sound_event lines in a day
 ALERT_DELAY_MS = 60 * 1000  # delay_ms over 60 s
 # ResponsePolicy.DARK_LUMA_THRESHOLD: mean luma below this counts as dark.
@@ -98,7 +101,7 @@ PHRASE_CRITICAL = "critical entry with no alert"
 PHRASE_LATE = "revert later than 2 minutes"
 PHRASE_RESTART = "no revert after a restart that spanned the due time"
 PHRASE_FRAMES = "power_saving release more than 2 frames after its trigger"
-PHRASE_FLAP = "power_saving engage/release flapping more than 20 times an hour"
+PHRASE_FLAP = "power_saving engage/release flapping more than 40 times an hour"
 PHRASE_MISS_POWER = "detection missed at a power_saving transition"
 PHRASE_MIC = "sound_event or listening interval while the microphone setting was off"
 PHRASE_SOUNDS = "more than 20 sound_event lines in a day"

@@ -1,7 +1,7 @@
 """Synthetic logs for tools/observe.py.
 
 The crossing log is built so each observation-table trigger fires once. The clean
-log sits on the safe side of every numeric threshold (20 sound events, 20 power
+log sits on the safe side of every numeric threshold (20 sound events, 40 power
 transitions in an hour, one throttled day, a gap that does not touch a throttle
 edge) and must not be marked.
 """
@@ -120,7 +120,7 @@ def crossing_rows():
     rows.append(ev(sound_base + 10500, "audio_listen", state="start", reason="viewer_live"))
     rows.append(ev(sound_base + 20500, "power_saving", state="release", reason="sound"))
     flap = at(4, 10, 30)
-    for i in range(20):
+    for i in range(40):
         state = "engage" if i % 2 == 0 else "release"
         reason = "idle" if state == "engage" else "movement"
         rows.append(ev(flap + i * 10, "power_saving", state=state, reason=reason))
@@ -233,9 +233,9 @@ def clean_rows():
     for i in range(20):
         rows.append(ev(sound_base + i * 1000, "sound_event", category="sound", level_db=-18.0))
     rows.append(ev(sound_base + 19_000 + 40, "power_saving", state="release", reason="sound"))
-    # 19 more transitions: peak in any hour is 20, which is not more than 20.
+    # 39 more transitions: peak in any hour is 40, which is not more than 40.
     flap = at(15, 12, 30)
-    for i in range(19):
+    for i in range(39):
         state = "engage" if i % 2 == 0 else "release"
         reason = "idle" if state == "engage" else "movement"
         rows.append(ev(flap + i * 10, "power_saving", state=state, reason=reason))

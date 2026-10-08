@@ -28,7 +28,8 @@ import org.webrtc.audio.JavaAudioDeviceModule.AudioSamples
 
 /**
  * Each release reason brings capture back to the full rate on the triggering frame,
- * and the tick puts the idle rate back only after [PowerSaving.QUIET_MS].
+ * and the tick puts the idle rate back only after the quiet period that short
+ * engagement leaves, twice [PowerSaving.QUIET_MS].
  * The capturer is never started, so this does not open a camera.
  */
 @RunWith(AndroidJUnit4::class)
@@ -208,10 +209,11 @@ class PowerSavingReleaseTest {
 
         fun assertIdleReturnsAfterQuietPeriod() {
             val releasedAt = now
-            now = releasedAt + PowerSaving.QUIET_MS - 1
+            val quiet = PowerSaving.QUIET_MS * 2
+            now = releasedAt + quiet - 1
             saving.tick(sceneIdle = true)
             assertEquals(fullRate, capturer.targetFps)
-            now = releasedAt + PowerSaving.QUIET_MS
+            now = releasedAt + quiet
             saving.tick(sceneIdle = true)
             assertEquals(CameraXVideoCapturer.IDLE_FPS, capturer.targetFps)
         }

@@ -58,14 +58,53 @@ class PowerSavingTest {
         harness.power.release(PowerSavingReason.MOTION)
         assertEquals(2, harness.log.size)
 
-        harness.now = releasedAt + PowerSaving.QUIET_MS - 1
+        val quiet = PowerSaving.QUIET_MS * 2
+        harness.now = releasedAt + quiet - 1
         harness.power.tick(sceneIdle = true)
         assertFalse(harness.saving)
 
-        harness.now = releasedAt + PowerSaving.QUIET_MS
+        harness.now = releasedAt + quiet
         harness.power.tick(sceneIdle = true)
         assertTrue(harness.saving)
         assertEquals(true to PowerSavingReason.IDLE, harness.log.last())
+    }
+
+    @Test
+    fun `each short engagement doubles the next quiet period up to the cap`() {
+        val harness = Harness()
+        val base = PowerSaving.QUIET_MS
+        harness.engageThenReleaseShort(base)
+        harness.engageThenReleaseShort(base * 2)
+        harness.engageThenReleaseShort(base * 4)
+        harness.engageThenReleaseShort(PowerSaving.QUIET_MS_CAP)
+        harness.engageThenReleaseShort(PowerSaving.QUIET_MS_CAP)
+    }
+
+    @Test
+    fun `an engagement that lasts the stable period resets the quiet period`() {
+        val harness = Harness()
+        harness.engageThenReleaseShort(PowerSaving.QUIET_MS)
+        harness.tickUntilEngaged(PowerSaving.QUIET_MS * 2)
+        harness.now += PowerSaving.STABLE_ENGAGED_MS
+        harness.power.release(PowerSavingReason.DETECTION)
+        assertFalse(harness.saving)
+        harness.tickUntilEngaged(PowerSaving.QUIET_MS)
+    }
+
+    @Test
+    fun `an engagement one millisecond short of stable doubles the quiet period`() {
+        val harness = Harness()
+        harness.tickUntilEngaged(PowerSaving.QUIET_MS)
+        harness.now += PowerSaving.STABLE_ENGAGED_MS - 1
+        harness.power.release(PowerSavingReason.MOTION)
+        assertFalse(harness.saving)
+        harness.tickUntilEngaged(PowerSaving.QUIET_MS * 2)
+    }
+
+    @Test
+    fun `a trigger every 31 seconds settles at no more than 8 pairs an hour`() {
+        val pairs = Harness().pairsOverHour(triggerEveryMs = 31_000)
+        assertTrue("pairs=$pairs", pairs in 1..8)
     }
 
     @Test
@@ -153,6 +192,41 @@ class PowerSavingTest {
             now = PowerSaving.QUIET_MS
             power.tick(sceneIdle = true)
             check(saving)
+        }
+
+        fun tickUntilEngaged(quiet: Long) {
+            val start = now
+            now = start + quiet - 1
+            power.tick(sceneIdle = true)
+            assertFalse(saving)
+            now = start + quiet
+            power.tick(sceneIdle = true)
+            assertTrue(saving)
+        }
+
+        fun engageThenReleaseShort(quiet: Long) {
+            tickUntilEngaged(quiet)
+            power.release(PowerSavingReason.MOTION)
+            assertFalse(saving)
+        }
+
+        fun pairsOverHour(triggerEveryMs: Long): Int {
+            val hour = 60 * 60 * 1000L
+            var pairs = 0
+            var nextTrigger = triggerEveryMs
+            var t = 0L
+            while (t <= hour) {
+                now = t
+                if (t == nextTrigger) {
+                    val wasEngaged = saving
+                    power.release(PowerSavingReason.MOTION)
+                    if (wasEngaged) pairs += 1
+                    nextTrigger += triggerEveryMs
+                }
+                power.tick(sceneIdle = true)
+                t += 1_000
+            }
+            return pairs
         }
     }
 }
