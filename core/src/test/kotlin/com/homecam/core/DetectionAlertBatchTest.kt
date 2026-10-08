@@ -65,4 +65,40 @@ class DetectionAlertBatchTest {
 
         assertTrue(batch.add(listOf("person"), null, 300_001))
     }
+
+    @Test
+    fun `a coincidence opens a batch even when both visits are already open`() {
+        batch.add(listOf("glass"), null, 0)
+        batch.flush()
+        batch.add(listOf("person"), null, 100_000)
+        batch.flush()
+
+        assertTrue(batch.add(listOf("glass"), null, 150_000))
+        assertTrue(batch.flush()!!.urgent)
+    }
+
+    @Test
+    fun `a person and a sound in one moment make an urgent batch`() {
+        batch.add(listOf("person"), null, 0)
+        batch.add(listOf("glass"), null, 6_000)
+
+        assertTrue(batch.flush()!!.urgent)
+    }
+
+    @Test
+    fun `urgency does not carry into the next batch`() {
+        batch.add(listOf("person"), null, 0)
+        batch.add(listOf("glass"), null, 1_000)
+        batch.flush()
+
+        batch.add(listOf("knock"), null, 400_000)
+        assertFalse(batch.flush()!!.urgent)
+    }
+
+    @Test
+    fun `a lone detection is not urgent`() {
+        batch.add(listOf("person"), null, 0)
+
+        assertFalse(batch.flush()!!.urgent)
+    }
 }
