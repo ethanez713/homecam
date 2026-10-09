@@ -24,6 +24,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
+import com.homecam.core.lens.LensEntry
+import com.homecam.proto.LensInfo
 import org.webrtc.CapturerObserver
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
@@ -47,6 +49,7 @@ class CameraXVideoCapturer(
 ) : VideoCapturer {
 
     private var lensFacing = initialLensFacing
+    private var lens: LensEntry? = null
     private var format = Triple(1920, 1080, 30)
     @Volatile private var powerSaving = false
     @Volatile private var thermalThrottle = false
@@ -112,7 +115,7 @@ class CameraXVideoCapturer(
                 )
                 .build()
 
-            val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+            val selector = selectorFor(lens)
             val sensorRotation = selector.filter(cameraProvider.availableCameraInfos)
                 .firstOrNull()?.sensorRotationDegrees ?: 0
 
@@ -144,7 +147,17 @@ class CameraXVideoCapturer(
             camera = bound
             watchCameraState(bound)
             applyFrameRate(bound)
+            lens?.takeIf { it.reach == LensInfo.Reach.ZOOM_RATIO || it.zoomMin > 1f }?.let { bound.cameraControl.setZoomRatio(it.zoomMin) }
         }, main)
+    }
+
+    @SuppressLint("UnsafeOptInUsageError")
+    private fun selectorFor(lens: LensEntry?): CameraSelector {
+        if (lens == null) return CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        return CameraSelector.Builder()
+            .addCameraFilter { infos -> infos.filter { Camera2CameraInfo.from(it).cameraId == lens.cameraId } }
+            .also { builder -> lens.physicalId?.let(builder::setPhysicalCameraId) }
+            .build()
     }
 
     /**
@@ -224,8 +237,21 @@ class CameraXVideoCapturer(
 
     fun setLensFacing(front: Boolean) {
         val next = if (front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-        if (next == lensFacing) return
+        if (next == lensFacing && lens == null) return
         lensFacing = next
+        lens = null
+        rebind()
+    }
+
+    /** Opens [next] by the means its catalog entry names; a switch is a rebind, about a second without frames. */
+    fun setLens(next: LensEntry) {
+        if (next == lens) return
+        lens = next
+        lensFacing = if (next.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+        rebind()
+    }
+
+    private fun rebind() {
         val (width, height, framerate) = format
         changeCaptureFormat(width, height, framerate)
     }
@@ -240,8 +266,11 @@ class CameraXVideoCapturer(
      * something different on each phone is worse than no slider.
      */
     fun setZoom(ratio: Float) {
+        val t = ratio.coerceIn(0f, 1f)
+        val reached = lens?.takeIf { it.reach == LensInfo.Reach.ZOOM_RATIO || it.zoomMin > 1f }
         ContextCompat.getMainExecutor(context).execute {
-            camera?.cameraControl?.setLinearZoom(ratio.coerceIn(0f, 1f))
+            if (reached == null) camera?.cameraControl?.setLinearZoom(t)
+            else camera?.cameraControl?.setZoomRatio(reached.zoomMin + t * (reached.zoomMax - reached.zoomMin))
         }
     }
 

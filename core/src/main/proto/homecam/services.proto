@@ -30,6 +30,23 @@ message Resolution { uint32 width = 1; uint32 height = 2; uint32 fps = 3; }
 message Zoom { float ratio = 1; }
 message Lens { enum Facing { BACK = 0; FRONT = 1; } Facing facing = 1; }
 
+// One lens a camera can open (Phase 12). Ids are stable names, never raw camera ids.
+message LensInfo {
+  // How the lens is opened: its own camera id, a zoom ratio below 1.0 on the logical back
+  // camera, or a physical camera inside it.
+  enum Reach { CAMERA_ID = 0; ZOOM_RATIO = 1; PHYSICAL_ID = 2; }
+  string id = 1;
+  Lens.Facing facing = 2;
+  // How much of the scene it sees compared with the back-wide lens (1.0): 1.8 is wider.
+  float relative_fov = 3;
+  Reach reach = 4;
+  repeated Resolution resolutions = 5;
+  bool torch = 6;
+  // The zoom factors the lens spans, as the lens itself reports them.
+  float zoom_min = 7;
+  float zoom_max = 8;
+}
+
 // Response actions (Phase 8). The siren plays through the camera phone's own speaker and
 // stops itself after [seconds]; the spotlight is the torch used deliberately as a light.
 message Siren { bool on = 1; uint32 seconds = 2; }
@@ -452,6 +469,8 @@ message Capabilities {
   bool hardware_protection = 12;
   // The platform reports a thermal status (API 29+); otherwise only battery temperature.
   bool thermal_status_supported = 13;
+  // Phase 12: every lens that opens. multi_lens is true exactly when this has more than one.
+  repeated LensInfo lenses = 14;
 
   enum EncoderTier {
     ENCODER_NONE = 0;  // software encode only

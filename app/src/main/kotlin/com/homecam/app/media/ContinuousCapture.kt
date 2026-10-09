@@ -2,6 +2,7 @@ package com.homecam.app.media
 
 import android.content.Context
 import androidx.lifecycle.LifecycleOwner
+import com.homecam.core.lens.LensEntry
 import com.homecam.proto.Lens
 import com.homecam.proto.PrivacyMask
 import kotlinx.coroutines.CompletableDeferred
@@ -157,6 +158,8 @@ open class ContinuousCapture(
     fun setZoom(ratio: Float) = capturer?.setZoom(ratio)
 
     fun setLens(facing: Lens.Facing) = capturer?.setLensFacing(facing == Lens.Facing.FRONT)
+
+    fun setLens(lens: LensEntry) = capturer?.setLens(lens)
 
     fun setFormat(next: Format) {
         format = next
