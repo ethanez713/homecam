@@ -1,6 +1,8 @@
 package com.homecam.app.camera.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +16,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,6 +29,7 @@ import com.homecam.app.ui.HardwareProtectionControl
 import com.homecam.app.ui.RecordingModeControl
 import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.Chevron
+import com.homecam.app.ui.kit.ConfirmSheet
 import com.homecam.app.ui.kit.Eyebrow
 import com.homecam.app.ui.kit.Gutter
 import com.homecam.app.ui.kit.ListRow
@@ -47,6 +54,7 @@ import com.homecam.proto.RecordingMode
  * device itself. Both are here for the same reason: the person walking past the phone in
  * the hallway is the one who most needs to know somebody is watching.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CameraHomeScreen(
     alias: String,
@@ -65,6 +73,8 @@ fun CameraHomeScreen(
     onPair: () -> Unit,
     onLog: () -> Unit,
     onNetwork: () -> Unit,
+    probing: Boolean = false,
+    onLensProbe: () -> Unit = {},
     lenses: List<LensInfo> = emptyList(),
     lens: String = "",
     onLens: (String) -> Unit = {},
@@ -74,11 +84,25 @@ fun CameraHomeScreen(
 ) {
     Column(Modifier.fillMaxSize()) {
         TopBar(alias, subtitle = "This phone is the camera", subtitleIsData = false) {
+            var confirmProbe by remember { mutableStateOf(false) }
             Badge(
-                if (serving) "Running" else "Stopped",
-                if (serving) Tone.SUCCESS else Tone.DANGER,
+                if (probing) "Probing lenses" else if (serving) "Running" else "Stopped",
+                if (probing) Tone.WARNING else if (serving) Tone.SUCCESS else Tone.DANGER,
                 dot = true,
+                // Hidden on purpose: the probe takes the camera offline for minutes.
+                modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { if (!probing) confirmProbe = true }),
             )
+            if (confirmProbe) {
+                ConfirmSheet(
+                    title = "Probe the lenses?",
+                    body = "The camera stops recording while it runs two lenses at once, for up to 20 minutes, " +
+                        "then starts again by itself. The result goes to the diagnostics log.",
+                    confirm = "Run probe",
+                    onConfirm = onLensProbe,
+                    onDismiss = { confirmProbe = false },
+                    danger = false,
+                )
+            }
             Spacer(Modifier.width(8.dp))
         }
 

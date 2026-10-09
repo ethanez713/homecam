@@ -264,6 +264,11 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
 
     fun cameraRecovered() = event("camera_recovered") {}
 
+    /** The measured answer to which lenses can run at once (Phase 12.4); the fields are the probe's own. */
+    fun lensProbe(result: JSONObject) = event("lens_probe") {
+        result.keys().forEach { put(it, result.get(it)) }
+    }
+
     private inline fun event(type: String, build: JSONObject.() -> Unit) {
         val line = JSONObject()
             .put("ts", System.currentTimeMillis())

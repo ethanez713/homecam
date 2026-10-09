@@ -34,10 +34,13 @@ import com.homecam.proto.AuditEvent
 import com.homecam.proto.LensSelection
 import com.homecam.core.retention.ClipRef
 import com.homecam.core.retention.RetentionPlanner
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 // Who changed a setting, where the change was made on the camera's own screen.
 private const val ON_THIS_CAMERA = "On the camera"
+private const val STOP_TIMEOUT_MS = 10_000L
 
 private enum class CameraScreen { HOME, ROSTER, PAIRING, LOG, NETWORK }
 
@@ -69,6 +72,7 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
 
     val settings by graph.settings.settings.collectAsState()
     val lenses = remember { CapabilityProvider.capabilities(context).lensesList }
+    var probing by remember { mutableStateOf(false) }
     val roster by node.roster.collectAsState()
     val accessCount by node.accessCount.collectAsState()
     val pairing by node.pairing.collectAsState()
@@ -131,6 +135,20 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
                 scope.launch {
                     graph.settings.update { setHardwareProtection(protection) }
                     graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = "hardware protection")
+                }
+            },
+            probing = probing,
+            onLensProbe = {
+                probing = true
+                graph.scope.launch {
+                    CameraService.stop(context)
+                    withTimeoutOrNull(STOP_TIMEOUT_MS) { CameraService.isRunning.first { !it } }
+                    runCatching { LensProbe(context).run() }
+                        .onSuccess { graph.diagnostics.lensProbe(it) }
+                        .onFailure { graph.diagnostics.error("lens_probe", it.message) }
+                    CameraService.startReason = "manual"
+                    CameraService.start(context)
+                    probing = false
                 }
             },
             lenses = lenses,
