@@ -88,9 +88,19 @@ fun TimelineRuler(
             val left = x(clip.startedAtMs).coerceAtLeast(0f)
             val right = x(end).coerceAtMost(size.width)
             drawRect(
-                color = if (clip.labelsCount > 0) colors.accent else colors.borderStrong,
+                color = colors.borderStrong,
                 topLeft = Offset(left, bandTop),
-                // A two-second event at a wide zoom would otherwise be thinner than a pixel.
+                size = Size((right - left).coerceAtLeast(2.dp.toPx()), bandHeight),
+            )
+        }
+        timeline.events.forEach { event ->
+            if (event.endMs < fromMs || event.startMs > toMs) return@forEach
+            val left = x(event.startMs).coerceAtLeast(0f)
+            val right = x(event.endMs).coerceAtMost(size.width)
+            drawRect(
+                color = colors.accent,
+                topLeft = Offset(left, bandTop),
+                // A one-second event at a wide zoom would otherwise be thinner than a pixel.
                 size = Size((right - left).coerceAtLeast(2.dp.toPx()), bandHeight),
             )
         }

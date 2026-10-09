@@ -156,15 +156,14 @@ class CameraServices(
                 .setUntilMs(until)
                 .addAllEntries(
                     graph.database.clips().between(query.sinceMs, until, MAX_CLIP_ROWS)
-                        .flatMap { clip ->
-                            clip.labels.split(",").filter { it.isNotBlank() }.ifEmpty { listOf("motion") }
-                                .map { label ->
-                                    TimelineQuery.Entry.newBuilder()
-                                        .setAtMs(clip.startedAtMs)
-                                        .setClipId(clip.id)
-                                        .setLabel(label)
-                                        .build()
-                                }
+                        .flatMap { ClipEventIndex.spans(it) }
+                        .map { span ->
+                            TimelineQuery.Entry.newBuilder()
+                                .setAtMs(span.startMs)
+                                .setEndMs(span.endMs)
+                                .setClipId(span.clipId)
+                                .setLabel(span.label)
+                                .build()
                         }
                 )
                 .build()
@@ -174,8 +173,8 @@ class CameraServices(
         peer.register(RpcMessage.Service.MEDIA, Controls.Media.TIMELINE_EVENT_COUNT) { request ->
             val query = TimelineCount.parseFrom(request.payload)
             val until = query.untilMs.takeIf { it > 0 } ?: System.currentTimeMillis()
-            // The same (clip × label) events TIMELINE returns, bucketed by local hour, so the
-            // density strip and the event list can never disagree.
+            // One event per (clip × label), bucketed by local hour. TIMELINE places events
+            // finer than that, inside the clip.
             val eventTimes = graph.database.clips().between(query.sinceMs, until, MAX_CLIP_ROWS)
                 .flatMap { clip ->
                     clip.labels.split(",").filter { it.isNotBlank() }.ifEmpty { listOf("motion") }

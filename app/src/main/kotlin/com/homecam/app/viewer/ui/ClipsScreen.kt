@@ -70,6 +70,7 @@ import com.homecam.app.ui.theme.HomecamTheme
 import com.homecam.core.media.ClipFilter
 import com.homecam.core.media.ClipRun
 import com.homecam.core.media.ClipRuns
+import com.homecam.core.media.EventSpan
 import com.homecam.core.media.Timeline
 import com.homecam.proto.Clip
 import java.io.File
@@ -104,6 +105,7 @@ fun ClipsScreen(
     onBack: () -> Unit = {},
     /** Where to put the playhead on opening, as an alert about that moment does. */
     openAtMs: Long? = null,
+    eventSpans: List<EventSpan> = emptyList(),
 ) {
     if (clips == null) {
         EmptyState("Loading clips", busy = true)
@@ -114,7 +116,7 @@ fun ClipsScreen(
         return
     }
 
-    val timeline = remember(clips) { Timeline(clips) }
+    val timeline = remember(clips, eventSpans) { Timeline(clips, eventSpans) }
     var playheadMs by remember(openAtMs) {
         mutableLongStateOf(openAtMs?.let(timeline::clamp) ?: timeline.clips.last().startedAtMs)
     }
@@ -170,8 +172,8 @@ fun ClipsScreen(
             else goTo(underPlayhead?.let { playheadMs } ?: timeline.firstClipFrom(playheadMs)?.startedAtMs ?: playheadMs)
         },
         onJump = { deltaMs -> goTo(playheadMs + deltaMs, play = wantPlaying) },
-        onPreviousEvent = { timeline.previousEvent(playheadMs)?.let { goTo(it.startedAtMs) } },
-        onNextEvent = { timeline.nextEvent(playheadMs)?.let { goTo(it.startedAtMs) } },
+        onPreviousEvent = { timeline.previousEvent(playheadMs)?.let { goTo(it.startMs) } },
+        onNextEvent = { timeline.nextEvent(playheadMs)?.let { goTo(it.startMs) } },
         onDay = { day -> timeline.clips.firstOrNull { dayOf(it.startedAtMs) == day }?.let { goTo(it.startedAtMs, play = false) } },
     )
 

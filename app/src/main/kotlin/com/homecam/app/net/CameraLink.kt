@@ -186,6 +186,15 @@ class CameraLink(private val peer: RpcPeer) {
         ).jpeg.toByteArray().takeIf { it.isNotEmpty() }
     }.getOrNull()
 
+    suspend fun eventSpans(sinceMs: Long): List<com.homecam.core.media.EventSpan> =
+        com.homecam.proto.TimelineQuery.parseFrom(
+            peer.request(
+                RpcMessage.Service.MEDIA,
+                Controls.Media.TIMELINE,
+                com.homecam.proto.TimelineQuery.newBuilder().setSinceMs(sinceMs).build().toByteString(),
+            )
+        ).entriesList.map { com.homecam.core.media.EventSpan(it.clipId, it.label, it.atMs, it.endMs) }
+
     suspend fun timelineCounts(sinceMs: Long, untilMs: Long = 0): com.homecam.proto.TimelineCount =
         com.homecam.proto.TimelineCount.parseFrom(
             peer.request(

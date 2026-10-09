@@ -1,5 +1,6 @@
 package com.homecam.core
 
+import com.homecam.core.media.EventSpan
 import com.homecam.core.media.TickSteps
 import com.homecam.core.media.Timeline
 import com.homecam.proto.Clip
@@ -54,17 +55,30 @@ class TimelineTest {
 
     @Test
     fun `events are the labelled clips, in order`() {
-        assertEquals(listOf("b", "c"), timeline.events.map { it.id })
-        assertEquals("b", timeline.nextEvent(0)?.id)
-        assertEquals("c", timeline.nextEvent(120_000)?.id)
+        assertEquals(listOf("b", "c"), timeline.events.map { it.clipId })
+        assertEquals("b", timeline.nextEvent(0)?.clipId)
+        assertEquals("c", timeline.nextEvent(120_000)?.clipId)
         assertNull(timeline.nextEvent(600_000))
     }
 
     @Test
     fun `stepping back restarts the event you are in before going to the one before`() {
-        assertEquals("c", timeline.previousEvent(610_000)?.id)
-        assertEquals("b", timeline.previousEvent(601_000)?.id)
+        assertEquals("c", timeline.previousEvent(610_000)?.clipId)
+        assertEquals("b", timeline.previousEvent(601_000)?.clipId)
         assertNull(timeline.previousEvent(121_000))
+    }
+
+    @Test
+    fun `placed spans replace the whole-clip event, and next event lands on their seconds`() {
+        val placed = Timeline(
+            timeline.clips,
+            listOf(EventSpan("b", "person", 150_000, 156_000), EventSpan("b", "person", 200_000, 203_000)),
+        )
+
+        assertEquals(listOf(150_000L, 200_000L, 600_000L), placed.events.map { it.startMs })
+        assertEquals(150_000L, placed.nextEvent(0)?.startMs)
+        assertEquals(200_000L, placed.nextEvent(150_000)?.startMs)
+        assertEquals(150_000L, placed.previousEvent(200_000)?.startMs)
     }
 
     @Test

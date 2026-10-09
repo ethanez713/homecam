@@ -294,11 +294,15 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
 
             CameraTab.CLIPS -> {
                 var clips by remember(open) { mutableStateOf<List<com.homecam.proto.Clip>?>(null) }
+                var eventSpans by remember(open) { mutableStateOf<List<com.homecam.core.media.EventSpan>>(emptyList()) }
                 var playing by remember(open) { mutableStateOf<java.io.File?>(null) }
                 var playingId by remember(open) { mutableStateOf<String?>(null) }
                 var downloading by remember(open) { mutableStateOf<String?>(null) }
                 suspend fun refresh() {
                     clips = open?.let { runCatching { it.link.clips().clipsList }.getOrNull() }
+                    eventSpans = open?.let { s ->
+                        clips?.minOfOrNull { it.startedAtMs }?.let { since -> runCatching { s.link.eventSpans(since) }.getOrNull() }
+                    }.orEmpty()
                 }
                 LaunchedEffect(open) { refresh() }
 
@@ -319,6 +323,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
 
                 ClipsScreen(
                     clips = clips,
+                    eventSpans = eventSpans,
                     playing = playing,
                     playingId = playingId,
                     downloadingId = downloading,

@@ -4,14 +4,19 @@ import com.homecam.proto.Clip
 
 /**
  * Recorded footage laid along a time axis: which clip covers an instant, where the gaps
- * are, and where the events worth jumping to begin. An event is a clip something was
- * detected in; inside a continuous segment that is as fine as the index goes, since the
- * exact moments live in the clip's own metadata track.
+ * are, and where the events worth jumping to begin. An event is a span the camera placed
+ * from a clip's metadata track; a labelled clip it has no span for counts as one event
+ * over its whole length.
  */
-class Timeline(clips: List<Clip>) {
+class Timeline(clips: List<Clip>, spans: List<EventSpan> = emptyList()) {
 
     val clips: List<Clip> = clips.sortedBy { it.startedAtMs }
-    val events: List<Clip> = this.clips.filter { it.labelsCount > 0 }
+    val events: List<EventSpan> = run {
+        val placed = spans.map { it.clipId }.toSet()
+        val whole = this.clips.filter { it.labelsCount > 0 && it.id !in placed }
+            .map { EventSpan(it.id, it.getLabels(0), it.startedAtMs, it.startedAtMs + it.durationMs) }
+        (spans + whole).sortedBy { it.startMs }
+    }
 
     val isEmpty: Boolean get() = clips.isEmpty()
     val startMs: Long get() = clips.firstOrNull()?.startedAtMs ?: 0L
@@ -33,13 +38,13 @@ class Timeline(clips: List<Clip>) {
         clips.firstOrNull { it.startedAtMs >= clip.endMs - OVERLAP_SLACK_MS && it.id != clip.id }
             ?.takeIf { it.startedAtMs - clip.endMs <= maxGapMs }
 
-    fun nextEvent(afterMs: Long): Clip? = events.firstOrNull { it.startedAtMs > afterMs }
+    fun nextEvent(afterMs: Long): EventSpan? = events.firstOrNull { it.startMs > afterMs }
 
     /**
      * Stepping back from the middle of an event goes to its own start first, as "previous
      * track" does in a music player; from its first moments, to the event before.
      */
-    fun previousEvent(beforeMs: Long): Clip? = events.lastOrNull { it.startedAtMs < beforeMs - RESTART_WINDOW_MS }
+    fun previousEvent(beforeMs: Long): EventSpan? = events.lastOrNull { it.startMs < beforeMs - RESTART_WINDOW_MS }
 
     private val Clip.endMs: Long get() = startedAtMs + durationMs
 

@@ -275,7 +275,7 @@ message DateList { repeated string dates = 1; repeated uint32 counts = 2; }
 message TimelineQuery {
   int64 since_ms = 1;
   int64 until_ms = 2;
-  message Entry { int64 at_ms = 1; string clip_id = 2; string label = 3; }
+  message Entry { int64 at_ms = 1; string clip_id = 2; string label = 3; int64 end_ms = 4; }
   repeated Entry entries = 3;
 }
 
