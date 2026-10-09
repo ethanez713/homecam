@@ -32,6 +32,10 @@ internal class CameraAdb(private val serial: String) {
         return catText(INVITE)
     }
 
+    fun unmuteHarnessAlerts() {
+        shell("run-as", PACKAGE, "rm", "-f", "files/harness-identities.txt")
+    }
+
     fun deleteInvite() {
         shell("run-as", PACKAGE, "rm", "-f", INVITE)
     }

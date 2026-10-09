@@ -81,6 +81,7 @@ class Sec3AlertEndpointTest {
                     )
                     val marker = lastLine(adb.cameraJsonl())
                     if (!a.isConnected()) a.connect()
+                    adb.unmuteHarnessAlerts()
                     a.openSession()
                     val body = subscription.awaitMessage(30_000)
                     val opened = body?.let { decrypt(keys, it) }
