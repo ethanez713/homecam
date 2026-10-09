@@ -24,7 +24,6 @@ interface MediaController {
     fun setPushToTalk(active: Boolean)
     fun setPrivacyMask(mask: PrivacyMask)
     suspend fun setResolution(resolution: Resolution): SessionStatus
-    fun setLens(facing: Lens.Facing)
     fun setOrientation(degrees: Int)
     fun recordManually(seconds: Int, start: Boolean)
     fun setSiren(on: Boolean, seconds: Int, by: Actor? = null)

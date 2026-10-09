@@ -3,7 +3,6 @@ package com.homecam.app.media
 import android.content.Context
 import androidx.lifecycle.LifecycleOwner
 import com.homecam.core.lens.LensEntry
-import com.homecam.proto.Lens
 import com.homecam.proto.PrivacyMask
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
@@ -49,9 +48,14 @@ open class ContinuousCapture(
 
     val lastCameraErrorCode: Int? get() = capturer?.lastErrorCode
 
-    fun start(format: Format = this.format, mask: PrivacyMask = PrivacyMask.getDefaultInstance()) {
+    fun start(
+        format: Format = this.format,
+        mask: PrivacyMask = PrivacyMask.getDefaultInstance(),
+        lens: LensEntry? = this.lens,
+    ) {
         if (running) return
         this.format = format
+        this.lens = lens
         maskProcessor.mask = mask
 
         val videoCapturer = createCapturer()
@@ -65,7 +69,7 @@ open class ContinuousCapture(
     }
 
     protected open fun createCapturer(): CameraXVideoCapturer =
-        CameraXVideoCapturer(context, lifecycleOwner)
+        CameraXVideoCapturer(context, lifecycleOwner, lens)
 
     protected open fun attachCapturer(
         videoCapturer: CameraXVideoCapturer,
@@ -157,9 +161,13 @@ open class ContinuousCapture(
 
     fun setZoom(ratio: Float) = capturer?.setZoom(ratio)
 
-    fun setLens(facing: Lens.Facing) = capturer?.setLensFacing(facing == Lens.Facing.FRONT)
+    /** Kept across a capture restart, which builds a new capturer. */
+    fun setLens(next: LensEntry) {
+        lens = next
+        capturer?.setLens(next)
+    }
 
-    fun setLens(lens: LensEntry) = capturer?.setLens(lens)
+    private var lens: LensEntry? = null
 
     fun setFormat(next: Format) {
         format = next

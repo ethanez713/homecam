@@ -45,11 +45,8 @@ import org.webrtc.VideoCapturer
 class CameraXVideoCapturer(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
-    initialLensFacing: Int = CameraSelector.LENS_FACING_BACK,
+    private var lens: LensEntry? = null,
 ) : VideoCapturer {
-
-    private var lensFacing = initialLensFacing
-    private var lens: LensEntry? = null
     private var format = Triple(1920, 1080, 30)
     @Volatile private var powerSaving = false
     @Volatile private var thermalThrottle = false
@@ -153,7 +150,7 @@ class CameraXVideoCapturer(
 
     @SuppressLint("UnsafeOptInUsageError")
     private fun selectorFor(lens: LensEntry?): CameraSelector {
-        if (lens == null) return CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        if (lens == null) return CameraSelector.DEFAULT_BACK_CAMERA
         return CameraSelector.Builder()
             .addCameraFilter { infos -> infos.filter { Camera2CameraInfo.from(it).cameraId == lens.cameraId } }
             .also { builder -> lens.physicalId?.let(builder::setPhysicalCameraId) }
@@ -235,19 +232,10 @@ class CameraXVideoCapturer(
         ContextCompat.getMainExecutor(context).execute { source.removeObserver(stateObserver) }
     }
 
-    fun setLensFacing(front: Boolean) {
-        val next = if (front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-        if (next == lensFacing && lens == null) return
-        lensFacing = next
-        lens = null
-        rebind()
-    }
-
     /** Opens [next] by the means its catalog entry names; a switch is a rebind, about a second without frames. */
     fun setLens(next: LensEntry) {
         if (next == lens) return
         lens = next
-        lensFacing = if (next.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
         rebind()
     }
 

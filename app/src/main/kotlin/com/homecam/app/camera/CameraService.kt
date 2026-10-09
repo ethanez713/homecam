@@ -29,6 +29,8 @@ import com.homecam.app.media.ContinuousCapture
 import com.homecam.app.media.WebRtc
 import com.homecam.core.diagnostics.PowerSavingReason
 import com.homecam.core.health.Axis
+import com.homecam.core.lens.LensEntry
+import com.homecam.core.lens.LensSelections
 import com.homecam.core.media.PowerSaving
 import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.HealthSample
@@ -112,7 +114,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
         capture = ContinuousCapture(this, this).also {
             it.setOrientation(capturePrefs().getInt(KEY_ORIENTATION, 0))
-            it.start(mask = graph.settings.current.privacyMask)
+            it.start(mask = graph.settings.current.privacyMask, lens = selectedLens())
         }
         powerSaving = PowerSaving(
             setSaving = capture::setPowerSaving,
@@ -178,6 +180,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         WebRtc.capturedAudio = { audioDetection.onLiveSamples(it) }
         ClipPruneWorker.schedule(this)
         observeArming()
+        observeLens()
         observeRecordingMode()
         observeHardwareProtection()
         observeSoundSettings()
@@ -446,7 +449,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             try {
                 endLive(Bye.Reason.CAMERA_DISABLED, "restarting capture")
                 capture.stop()
-                capture.start(mask = graph.settings.current.privacyMask)
+                capture.start(mask = graph.settings.current.privacyMask, lens = selectedLens())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -505,6 +508,16 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         lifecycleScope.launch {
             graph.settings.settings.map { it.armed }.distinctUntilChanged().collect {
                 recorder.setArmed(it)
+            }
+        }
+    }
+
+    private fun selectedLens(): LensEntry? = LensSource.lens(this, LensSelections.primaryOf(graph.settings.current))
+
+    private fun observeLens() {
+        lifecycleScope.launch {
+            graph.settings.settings.map { LensSelections.primaryOf(it) }.distinctUntilChanged().collect { id ->
+                LensSource.lens(this@CameraService, id)?.let(capture::setLens)
             }
         }
     }
@@ -659,8 +672,6 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         if (!throttle.offerFormat(next)) capture.setFormat(next)
         return sessionStatus(live?.peer?.viewer?.shortFingerprint.orEmpty())
     }
-
-    override fun setLens(facing: com.homecam.proto.Lens.Facing) = capture.setLens(facing) ?: Unit
 
     override fun setOrientation(degrees: Int) {
         capture.setOrientation(degrees)

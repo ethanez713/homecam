@@ -51,6 +51,7 @@ import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.SoundDetection
 import com.homecam.proto.SoundRecognition
 import com.homecam.proto.Thumbnail
+import com.homecam.proto.LensSelection
 import com.homecam.proto.TimelineCount
 import com.homecam.proto.TimelineQuery
 import com.homecam.proto.Torch
@@ -74,6 +75,7 @@ class CameraServices(
     private val viewerIp: String = "",
 ) {
     private val actor = Actor(viewerFingerprint, viewerLabel, viewerIp)
+    private val lensControl = LensControl(graph.settings, graph.audit) { LensSource.lenses(graph.app).map { it.id } }
 
     fun registerOn(peer: RpcPeer) {
         registerSession(peer)
@@ -259,7 +261,7 @@ class CameraServices(
             media().setResolution(Resolution.parseFrom(request.payload)).toByteString()
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.LENS) { request ->
-            media().setLens(Lens.parseFrom(request.payload).facing)
+            lensControl.select(Lens.parseFrom(request.payload).facing, viewerFingerprint, viewerLabel)
             request.payload
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.PUSH_TO_TALK) { request ->
@@ -310,6 +312,7 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.ALIAS) { setAlias(Alias.parseFrom(it).alias) }
         settingSetter(peer, Controls.Settings.MICROPHONE) { setMicrophone(Microphone.parseFrom(it).enabled) }
         settingSetter(peer, Controls.Settings.LOW_LIGHT) { setLowLight(LowLight.parseFrom(it).enabled) }
+        settingSetter(peer, Controls.Settings.LENS) { setLens(lensControl.validated(LensSelection.parseFrom(it))) }
         settingSetter(peer, Controls.Settings.DETECTION_MODE) { setDetectionMode(DetectionMode.parseFrom(it)) }
         settingSetter(peer, Controls.Settings.DETECTION_SCHEDULE) { setDetectionSchedule(DetectionSchedule.parseFrom(it)) }
         settingSetter(peer, Controls.Settings.DETECTION_ZONE) { setDetectionZone(DetectionZone.parseFrom(it)) }
@@ -463,6 +466,7 @@ class CameraServices(
         Controls.Settings.ALIAS -> "alias"
         Controls.Settings.MICROPHONE -> "microphone"
         Controls.Settings.LOW_LIGHT -> "low light"
+        Controls.Settings.LENS -> LensControl.AUDIT_DETAIL
         Controls.Settings.DETECTION_MODE -> "detection mode"
         Controls.Settings.DETECTION_SCHEDULE -> "detection schedule"
         Controls.Settings.DETECTION_ZONE -> "detection zone"
