@@ -298,6 +298,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 var playing by remember(open) { mutableStateOf<java.io.File?>(null) }
                 var playingId by remember(open) { mutableStateOf<String?>(null) }
                 var downloading by remember(open) { mutableStateOf<String?>(null) }
+                var downloadProgress by remember(open) { mutableStateOf<com.homecam.core.media.DownloadProgress?>(null) }
                 suspend fun refresh() {
                     clips = open?.let { runCatching { it.link.clips().clipsList }.getOrNull() }
                     eventSpans = open?.let { s ->
@@ -317,7 +318,15 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
 
                 suspend fun fetch(session: ViewerSession, clip: com.homecam.proto.Clip): java.io.File {
                     val file = java.io.File(context.cacheDir, "clips/${clip.id}.mp4")
-                    if (!file.exists()) session.link.downloadClip(clip.id, file)
+                    if (!file.exists()) {
+                        try {
+                            session.link.downloadClip(clip.id, file) { received ->
+                                downloadProgress = com.homecam.core.media.DownloadProgress(received, clip.sizeBytes)
+                            }
+                        } finally {
+                            downloadProgress = null
+                        }
+                    }
                     return file
                 }
 
@@ -327,6 +336,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                     playing = playing,
                     playingId = playingId,
                     downloadingId = downloading,
+                    downloadProgress = downloadProgress,
                     projectedDays = projectedDays,
                     showBoxes = settings?.boundingBoxOverlay ?: true,
                     loadThumbnail = open?.let { s -> { id -> s.link.thumbnail(id) } },

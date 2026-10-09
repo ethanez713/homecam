@@ -70,6 +70,7 @@ import com.homecam.app.ui.theme.HomecamTheme
 import com.homecam.core.media.ClipFilter
 import com.homecam.core.media.ClipRun
 import com.homecam.core.media.ClipRuns
+import com.homecam.core.media.DownloadProgress
 import com.homecam.core.media.EventSpan
 import com.homecam.core.media.Timeline
 import com.homecam.proto.Clip
@@ -106,6 +107,7 @@ fun ClipsScreen(
     /** Where to put the playhead on opening, as an alert about that moment does. */
     openAtMs: Long? = null,
     eventSpans: List<EventSpan> = emptyList(),
+    downloadProgress: DownloadProgress? = null,
 ) {
     if (clips == null) {
         EmptyState("Loading clips", busy = true)
@@ -150,6 +152,7 @@ fun ClipsScreen(
         clip = underPlayhead,
         file = playing?.takeIf { playingClip != null && playingClip.id == underPlayhead?.id },
         loading = downloadingId != null && downloadingId == underPlayhead?.id,
+        downloadProgress = downloadProgress,
         playing = wantPlaying,
         seek = seek,
         unplayable = unplayable,
@@ -193,6 +196,7 @@ fun ClipsScreen(
             clips = clips,
             playingId = underPlayhead?.id,
             downloadingId = downloadingId,
+            downloadProgress = downloadProgress,
             projectedDays = projectedDays,
             pinnedNearCeiling = pinnedNearCeiling,
             loadThumbnail = loadThumbnail,
@@ -211,6 +215,7 @@ private class PlaybackState(
     val clip: Clip?,
     val file: File?,
     val loading: Boolean,
+    val downloadProgress: DownloadProgress?,
     val playing: Boolean,
     val seek: Seek?,
     val unplayable: Boolean,
@@ -296,7 +301,12 @@ private fun Picture(state: PlaybackState, modifier: Modifier) {
         }
         Box(Modifier.align(Alignment.TopStart).padding(10.dp)) { MomentBadge(state) }
         if (state.loading) {
-            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp, color = Ethan.colors.accent)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                DownloadIndicator(state.downloadProgress, 28.dp)
+                state.downloadProgress?.percent?.let {
+                    Text("$it%", style = Ethan.type.monoSmall, color = Ethan.colors.textHeading)
+                }
+            }
         } else if (clip != null && !state.playing && !state.unplayable) {
             Box(
                 Modifier.size(56.dp).clip(CircleShape).background(Ethan.colors.accent),
@@ -304,6 +314,13 @@ private fun Picture(state: PlaybackState, modifier: Modifier) {
             ) { LucideIcon(R.drawable.lucide_play, "Play", size = 24.dp, tint = Ethan.colors.onAccent) }
         }
     }
+}
+
+@Composable
+private fun DownloadIndicator(progress: DownloadProgress?, size: androidx.compose.ui.unit.Dp) {
+    val fraction = progress?.fraction
+    if (fraction == null) CircularProgressIndicator(Modifier.size(size), strokeWidth = 2.dp, color = Ethan.colors.accent)
+    else CircularProgressIndicator({ fraction }, Modifier.size(size), strokeWidth = 2.dp, color = Ethan.colors.accent)
 }
 
 @Composable
@@ -379,6 +396,7 @@ private fun ClipList(
     clips: List<Clip>,
     playingId: String?,
     downloadingId: String?,
+    downloadProgress: DownloadProgress?,
     projectedDays: Double?,
     pinnedNearCeiling: Boolean,
     loadThumbnail: (suspend (String) -> ByteArray?)?,
@@ -450,7 +468,7 @@ private fun ClipList(
                         val clip = run.clips.single()
                         item(key = clip.id) {
                             ClipRow(
-                                clip, clip.id == playingId, downloadingId, loadThumbnail,
+                                clip, clip.id == playingId, downloadingId, downloadProgress, loadThumbnail,
                                 mark = if (selecting) clip.id in selected else null,
                                 onClick = { if (selecting) toggle(ids) else onOpen(clip) },
                                 onPin = onPin, onMenu = { menuFor = it },
@@ -471,7 +489,7 @@ private fun ClipList(
                         if (open) {
                             items(run.clips, key = { it.id }) { clip ->
                                 ClipRow(
-                                    clip, clip.id == playingId, downloadingId, loadThumbnail,
+                                    clip, clip.id == playingId, downloadingId, downloadProgress, loadThumbnail,
                                     mark = if (selecting) clip.id in selected else null,
                                     onClick = { if (selecting) toggle(listOf(clip.id)) else onOpen(clip) },
                                     onPin = onPin, onMenu = { menuFor = it }, indented = true,
@@ -620,6 +638,7 @@ private fun ClipRow(
     clip: Clip,
     current: Boolean,
     downloadingId: String?,
+    downloadProgress: DownloadProgress?,
     loadThumbnail: (suspend (String) -> ByteArray?)?,
     mark: Boolean?,
     onClick: () -> Unit,
@@ -651,7 +670,8 @@ private fun ClipRow(
             Text(clipMeta(clip), style = Ethan.type.monoSmall, color = Ethan.colors.textMuted, maxLines = 1)
         }
         if (downloadingId == clip.id) {
-            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Ethan.colors.accent)
+            DownloadIndicator(downloadProgress, 18.dp)
+            downloadProgress?.percent?.let { Text(" $it%", style = Ethan.type.monoSmall, color = Ethan.colors.textMuted) }
             Spacer(Modifier.width(8.dp))
         }
         if (mark == null) {

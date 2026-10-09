@@ -227,7 +227,7 @@ class CameraLink(private val peer: RpcPeer) {
     )
 
     /** Streams a clip into [destination]. Chunked because a clip does not fit one frame. */
-    suspend fun downloadClip(id: String, destination: File) {
+    suspend fun downloadClip(id: String, destination: File, onReceived: (Long) -> Unit = {}) {
         destination.parentFile?.mkdirs()
         destination.outputStream().use { out ->
             peer.requestStream(
@@ -235,7 +235,10 @@ class CameraLink(private val peer: RpcPeer) {
                 Controls.Media.CLIP_DATA,
                 ClipData.newBuilder().setClipId(id).build().toByteString(),
                 timeoutMs = CLIP_DOWNLOAD_TIMEOUT_MS,
-            ) { chunk -> out.write(ClipData.parseFrom(chunk).chunk.toByteArray()) }
+            ) { chunk ->
+                out.write(ClipData.parseFrom(chunk).chunk.toByteArray())
+                onReceived(destination.length())
+            }
         }
     }
 
