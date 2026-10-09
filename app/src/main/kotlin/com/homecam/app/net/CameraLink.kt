@@ -266,6 +266,14 @@ class CameraLink(private val peer: RpcPeer) {
         )
     }
 
+    suspend fun setLens(id: String): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.LENS,
+            com.homecam.proto.LensSelection.newBuilder().setPrimary(id).build().toByteString(),
+        )
+    )
+
     suspend fun setAutoSpotlight(enabled: Boolean): SettingsSnapshot = SettingsSnapshot.parseFrom(
         peer.request(
             RpcMessage.Service.SETTINGS,

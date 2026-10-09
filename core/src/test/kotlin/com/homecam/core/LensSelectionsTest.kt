@@ -44,4 +44,9 @@ class LensSelectionsTest {
         assertEquals("front", LensSelections.idFor(Lens.Facing.FRONT))
         assertEquals("back-wide", LensSelections.idFor(Lens.Facing.BACK))
     }
+
+    @Test
+    fun `lenses read as the words a person would use`() {
+        assertEquals(listOf("Wide", "Ultra-wide", "Front"), advertised.map(LensSelections::labelOf))
+    }
 }

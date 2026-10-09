@@ -162,9 +162,16 @@ private val pausedStatus = status.toBuilder()
     .setRecordingRevertAtMs(System.currentTimeMillis() + 50 * MINUTE).setRecordingRevertTo(RecordingMode.DETECTION)
     .build()
 
+private val sampleLenses = listOf(
+    com.homecam.proto.LensInfo.newBuilder().setId("back-wide").setZoomMin(1f).setZoomMax(8f).setTorch(true).build(),
+    com.homecam.proto.LensInfo.newBuilder().setId("back-ultrawide").setZoomMin(1f).setZoomMax(8f).setTorch(true).build(),
+    com.homecam.proto.LensInfo.newBuilder().setId("front").setZoomMin(1f).setZoomMax(4f).build(),
+)
+
 private fun controls(siren: Boolean = false, from: RuntimeStatus = status) = LiveControls(
     torchOn = false, micOn = false, zoom = 0.25f, onTorch = {}, onMic = {}, onZoom = {},
     sirenAvailable = true, sirenOn = siren,
+    lenses = sampleLenses, lens = "back-wide", onLens = {},
     recording = com.homecam.app.ui.RecordingPanelState(
         mode = from.requestedRecordingMode.takeIf { from.cap != RuntimeStatus.Cap.CAP_NONE } ?: RecordingMode.DETECTION,
         readout = com.homecam.core.health.HealthReadout.recording(from, ::formatStamp),
@@ -259,6 +266,7 @@ private fun CameraHome(watcher: String?) {
         hardwareBacked = true, recordingMode = RecordingMode.CONTINUOUS, projectedDays = 14.0,
         onArmedChange = {}, onRecordingMode = {}, protection = com.homecam.core.health.HealthConfig(), onProtection = {},
         onManage = {}, onPair = {}, onLog = {}, onNetwork = {},
+        lenses = sampleLenses, lens = "back-wide",
         canDrawOverlays = watcher == null,
     )
 }

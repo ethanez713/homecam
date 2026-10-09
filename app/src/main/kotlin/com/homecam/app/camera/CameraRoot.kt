@@ -29,7 +29,9 @@ import com.homecam.app.ui.PermissionGate
 import com.homecam.app.data.toRetentionLimits
 import com.homecam.app.ui.cameraEgress
 import com.homecam.core.audit.AuditChain
+import com.homecam.core.lens.LensSelections
 import com.homecam.proto.AuditEvent
+import com.homecam.proto.LensSelection
 import com.homecam.core.retention.ClipRef
 import com.homecam.core.retention.RetentionPlanner
 import kotlinx.coroutines.launch
@@ -66,6 +68,7 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
     var screen by remember { mutableStateOf(CameraScreen.HOME) }
 
     val settings by graph.settings.settings.collectAsState()
+    val lenses = remember { CapabilityProvider.capabilities(context).lensesList }
     val roster by node.roster.collectAsState()
     val accessCount by node.accessCount.collectAsState()
     val pairing by node.pairing.collectAsState()
@@ -128,6 +131,14 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
                 scope.launch {
                     graph.settings.update { setHardwareProtection(protection) }
                     graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = "hardware protection")
+                }
+            },
+            lenses = lenses,
+            lens = LensSelections.primaryOf(settings),
+            onLens = { id ->
+                scope.launch {
+                    graph.settings.update { setLens(LensSelection.newBuilder().setPrimary(id)) }
+                    graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = LensControl.AUDIT_DETAIL)
                 }
             },
             onManage = { screen = CameraScreen.ROSTER },

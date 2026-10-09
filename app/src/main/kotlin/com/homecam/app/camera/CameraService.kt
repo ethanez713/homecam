@@ -793,7 +793,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     private fun hasFlash(): Boolean =
-        packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FLASH)
+        selectedLens()?.hasFlash ?: packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FLASH)
 
     /**
      * A mask edited while somebody is watching has to take effect on that stream, not the

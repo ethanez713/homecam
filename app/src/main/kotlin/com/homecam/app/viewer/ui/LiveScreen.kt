@@ -32,10 +32,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.homecam.app.R
+import com.homecam.app.ui.LensSelector
 import com.homecam.app.ui.RecordingPanel
 import com.homecam.app.ui.RecordingPanelState
 import com.homecam.app.ui.formatBytes
 import com.homecam.core.health.HealthItem
+import com.homecam.core.lens.ZoomMap
+import com.homecam.proto.LensInfo
 import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.ConfirmSheet
 import com.homecam.app.ui.kit.EmptyState
@@ -77,6 +80,9 @@ data class LiveControls(
     val onZoom: (Float) -> Unit,
     val onRotate: () -> Unit = {},
     val onSnapshot: () -> Unit = {},
+    val lenses: List<LensInfo> = emptyList(),
+    val lens: String = "",
+    val onLens: (String) -> Unit = {},
     // Hidden when the camera's capabilities say it has no flash / no speaker (Phase 2).
     val torchAvailable: Boolean = true,
     val pushToTalkAvailable: Boolean = true,
@@ -227,10 +233,16 @@ private fun CameraStats(status: RuntimeStatus, health: List<HealthItem>) {
 
 @Composable
 private fun Controls(controls: LiveControls) {
+    LensSelector(controls.lenses, controls.lens, controls.onLens, Modifier.padding(bottom = 8.dp))
+    val range = controls.lenses.firstOrNull { it.id == controls.lens }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("ZOOM", style = Ethan.type.micro, color = Ethan.colors.textFaint)
         EthanSlider(controls.zoom, controls.onZoom, Modifier.weight(1f).padding(horizontal = 12.dp))
-        Text("%3.0f%%".format(controls.zoom * 100), style = Ethan.type.monoSmall, color = Ethan.colors.textMuted)
+        Text(
+            range?.let { ZoomMap.label(ZoomMap.factorAt(controls.zoom, it.zoomMin, it.zoomMax)) } ?: "%3.0f%%".format(controls.zoom * 100),
+            style = Ethan.type.monoSmall,
+            color = Ethan.colors.textMuted,
+        )
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Keys(controls, Modifier.weight(1f))

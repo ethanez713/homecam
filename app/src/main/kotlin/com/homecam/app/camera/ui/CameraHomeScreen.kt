@@ -37,7 +37,9 @@ import com.homecam.app.ui.kit.TopBar
 import com.homecam.app.ui.theme.Ethan
 import com.homecam.app.ui.theme.EthanRadius
 import com.homecam.core.health.HealthConfig
+import com.homecam.app.ui.LensSelector
 import com.homecam.proto.HardwareProtection
+import com.homecam.proto.LensInfo
 import com.homecam.proto.RecordingMode
 
 /**
@@ -63,6 +65,9 @@ fun CameraHomeScreen(
     onPair: () -> Unit,
     onLog: () -> Unit,
     onNetwork: () -> Unit,
+    lenses: List<LensInfo> = emptyList(),
+    lens: String = "",
+    onLens: (String) -> Unit = {},
     onSwitchRole: () -> Unit = {},
     canDrawOverlays: Boolean = true,
     onAllowOverlay: () -> Unit = {},
@@ -87,6 +92,11 @@ fun CameraHomeScreen(
                     if (armed) "Armed" else "Disarmed", armed, onArmedChange,
                     meta = if (armed) "Detecting, recording events and alerting" else "Not detecting. Nothing is recorded or alerted",
                 )
+            }
+
+            if (lenses.size > 1) {
+                Eyebrow("Lens")
+                PaperCard { LensSelector(lenses, lens, onLens) }
             }
 
             Eyebrow("Recording")

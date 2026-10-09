@@ -11,6 +11,13 @@ object LensSelections {
     /** The lens the older, facing-only control means. */
     fun idFor(facing: Lens.Facing): String = if (facing == Lens.Facing.FRONT) LensCatalog.FRONT else LensCatalog.BACK_WIDE
 
+    fun labelOf(id: String): String = when (id) {
+        LensCatalog.BACK_WIDE -> "Wide"
+        LensCatalog.BACK_ULTRAWIDE -> "Ultra-wide"
+        LensCatalog.FRONT -> "Front"
+        else -> id
+    }
+
     /** Why [selection] cannot be taken on a camera that opens [advertised], or null if it can. */
     fun rejection(selection: LensSelection, advertised: Collection<String>): String? = when {
         selection.primary !in advertised -> "this camera has no lens named '${selection.primary}'"

@@ -46,6 +46,8 @@ import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.HealthReadout
 import com.homecam.app.ui.RecordingPanelState
 import com.homecam.app.ui.formatStamp
+import com.homecam.core.lens.LensCatalog
+import com.homecam.core.lens.LensSelections
 import com.homecam.core.rpc.ControlGating
 import com.homecam.core.retention.ClipRef
 import com.homecam.core.retention.RetentionPlanner
@@ -91,6 +93,8 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     var mic by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
     var siren by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
     var zoom by remember(camera.fingerprint, attempt, foreground) { mutableFloatStateOf(0f) }
+    val selectedLens = settings?.let(LensSelections::primaryOf) ?: LensCatalog.DEFAULT
+    val lensInfo = capabilities?.lensesList?.firstOrNull { it.id == selectedLens }
     val alertKeys = remember { AlertKeys(context) }
     var alertsOn by remember { mutableStateOf(AlertPreferences.enabled(context)) }
     var healthAlertsOn by remember { mutableStateOf(AlertPreferences.health(context)) }
@@ -252,6 +256,15 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         onTorch = { on -> torch = on; scope.launch { it.setTorch(on) } },
                         onMic = { on -> mic = on; scope.launch { it.setPushToTalk(on) } },
                         onZoom = { value -> zoom = value; scope.launch { it.setZoom(value) } },
+                        lenses = if (gates?.lensSwitch == false) emptyList() else capabilities?.lensesList.orEmpty(),
+                        lens = selectedLens,
+                        onLens = { id ->
+                            edit(scope, it, say) { session ->
+                                settings = session.link.setLens(id)
+                                zoom = 0f
+                                torch = false
+                            }
+                        },
                         onRotate = { edit(scope, it, say) { session -> session.rotateQuarterTurn() } },
                         onSnapshot = {
                             edit(scope, it, say) { session ->
@@ -262,7 +275,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                                 say(if (saved != null) "Snapshot saved to the gallery." else "The snapshot could not be saved.")
                             }
                         },
-                        torchAvailable = gates?.torch ?: true,
+                        torchAvailable = (gates?.torch ?: true) && (lensInfo?.torch ?: true),
                         pushToTalkAvailable = gates?.pushToTalk ?: true,
                         sirenAvailable = gates?.siren ?: false,
                         sirenOn = siren,
@@ -392,7 +405,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 onProtection = { protection ->
                     edit(scope, open, say) { settings = it.link.setHardwareProtection(protection) }
                 },
-                autoSpotlightSupported = capabilities?.spotlight ?: true,
+                autoSpotlightSupported = (capabilities?.spotlight ?: true) && (lensInfo?.torch ?: true),
                 autoSpotlight = settings?.autoSpotlight ?: false,
                 onAutoSpotlight = { on ->
                     edit(scope, open, say) { settings = it.link.setAutoSpotlight(on) }

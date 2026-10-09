@@ -25,7 +25,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
 import com.homecam.core.lens.LensEntry
-import com.homecam.proto.LensInfo
+import com.homecam.core.lens.ZoomMap
 import org.webrtc.CapturerObserver
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
@@ -144,7 +144,7 @@ class CameraXVideoCapturer(
             camera = bound
             watchCameraState(bound)
             applyFrameRate(bound)
-            lens?.takeIf { it.reach == LensInfo.Reach.ZOOM_RATIO || it.zoomMin > 1f }?.let { bound.cameraControl.setZoomRatio(it.zoomMin) }
+            lens?.let { bound.cameraControl.setZoomRatio(it.zoomMin) }
         }, main)
     }
 
@@ -254,11 +254,11 @@ class CameraXVideoCapturer(
      * something different on each phone is worse than no slider.
      */
     fun setZoom(ratio: Float) {
-        val t = ratio.coerceIn(0f, 1f)
-        val reached = lens?.takeIf { it.reach == LensInfo.Reach.ZOOM_RATIO || it.zoomMin > 1f }
+        val position = ratio.coerceIn(0f, 1f)
+        val active = lens
         ContextCompat.getMainExecutor(context).execute {
-            if (reached == null) camera?.cameraControl?.setLinearZoom(t)
-            else camera?.cameraControl?.setZoomRatio(reached.zoomMin + t * (reached.zoomMax - reached.zoomMin))
+            if (active == null) camera?.cameraControl?.setLinearZoom(position)
+            else camera?.cameraControl?.setZoomRatio(ZoomMap.factorAt(position, active.zoomMin, active.zoomMax))
         }
     }
 
