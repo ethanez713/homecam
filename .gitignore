@@ -14,3 +14,4 @@ app/schemas/
 
 # Local working plans: kept on disk, not published
 docs/plans/
+CLAUDE.local.md
