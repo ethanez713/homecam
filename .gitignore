@@ -11,3 +11,6 @@ local.properties
 captures/
 .kotlin/
 app/schemas/
+
+# Local working plans: kept on disk, not published
+docs/plans/
