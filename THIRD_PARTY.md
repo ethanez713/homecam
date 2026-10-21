@@ -9,6 +9,6 @@ Bundled in the app, alongside the libraries Gradle resolves.
 | IBM Plex Mono (IBM) | `app/src/main/res/font/ibm_plex_mono_*.ttf` | SIL Open Font License 1.1 |
 | Lucide icons 0.469.0 | `app/src/main/res/drawable/lucide_*.xml`, converted from the SVGs | ISC |
 
-The typefaces and the icon set are the ones `../ethan_design_system` specifies. An icon is
+The typefaces and the icon set are the ones the author's design system specifies. An icon is
 added by converting its Lucide SVG to a vector drawable with a 2 px round-capped stroke and
 no fill, named `lucide_<slug>.xml`.
