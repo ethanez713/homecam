@@ -6,7 +6,7 @@ Two phones, and no cloud account between them. Pairing pins each viewer's key, t
 
 ## Screenshots
 
-Sample data from the debug build's screen gallery (`GalleryActivity`), captured on a phone.
+Sample data from the debug build's screen gallery (`GalleryActivity`), captured on a phone. The camera feed is a stand-in photo, ["View from front door"](https://www.flickr.com/photos/27532236@N00/6841655600) by humbert15 (CC BY 2.0), shipped only in debug builds.
 
 <table>
   <tr>

@@ -34,3 +34,10 @@ Apache License 2.0. The license text is included once, in [Apache-2.0.txt](THIRD
 | COCO labels, `labelmap.txt` | `models/labelmap.txt`, `app/src/main/assets/labelmap.txt` | The 90 COCO labels extracted from the EfficientDet-Lite0 model's embedded metadata. | Apache-2.0 |
 | YAMNet, `yamnet.tflite` | `models/yamnet.tflite`, `app/src/main/assets/yamnet.tflite` | Google's public MediaPipe model host. AudioSet 521-class audio classifier, 16 kHz mono. | Apache-2.0 |
 | AudioSet labels, `yamnet_labels.txt` | `models/yamnet_labels.txt`, `app/src/main/assets/yamnet_labels.txt` | The 521 AudioSet class names extracted from the YAMNet model's `yamnet_label_list.txt` entry. | Apache-2.0 |
+
+## Sample image (debug build only)
+
+`app/src/debug/assets/gallery/front-door.jpg` is the scene the debug `GalleryActivity` shows in
+place of a camera feed. It is not in release builds. Cropped from
+["View from front door"](https://www.flickr.com/photos/27532236@N00/6841655600) by humbert15,
+[CC BY 2.0](https://creativecommons.org/licenses/by/2.0/).

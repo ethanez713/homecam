@@ -1,8 +1,10 @@
 package com.homecam.app.debug
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Rect
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -63,6 +65,7 @@ class GalleryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        scene = assets.open("gallery/front-door.jpg").use(BitmapFactory::decodeStream)
         val screen = intent.getStringExtra("screen") ?: "viewer_home"
         val dark = intent.getBooleanExtra("dark", false)
         setContent {
@@ -77,12 +80,12 @@ private const val NOW = 1_790_917_200_000L
 private const val MINUTE = 60_000L
 
 private val cameras = listOf(
-    CameraEntity("Y1TM-4JVY-9K8F", ByteArray(0), "Living room", "192.168.0.18", 8443, "100.64.0.9", 0, NOW - 90 * MINUTE, System.currentTimeMillis() - 2 * MINUTE, lastArmed = 1, lastRecordingMode = "Continuous"),
+    CameraEntity("Y1TM-4JVY-9K8F", ByteArray(0), "Front door", "192.168.0.18", 8443, "100.64.0.9", 0, NOW - 90 * MINUTE, System.currentTimeMillis() - 2 * MINUTE, lastArmed = 1, lastRecordingMode = "Continuous"),
     CameraEntity("Q7RD-2MXA-HH3C", ByteArray(0), "Garage", "192.168.0.31", 8443, "", 0, NOW - 9000 * MINUTE, System.currentTimeMillis() - 3 * 24 * 60 * MINUTE, lastArmed = 0, lastRecordingMode = "Detection"),
 )
 
 private val settings = SettingsSnapshot.newBuilder()
-    .setArmed(true).setAlias("Living room").setMicrophone(true)
+    .setArmed(true).setAlias("Front door").setMicrophone(true)
     .setDetectionMode(DetectionMode.newBuilder().setPerson(true).setVehicle(true).setPet(true))
     .setSoundDetection(SoundDetection.newBuilder().setEnabled(true))
     .setSoundRecognition(SoundRecognition.newBuilder().addClasses("alarm").addClasses("glass"))
@@ -135,21 +138,21 @@ private val viewers = listOf(
         .setLastSeenMs(System.currentTimeMillis() - 2000 * MINUTE).setSessions30D(3).build(),
 )
 
+// A doorstep photo standing in for the camera feed; see THIRD_PARTY.md for its license.
+private lateinit var scene: Bitmap
+
+/** The scene, cropped a little differently per clip so the list does not repeat one frame. */
 private fun thumbnail(seed: String): ByteArray {
-    val bitmap = Bitmap.createBitmap(160, 100, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    canvas.drawColor(0xFF6E6558.toInt())
-    val paint = Paint().apply { color = 0xFFD9CFBE.toInt() }
-    canvas.drawRect(0f, 0f, 160f, 44f + (seed.hashCode() and 15), paint)
-    paint.color = 0xFF3A342B.toInt()
-    canvas.drawRect(20f + (seed.hashCode() and 31), 50f, 70f + (seed.hashCode() and 31), 100f, paint)
+    val bitmap = Bitmap.createBitmap(640, 360, Bitmap.Config.ARGB_8888)
+    val inset = seed.hashCode() and 63
+    val source = Rect(inset, inset * 9 / 16, scene.width - (63 - inset), scene.height - (63 - inset) * 9 / 16)
+    Canvas(bitmap).drawBitmap(scene, source, Rect(0, 0, 640, 360), Paint(Paint.FILTER_BITMAP_FLAG))
     return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
 }
 
 @Composable
-private fun Room() {
-    val bytes = remember { thumbnail("room") }
-    val image = remember { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size).asImageBitmap() }
+private fun Scene() {
+    val image = remember { scene.asImageBitmap() }
     Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
 }
 
@@ -185,7 +188,7 @@ private fun controls(siren: Boolean = false, from: RuntimeStatus = status) = Liv
 private fun Shell(tab: CameraTab, armed: Boolean = true, content: @Composable () -> Unit) {
     var current by remember { mutableStateOf(tab) }
     CameraShell(
-        "Living room", "Connected · home network", armed, current, { current = it }, {},
+        "Front door", "Connected · home network", armed, current, { current = it }, {},
         chrome = !(com.homecam.app.ui.kit.isLandscape() && current != CameraTab.SETTINGS), content = content,
     )
 }
@@ -197,22 +200,22 @@ private fun Screen(name: String) {
         "viewer_home" -> ViewerHomeScreen(cameras, {}, {}, {}, {}, {}, starred = "Y1TM-4JVY-9K8F")
         "viewer_home_empty" -> ViewerHomeScreen(emptyList(), {}, {}, {}, {}, {})
         "live" -> Shell(CameraTab.LIVE) {
-            LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Home network"), controls(), {}) { Room() }
+            LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Home network"), controls(), {}) { Scene() }
         }
         "live_paused" -> Shell(CameraTab.LIVE) {
-            LiveScreen(LiveState.Connected("amber-otter-seven", null, pausedStatus, null, "Home network"), controls(from = pausedStatus), {}) { Room() }
+            LiveScreen(LiveState.Connected("amber-otter-seven", null, pausedStatus, null, "Home network"), controls(from = pausedStatus), {}) { Scene() }
         }
         "live_siren" -> Shell(CameraTab.LIVE) {
-            LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Remote"), controls(siren = true), {}) { Room() }
+            LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Remote"), controls(siren = true), {}) { Scene() }
         }
         "live_waiting" -> Shell(CameraTab.LIVE) {
             LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null), null, {})
         }
-        "live_finding" -> Shell(CameraTab.LIVE, armed = false) { LiveScreen(LiveState.Locating("Living room"), null, {}) }
+        "live_finding" -> Shell(CameraTab.LIVE, armed = false) { LiveScreen(LiveState.Locating("Front door"), null, {}) }
         "live_failed" -> Shell(CameraTab.LIVE) {
             LiveScreen(
                 LiveState.Failed(
-                    "Living room is not answering on this network, and it has no remote address. To watch from " +
+                    "Front door is not answering on this network, and it has no remote address. To watch from " +
                         "anywhere else, connect once at home and set its Tailscale name under Settings → Remote address."
                 ),
                 null, {},
@@ -262,7 +265,7 @@ private fun Settings(snapshot: SettingsSnapshot, remote: String) {
 @Composable
 private fun CameraHome(watcher: String?) {
     CameraHomeScreen(
-        alias = "Living room", accessCount = 2, liveViewerLabel = watcher, serving = true, armed = true,
+        alias = "Front door", accessCount = 2, liveViewerLabel = watcher, serving = true, armed = true,
         hardwareBacked = true, recordingMode = RecordingMode.CONTINUOUS, projectedDays = 14.0,
         onArmedChange = {}, onRecordingMode = {}, protection = com.homecam.core.health.HealthConfig(), onProtection = {},
         onManage = {}, onPair = {}, onLog = {}, onNetwork = {},
