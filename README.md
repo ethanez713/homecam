@@ -4,6 +4,33 @@ An old Android phone is the camera and the signaling server. Your daily phone is
 
 Two phones, and no cloud account between them. Pairing pins each viewer's key, the camera shows how many devices have access, and every access is written to a tamper-evident log on the camera.
 
+## Screenshots
+
+Sample data from the debug build's screen gallery (`GalleryActivity`), captured on a phone.
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/live.png" alt="Live view"></td>
+    <td width="33%"><img src="docs/screenshots/clips.png" alt="Clips"></td>
+    <td width="33%"><img src="docs/screenshots/access-log.png" alt="Access log"></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Live view.</b> WebRTC video from the camera phone, with lens, zoom, torch, talk and siren controls and the camera's battery, heat and storage.</td>
+    <td valign="top"><b>Clips.</b> Recordings on a timeline, tagged by on-device detection (person, pet, sound, vehicle) and kept for a fixed number of days.</td>
+    <td valign="top"><b>Access log.</b> Every session, settings change and refused connection goes into an append-only hash chain, and the header reports whether the chain verifies.</td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/pairing.png" alt="Pairing"></td>
+    <td width="33%"><img src="docs/screenshots/network.png" alt="Network activity"></td>
+    <td width="33%"><img src="docs/screenshots/camera.png" alt="Camera side"></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Pairing.</b> Both phones show a verification phrase. If the phrases differ, something is relaying the connection.</td>
+    <td valign="top"><b>Network activity.</b> Every outbound connection the app makes and why it exists. There is no analytics, crash reporting or remote config.</td>
+    <td valign="top"><b>Camera side.</b> The old phone shows who is watching right now. It pauses continuous recording when it runs hot or the battery runs low.</td>
+  </tr>
+</table>
+
 ## Architecture
 
 CameraX runs for as long as the camera service does. A privacy mask sits on those frames before any consumer, so a masked region is absent from both the live stream and the recording. The masked frames feed the recorder's encoder continuously, and a second encoder for live H.264 only while a viewer is connected. The same frames, after a motion gate, feed on-device object detection. When sound detection is on, the microphone feeds on-device sound classification. The camera also runs a TLS-pinned signaling server that admits only paired keys. RPC prefers the WebRTC DataChannel while a session is up, and uses that signaling socket otherwise. An append-only hash chain records access. Off the LAN, Tailscale is how the viewer reaches the camera. Alerts leave as ciphertext for ntfy.
