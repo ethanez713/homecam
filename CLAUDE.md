@@ -3,17 +3,13 @@
 This file is published with the repo. Personal or machine-specific notes go in the
 gitignored `CLAUDE.local.md`, which Claude Code loads right after it.
 
-Two phones, no cloud: an old Android phone is the camera *and* the signaling server, your
-daily phone is the viewer. Only explicitly paired devices can see a feed, the camera shows
-how many have access, and every access is logged where you can see it.
-
 ## Getting oriented
 
 Read in this order; stop as soon as you have what you need.
 
 | | |
 |---|---|
-| `docs/PLAN.md` | The design: threat model, wire protocol, storage, media pipeline. M0–M9, all shipped. |
+| `docs/PLAN.md` | The design: threat model, wire protocol, storage, media pipeline. |
 | `docs/DECISIONS.md` | Every place the implementation diverged from that design, and why. Read before changing anything security-shaped. |
 
 `:core` is pure JVM — protocol, crypto, handshake, RPC, audit chain, retention, detection
