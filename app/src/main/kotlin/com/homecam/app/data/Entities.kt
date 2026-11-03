@@ -1,5 +1,6 @@
 package com.homecam.app.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -85,4 +86,5 @@ data class ClipEntity(
     val hasAudio: Boolean,
     val pinned: Boolean,
     val labels: String,
+    @ColumnInfo(defaultValue = "''") val lensId: String = "",
 )

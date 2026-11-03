@@ -38,8 +38,14 @@ class Alerts(private val graph: AppGraph) {
         }
     }
 
-    fun onDetection(labels: List<String>, clipId: String, thumbnailJpeg: ByteArray?) {
-        if (!detectionBatch.add(labels, thumbnailJpeg, System.currentTimeMillis())) return
+    fun onDetection(
+        categories: List<String>,
+        clipId: String,
+        thumbnailJpeg: ByteArray?,
+        lens: String? = null,
+    ) {
+        val display = if (lens == null) categories else categories.map { "$it · $lens" }
+        if (!detectionBatch.add(categories, thumbnailJpeg, System.currentTimeMillis(), display)) return
         graph.scope.launch {
             delay(DetectionAlertBatch.HOLD_MS)
             val held = detectionBatch.flush() ?: return@launch

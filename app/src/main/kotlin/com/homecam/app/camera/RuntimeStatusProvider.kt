@@ -21,6 +21,9 @@ class RuntimeStatusProvider(private val graph: AppGraph, private val node: Camer
     var detectorFps: Float = 0f
     var hardware: HardwareMonitor? = null
 
+    /** A second lens is selected and not running, because of heat or a recording cap. */
+    @Volatile var secondaryPaused: Boolean = false
+
     fun snapshot(clipBytes: Long): RuntimeStatus {
         val battery = graph.app.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
@@ -42,6 +45,7 @@ class RuntimeStatusProvider(private val graph: AppGraph, private val node: Camer
             .setArmed(graph.settings.current.armed)
             .setViewersWithAccess(node.accessCount.value)
             .setCameraAlias(graph.settings.current.alias)
+            .setSecondaryPaused(secondaryPaused)
             .also { hardware?.fill(it) }
             .build()
     }

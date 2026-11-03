@@ -34,7 +34,11 @@ class ClipStore(
 
     private val pruneLock = Mutex()
 
-    suspend fun index(written: ClipRecorder.Written, labels: List<String> = emptyList()): ClipEntity {
+    suspend fun index(
+        written: ClipRecorder.Written,
+        labels: List<String> = emptyList(),
+        lensId: String = "",
+    ): ClipEntity {
         val dimensions = readDimensions(written.file)
         // Generated once, now, so a viewer scrolling a list never makes the camera decode
         // video on demand. Stored beside the clip and pruned with it (§5).
@@ -50,6 +54,7 @@ class ClipStore(
             hasAudio = false,
             pinned = false,
             labels = labels.joinToString(","),
+            lensId = lensId,
         )
         dao.upsert(entity)
         return entity
@@ -234,4 +239,5 @@ fun ClipEntity.toProto(): Clip = Clip.newBuilder()
     .setWidth(width)
     .setHeight(height)
     .setHasAudio(hasAudio)
+    .setLensId(lensId)
     .build()

@@ -29,6 +29,7 @@ class Recorder(
     private val graph: AppGraph,
     private val capture: ContinuousCapture,
     val clips: ClipStore,
+    var lensId: String = "",
 ) {
     private val recorder = ClipRecorder(clips.directory)
 
@@ -60,7 +61,7 @@ class Recorder(
                 onManualResult?.invoke(written)
             }
             graph.scope.launch {
-                val entity = clips.index(written, labels)
+                val entity = clips.index(written, labels, lensId)
                 Log.i(TAG, "clip ${entity.id} ${entity.durationMs}ms ${entity.sizeBytes}B")
                 graph.diagnostics.segment(
                     entity.id, entity.durationMs, entity.sizeBytes, gapMs, cap, effectiveMode,

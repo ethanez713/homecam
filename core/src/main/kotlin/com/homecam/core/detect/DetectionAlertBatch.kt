@@ -19,15 +19,20 @@ class DetectionAlertBatch(
 
     /** True when this call opened a batch: the caller flushes it [HOLD_MS] later. */
     @Synchronized
-    fun add(categories: Collection<String>, thumbnail: ByteArray?, nowMs: Long): Boolean {
-        val alertable = throttle.shouldAlert(categories, nowMs)
+    fun add(
+        categories: Collection<String>,
+        thumbnail: ByteArray?,
+        nowMs: Long,
+        display: Collection<String> = categories,
+    ): Boolean {
+        val alertable = throttle.shouldAlert(display, nowMs)
         val isUrgent = urgency.observe(categories, nowMs)
         val open = counts
         if (open == null && !alertable && !isUrgent) return false
         if (isUrgent) urgent = true
         val target = open ?: LinkedHashMap<String, Int>().also { counts = it }
-        categories.groupingBy { it }.eachCount().forEach { (category, count) ->
-            target.merge(category, count, ::maxOf)
+        display.groupingBy { it }.eachCount().forEach { (label, count) ->
+            target.merge(label, count, ::maxOf)
         }
         if (this.thumbnail == null) this.thumbnail = thumbnail
         return open == null

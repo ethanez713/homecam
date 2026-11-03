@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ViewerEntity::class, CameraEntity::class, AuditEntity::class, ClipEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class HomecamDatabase : RoomDatabase() {
@@ -49,7 +49,13 @@ abstract class HomecamDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE clips ADD COLUMN lensId TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 
         @Volatile private var instance: HomecamDatabase? = null
 

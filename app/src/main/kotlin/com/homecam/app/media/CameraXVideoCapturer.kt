@@ -19,7 +19,6 @@ import androidx.camera.core.SurfaceRequest
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
@@ -46,14 +45,24 @@ class CameraXVideoCapturer(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
     private var lens: LensEntry? = null,
+    private val binder: CameraBinder = CameraBinder(context, lifecycleOwner),
+    private val bindFirst: Boolean = false,
 ) : VideoCapturer {
     private var format = Triple(1920, 1080, 30)
     @Volatile private var powerSaving = false
     @Volatile private var thermalThrottle = false
 
+    /**
+     * A rebind caused by the other lens must put this camera back how the user left it.
+     * [startCapture] clears both, which is what a format or lens change already did: the
+     * new session opens at the lens minimum with the torch off.
+     */
+    @Volatile private var userZoom: Float? = null
+    @Volatile private var torchOn = false
+    @Volatile private var bindGeneration = 0
+
     private var helper: SurfaceTextureHelper? = null
     private var observer: CapturerObserver? = null
-    private var provider: ProcessCameraProvider? = null
     private var preview: Preview? = null
     private var surface: Surface? = null
     private var camera: Camera? = null
@@ -85,15 +94,16 @@ class CameraXVideoCapturer(
         format = Triple(width, height, framerate)
         val helper = helper ?: return
         val observer = observer ?: return
+        userZoom = null
+        torchOn = false
+        val generation = ++bindGeneration
 
         helper.startListening { frame -> observer.onFrameCaptured(frame) }
         observer.onCapturerStarted(true)
 
         val main = ContextCompat.getMainExecutor(context)
-        val future = ProcessCameraProvider.getInstance(context)
-        future.addListener({
-            val cameraProvider = future.get()
-            provider = cameraProvider
+        binder.useProvider { cameraProvider ->
+            if (generation != bindGeneration) return@useProvider
 
             val useCase = Preview.Builder()
                 .also(::leaveOutWhatAFixedCameraDoesNotNeed)
@@ -135,17 +145,20 @@ class CameraXVideoCapturer(
             }
 
             preview = useCase
-            cameraProvider.unbindAll()
-            val bound = cameraProvider.bindToLifecycle(
-                lifecycleOwner,
+            binder.register(
+                this,
                 selector,
                 useCase,
-            )
-            camera = bound
-            watchCameraState(bound)
-            applyFrameRate(bound)
-            lens?.let { bound.cameraControl.setZoomRatio(it.zoomMin) }
-        }, main)
+                accept = { generation == bindGeneration },
+                bindFirst = bindFirst,
+            ) { bound ->
+                if (generation != bindGeneration) return@register
+                camera = bound
+                watchCameraState(bound)
+                applyFrameRate(bound)
+                applyRememberedControls(bound)
+            }
+        }
     }
 
     @SuppressLint("UnsafeOptInUsageError")
@@ -245,6 +258,7 @@ class CameraXVideoCapturer(
     }
 
     fun setTorch(on: Boolean) {
+        torchOn = on
         ContextCompat.getMainExecutor(context).execute { camera?.cameraControl?.enableTorch(on) }
     }
 
@@ -255,6 +269,7 @@ class CameraXVideoCapturer(
      */
     fun setZoom(ratio: Float) {
         val position = ratio.coerceIn(0f, 1f)
+        userZoom = position
         val active = lens
         ContextCompat.getMainExecutor(context).execute {
             if (active == null) camera?.cameraControl?.setLinearZoom(position)
@@ -262,13 +277,25 @@ class CameraXVideoCapturer(
         }
     }
 
-    override fun stopCapture() {
-        unwatchCameraState()
-        ContextCompat.getMainExecutor(context).execute {
-            preview?.let { provider?.unbind(it) }
-            preview = null
-            camera = null
+    private fun applyRememberedControls(bound: Camera) {
+        val active = lens
+        val zoom = userZoom
+        if (zoom == null) {
+            active?.let { bound.cameraControl.setZoomRatio(it.zoomMin) }
+        } else if (active == null) {
+            bound.cameraControl.setLinearZoom(zoom)
+        } else {
+            bound.cameraControl.setZoomRatio(ZoomMap.factorAt(zoom, active.zoomMin, active.zoomMax))
         }
+        if (torchOn) bound.cameraControl.enableTorch(true)
+    }
+
+    override fun stopCapture() {
+        bindGeneration++
+        unwatchCameraState()
+        binder.unregister(this)
+        camera = null
+        preview = null
         helper?.stopListening()
         surface?.release()
         surface = null
@@ -282,7 +309,6 @@ class CameraXVideoCapturer(
 
     override fun dispose() {
         stopCapture()
-        provider = null
     }
 
     override fun isScreencast(): Boolean = false

@@ -26,6 +26,8 @@ import kotlin.math.roundToInt
 open class ContinuousCapture(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
+    private val binder: CameraBinder = CameraBinder(context, lifecycleOwner),
+    private val bindFirst: Boolean = false,
 ) {
     data class Format(val width: Int, val height: Int, val framerate: Int)
 
@@ -69,7 +71,7 @@ open class ContinuousCapture(
     }
 
     protected open fun createCapturer(): CameraXVideoCapturer =
-        CameraXVideoCapturer(context, lifecycleOwner, lens)
+        CameraXVideoCapturer(context, lifecycleOwner, lens, binder, bindFirst)
 
     protected open fun attachCapturer(
         videoCapturer: CameraXVideoCapturer,

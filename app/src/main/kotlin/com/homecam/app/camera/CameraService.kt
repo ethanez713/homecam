@@ -23,6 +23,8 @@ import com.homecam.app.alerts.Alerts
 import com.homecam.app.data.ClipStore
 import com.homecam.app.detect.AudioDetectionPipeline
 import com.homecam.app.detect.DetectionPipeline
+import com.homecam.app.detect.SharedObjectDetector
+import com.homecam.app.media.CameraBinder
 import com.homecam.app.media.CameraMediaSession
 import com.homecam.app.media.CameraXVideoCapturer
 import com.homecam.app.media.ContinuousCapture
@@ -70,18 +72,30 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private lateinit var node: CameraNode
     private var server: SignalingServer? = null
     private var mdns: MdnsAdvertiser? = null
-    private lateinit var capture: ContinuousCapture
+    private lateinit var binder: CameraBinder
+    private lateinit var clips: ClipStore
+    private lateinit var detector: SharedObjectDetector
+    private lateinit var primary: LensPipeline
+    private val capture: ContinuousCapture get() = primary.capture
+    private val recorder: Recorder get() = primary.recorder
+    private val detection: DetectionPipeline get() = primary.detection
+    @Volatile private var secondary: LensPipeline? = null
     private lateinit var powerSaving: PowerSaving
-    private lateinit var recorder: Recorder
     private lateinit var hardware: HardwareMonitor
-    private lateinit var detection: DetectionPipeline
     private lateinit var audioDetection: AudioDetectionPipeline
     private val screen = ScreenDimmer().also { ScreenDimmer.attach(it) }
     private lateinit var throttle: ThermalThrottle
+    private var captureThrottled = false
+    private var detectorThrottled = false
     private lateinit var alerts: Alerts
     private val siren by lazy { Siren(this) }
     @Volatile private var spotlightOffAtMs = 0L
     @Volatile private var autoSpotlightOn = false
+    @Volatile private var autoTorch: ContinuousCapture? = null
+    private var secondaryAnnounced: Boolean? = null
+    /** The HAL refused this pair. Health must not start it again until the selection changes. */
+    private var secondaryBindFailed = false
+    @Volatile private var secondaryPaused = false
     private var spotlightLoggedOn = false
     private var spotlightLoggedAuto = false
     private var spotlightSinceMs = 0L
@@ -112,40 +126,33 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         createChannel()
         startForegroundWithNotification(idleNotification())
 
-        capture = ContinuousCapture(this, this).also {
-            it.setOrientation(capturePrefs().getInt(KEY_ORIENTATION, 0))
-            it.start(mask = graph.settings.current.privacyMask, lens = selectedLens())
-        }
+        binder = CameraBinder(this, this).also { it.onConcurrentBindFailed = ::onConcurrentBindFailed }
+        clips = ClipStore(this, graph.database.clips())
+        detector = SharedObjectDetector(this)
+        primary = openPipeline(
+            lensId = LensSelections.primaryOf(graph.settings.current),
+            lens = selectedLens(),
+            reportManual = true,
+        )
         powerSaving = PowerSaving(
-            setSaving = capture::setPowerSaving,
+            setSaving = { saving ->
+                captures().fold(false) { changed, each -> each.setPowerSaving(saving) || changed }
+            },
             log = { engaged, reason -> graph.diagnostics.powerSaving(engaged, reason) },
         )
-        recorder = Recorder(graph, capture, ClipStore(this, graph.database.clips())).also {
-            it.start()
-            it.setArmed(graph.settings.current.armed)
-            it.setMode(graph.settings.current.recordingMode)
-            it.onManualResult = ::onManualRecordResult
-        }
-        detection = DetectionPipeline(
-            context = this,
-            settings = { graph.settings.current },
-            onMotion = { powerSaving.release(PowerSavingReason.MOTION) },
-            onEvent = { detections, thumbnailJpeg ->
-                if (detections.isNotEmpty()) powerSaving.release(PowerSavingReason.DETECTION)
-                recorder.onDetection(detections, System.currentTimeMillis())
-                if (detections.isNotEmpty()) {
-                    alerts.onDetection(detections.map { it.category }, clipId = "", thumbnailJpeg = thumbnailJpeg)
-                    maybeAutoSpotlight()
-                }
-            },
-        ).also { capture.addSink(it) }
         throttle = ThermalThrottle(
-            setCaptureThrottled = { capture.setThermalThrottle(it) },
-            setDetectorThrottled = { detection.setThrottled(it) },
+            setCaptureThrottled = { on ->
+                captureThrottled = on
+                captures().forEach { it.setThermalThrottle(on) }
+            },
+            setDetectorThrottled = { on ->
+                detectorThrottled = on
+                pipelines().forEach { it.detection.setThrottled(on) }
+            },
             live = LiveSessionThrottle(
                 session = { live?.media },
                 format = { capture.format },
-                applyFormat = { capture.setFormat(it) },
+                applyFormat = { applyCaptureFormat(it) },
             ),
             screen = screen,
         ).also { created ->
@@ -153,14 +160,15 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 graph.diagnostics.throttle(step, engaged, reading.batteryTempC, reading.thermalStatus)
             }
         }
-        hardware = HardwareMonitor(graph, recorder.clips, ::onHealthChange).also { it.start() }
+        hardware = HardwareMonitor(graph, clips, ::onHealthChange).also { it.start() }
         startClipRollover()
 
         server = SignalingServer(graph, node).also {
             it.listener = this
             it.mediaController = this
-            it.clipStore = recorder.clips
+            it.clipStore = clips
             it.statusProvider.hardware = hardware
+            it.statusProvider.secondaryPaused = secondaryPaused
             it.start()
         }
         alerts = Alerts(graph)
@@ -168,7 +176,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             context = this,
             settings = { graph.settings.current },
             onEvent = { category, levelDb, push ->
-                recorder.onSoundEvent(category, System.currentTimeMillis())
+                val now = System.currentTimeMillis()
+                recorders().forEach { it.onSoundEvent(category, now) }
                 if (push) alerts.onDetection(listOf(category), clipId = "", thumbnailJpeg = null)
                 graph.diagnostics.soundEvent(category, levelDb)
             },
@@ -221,10 +230,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         hardware.stop()
         WebRtc.capturedAudio = null
         audioDetection.close()
-        capture.removeSink(detection)
-        capture.stop()
-        detection.close()
-        recorder.stop()
+        secondary?.let { stopSecondary() }
+        if (::primary.isInitialized) primary.stop()
         runCatching { server?.stop(SHUTDOWN_GRACE_MS) }
             .onFailure { Log.w(TAG, "signaling server did not stop cleanly", it) }
         graph.scope.launch { graph.audit.record(AuditEvent.Kind.CAMERA_STOPPED) }
@@ -308,8 +315,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             var ticks = 0
             while (true) {
                 kotlinx.coroutines.delay(ROLLOVER_TICK_MS)
-                recorder.tick()
-                powerSaving.tick(sceneIdle = live == null && !recorder.eventInProgress)
+                recorders().forEach { it.tick() }
+                powerSaving.tick(sceneIdle = live == null && recorders().none { it.eventInProgress })
                 statusFromPipeline()
                 if (ticks % HARDWARE_SAMPLE_EVERY_TICKS == 0) sampleHardware()
                 revertTimedRecording()
@@ -329,7 +336,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             val clipBytes = graph.database.clips().all().sumOf { it.sizeBytes }
             graph.diagnostics.heartbeat(
                 status = server?.statusProvider?.snapshot(clipBytes) ?: return@launch,
-                recording = recorder.recording,
+                recording = recorders().any { it.recording },
                 mode = graph.settings.current.recordingMode.name,
                 batteryPausePct = HealthProtocol.configOf(graph.settings.current).batteryPausePercent,
                 chargeCounterUah = hardware.chargeCounterUah,
@@ -342,7 +349,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         Axis.entries.filter { previous.level(it) != current.level(it) }.forEach {
             graph.diagnostics.healthState(it, previous.level(it), current.level(it), reading, current, batteryPausePct)
         }
-        if (previous.cap != current.cap) recorder.setCap(current.cap)
+        if (previous.cap != current.cap) recorders().forEach { it.setCap(current.cap) }
         if (::alerts.isInitialized) alerts.onHealth(current, previous)
         if (previous.cap != current.cap || previous.capReason != current.capReason) {
             val requested = graph.settings.current.recordingMode
@@ -352,7 +359,11 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
         // The window and the capture request are main-thread objects. A thermal callback
         // arrives on the IO scope that sampled it.
-        lifecycleScope.launch { throttle.onHealth(current, reading) }
+        val secondaryAllowanceChanged = previous.secondaryAllowed != current.secondaryAllowed
+        lifecycleScope.launch {
+            throttle.onHealth(current, reading)
+            if (secondaryAllowanceChanged) reconcileSecondary("health")
+        }
     }
 
     private suspend fun revertTimedRecording() {
@@ -427,7 +438,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
      * [RESUME_COOLDOWN_MS] is ignored.
      */
     private fun resumeCapture(done: () -> Unit) {
-        if (!::capture.isInitialized || !watchdog.isBlind) {
+        if (!::primary.isInitialized || !watchdog.isBlind) {
             done()
             return
         }
@@ -448,8 +459,11 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         lifecycleScope.launch {
             try {
                 endLive(Bye.Reason.CAMERA_DISABLED, "restarting capture")
-                capture.stop()
-                capture.start(mask = graph.settings.current.privacyMask, lens = selectedLens())
+                val mask = graph.settings.current.privacyMask
+                pipelines().forEach { pipeline ->
+                    pipeline.capture.stop()
+                    pipeline.capture.start(mask = mask, lens = pipeline.lens)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -506,8 +520,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
      */
     private fun observeArming() {
         lifecycleScope.launch {
-            graph.settings.settings.map { it.armed }.distinctUntilChanged().collect {
-                recorder.setArmed(it)
+            graph.settings.settings.map { it.armed }.distinctUntilChanged().collect { armed ->
+                recorders().forEach { it.setArmed(armed) }
             }
         }
     }
@@ -516,10 +530,190 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     private fun observeLens() {
         lifecycleScope.launch {
-            graph.settings.settings.map { LensSelections.primaryOf(it) }.distinctUntilChanged().collect { id ->
-                LensSource.lens(this@CameraService, id)?.let(capture::setLens)
-            }
+            graph.settings.settings
+                .map { LensSelections.primaryOf(it) to it.lens.secondaryList.toList() }
+                .distinctUntilChanged()
+                .collect { (primaryId, _) ->
+                    applyPrimaryLens(primaryId)
+                    reconcileSecondary("selection")
+                }
         }
+    }
+
+    private fun applyPrimaryLens(id: String) {
+        primary.lensId = id
+        primary.recorder.lensId = id
+        val entry = LensSource.lens(this, id) ?: return
+        primary.lens = entry
+        primary.capture.setLens(entry)
+    }
+
+    /** A stored secondary that the proven pairs no longer cover is not selected. */
+    private fun validatedSecondary(): LensEntry? {
+        val selection = graph.settings.current.lens
+        if (selection.secondaryCount == 0) return null
+        val advertised = LensSource.lenses(this).map { it.id }
+        if (LensSelections.rejection(selection, advertised, ConcurrentPairs.read(this)) != null) return null
+        return LensSource.lens(this, selection.getSecondary(0))
+    }
+
+    private fun reconcileSecondary(reason: String) {
+        if (reason == "selection") secondaryBindFailed = false
+        val wanted = validatedSecondary()
+        if (secondaryBindFailed) {
+            publishPaused(wanted != null && secondary == null)
+            return
+        }
+        val running = secondary
+        if (wanted != null && hardware.state.secondaryAllowed) {
+            if (running != null && running.lensId == wanted.id) {
+                val capped = cappedFormat(wanted.id, capture.format)
+                if (running.capture.format != capped) running.capture.setFormat(capped)
+                publishPaused(false)
+                return
+            }
+            if (running != null) {
+                stopSecondary()
+                announceSecondary(on = false, reason = "selection")
+            }
+            startSecondary(wanted)
+            announceSecondary(on = true, reason = reason)
+        } else if (running != null) {
+            stopSecondary()
+            announceSecondary(on = false, reason = if (wanted == null) "selection" else "health")
+        } else if (wanted != null) {
+            announceSecondary(on = false, reason = "health")
+        }
+        publishPaused(wanted != null && secondary == null)
+    }
+
+    private fun onConcurrentBindFailed(error: Exception) {
+        secondaryBindFailed = true
+        stopSecondary()
+        publishPaused(true)
+        graph.diagnostics.secondaryLens("off", "bind_failed")
+        secondaryAnnounced = false
+        graph.diagnostics.error("concurrent_bind", error.message)
+    }
+
+    private fun startSecondary(entry: LensEntry) {
+        // The proven pair names the largest size both lenses held. The second lens also
+        // stays at or below whatever the primary is running right now.
+        val format = cappedFormat(entry.id, capture.format)
+        secondary = openPipeline(entry.id, entry, reportManual = false, format = format)
+    }
+
+    private fun stopSecondary() {
+        val stopping = secondary ?: return
+        if (autoSpotlightOn && autoTorch === stopping.capture) {
+            stopping.capture.setTorch(false)
+            autoSpotlightOn = false
+            noteSpotlight(on = false, auto = true)
+            autoTorch = null
+        }
+        stopping.stop()
+        secondary = null
+    }
+
+    private fun cappedFormat(secondaryId: String, primaryFormat: ContinuousCapture.Format): ContinuousCapture.Format {
+        val pair = ConcurrentPairs.read(this).firstOrNull { candidate ->
+            (candidate.a == primary.lensId && candidate.b == secondaryId) ||
+                (candidate.b == primary.lensId && candidate.a == secondaryId)
+        } ?: return primaryFormat
+        val maxWidth = pair.max.width
+        val maxHeight = pair.max.height
+        if (maxWidth <= 0 || maxHeight <= 0) return primaryFormat
+        return primaryFormat.copy(
+            width = minOf(primaryFormat.width, maxWidth),
+            height = minOf(primaryFormat.height, maxHeight),
+        )
+    }
+
+    private fun applyCaptureFormat(next: ContinuousCapture.Format) {
+        capture.setFormat(next)
+        val second = secondary ?: return
+        val capped = cappedFormat(second.lensId, capture.format)
+        if (second.capture.format != capped) second.capture.setFormat(capped)
+    }
+
+    private fun announceSecondary(on: Boolean, reason: String) {
+        if (secondaryAnnounced == on) return
+        secondaryAnnounced = on
+        graph.diagnostics.secondaryLens(if (on) "on" else "off", reason)
+    }
+
+    private fun publishPaused(paused: Boolean) {
+        secondaryPaused = paused
+        server?.statusProvider?.secondaryPaused = paused
+    }
+
+    private fun pipelines(): List<LensPipeline> =
+        listOfNotNull(if (::primary.isInitialized) primary else null, secondary)
+
+    private fun captures(): List<ContinuousCapture> = pipelines().map { it.capture }
+
+    private fun recorders(): List<Recorder> = pipelines().map { it.recorder }
+
+    private fun openPipeline(
+        lensId: String,
+        lens: LensEntry?,
+        reportManual: Boolean,
+        format: ContinuousCapture.Format? = null,
+    ): LensPipeline {
+        val pipeCapture = ContinuousCapture(this, this, binder, bindFirst = !::primary.isInitialized)
+        val inherit = ::primary.isInitialized
+        pipeCapture.setOrientation(
+            if (inherit) capture.orientationDegrees else capturePrefs().getInt(KEY_ORIENTATION, 0),
+        )
+        if (inherit) {
+            pipeCapture.setPowerSaving(powerSaving.isEngaged)
+            pipeCapture.setThermalThrottle(captureThrottled)
+        }
+        pipeCapture.start(
+            format = format ?: pipeCapture.format,
+            mask = graph.settings.current.privacyMask,
+            lens = lens,
+        )
+        val pipeRecorder = Recorder(graph, pipeCapture, clips, lensId).also { created ->
+            created.start()
+            created.setArmed(graph.settings.current.armed)
+            created.setMode(graph.settings.current.recordingMode)
+            if (inherit) created.setCap(hardware.state.cap)
+            if (reportManual) created.onManualResult = ::onManualRecordResult
+        }
+        var pipeline: LensPipeline? = null
+        val pipeDetection = DetectionPipeline(
+            context = this,
+            settings = { graph.settings.current },
+            onMotion = { powerSaving.release(PowerSavingReason.MOTION) },
+            detect = detector.attach(),
+            onEvent = event@{ detections, thumbnailJpeg ->
+                val current = pipeline ?: return@event
+                onLensDetection(current, detections, thumbnailJpeg)
+            },
+        )
+        if (inherit && detectorThrottled) pipeDetection.setThrottled(true)
+        pipeCapture.addSink(pipeDetection)
+        return LensPipeline(lensId, pipeCapture, pipeRecorder, pipeDetection, lens, detector::detach)
+            .also { pipeline = it }
+    }
+
+    private fun onLensDetection(
+        pipeline: LensPipeline,
+        detections: List<DetectionPipeline.LabelledDetection>,
+        thumbnailJpeg: ByteArray?,
+    ) {
+        if (detections.isNotEmpty()) powerSaving.release(PowerSavingReason.DETECTION)
+        pipeline.recorder.onDetection(detections, System.currentTimeMillis())
+        if (detections.isEmpty()) return
+        val lens = if (secondary == null) null else LensSelections.labelOf(pipeline.lensId)
+        alerts.onDetection(
+            detections.map { it.category },
+            clipId = "",
+            thumbnailJpeg = thumbnailJpeg,
+            lens = lens,
+        )
+        maybeAutoSpotlight(pipeline)
     }
 
     private fun observeHardwareProtection() {
@@ -532,8 +726,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     private fun observeRecordingMode() {
         lifecycleScope.launch {
-            graph.settings.settings.map { it.recordingMode }.distinctUntilChanged().collect {
-                recorder.setMode(it)
+            graph.settings.settings.map { it.recordingMode }.distinctUntilChanged().collect { mode ->
+                recorders().forEach { it.setMode(mode) }
             }
         }
     }
@@ -669,12 +863,12 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             framerate = resolution.fps.coerceIn(5, 30),
         )
         // A throttled live session stays at the lower tier; the request is what release restores.
-        if (!throttle.offerFormat(next)) capture.setFormat(next)
+        if (!throttle.offerFormat(next)) applyCaptureFormat(next)
         return sessionStatus(live?.peer?.viewer?.shortFingerprint.orEmpty())
     }
 
     override fun setOrientation(degrees: Int) {
-        capture.setOrientation(degrees)
+        captures().forEach { it.setOrientation(degrees) }
         // A camera propped on its side stays on its side across a restart.
         capturePrefs().edit().putInt(KEY_ORIENTATION, capture.orientationDegrees).apply()
     }
@@ -702,9 +896,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
         if (start) {
             powerSaving.release(PowerSavingReason.MANUAL_CLIP)
-            recorder.recordManually(seconds)
+            recorders().forEach { it.recordManually(seconds) }
         } else {
-            recorder.stopManual()
+            recorders().forEach { it.stopManual() }
         }
     }
 
@@ -720,19 +914,26 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     /** The spotlight is the torch used deliberately as a light; manual use is audited but not alerted. */
     override fun setSpotlight(on: Boolean, by: Actor?) {
+        val other = autoTorch?.takeIf { it !== capture }
+        other?.setTorch(false)
         capture.setTorch(on)
         val wasAuto = autoSpotlightOn
         autoSpotlightOn = false
+        if (on) autoTorch = capture
         recordResponseAction(if (on) "spotlight on" else "spotlight off", by = by)
         noteSpotlight(on = on, auto = if (on) false else wasAuto)
+        if (!on) autoTorch = null
     }
 
-    private fun maybeAutoSpotlight() {
+    private fun maybeAutoSpotlight(from: LensPipeline) {
+        val flash = spotlightPipeline() ?: return
+        if (from !== flash) return
         val settings = graph.settings.current
-        val dark = detection.averageLuma < com.homecam.core.response.ResponsePolicy.DARK_LUMA_THRESHOLD
-        if (!com.homecam.core.response.ResponsePolicy.autoSpotlightEngages(settings.autoSpotlight, hasFlash(), dark)) return
+        val dark = flash.detection.averageLuma < com.homecam.core.response.ResponsePolicy.DARK_LUMA_THRESHOLD
+        if (!com.homecam.core.response.ResponsePolicy.autoSpotlightEngages(settings.autoSpotlight, true, dark)) return
         if (!autoSpotlightOn) {
-            capture.setTorch(true)
+            flash.capture.setTorch(true)
+            autoTorch = flash.capture
             autoSpotlightOn = true
             recordResponseAction("spotlight (auto)")
             noteSpotlight(on = true, auto = true)
@@ -740,13 +941,22 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         spotlightOffAtMs = System.currentTimeMillis() + AUTO_SPOTLIGHT_MS
     }
 
+    /** The lens that can light the scene. A single lens with no catalog entry keeps the old device-flash check. */
+    private fun spotlightPipeline(): LensPipeline? {
+        pipelines().firstOrNull { it.lens?.hasFlash == true }?.let { return it }
+        val only = pipelines().singleOrNull() ?: return null
+        val deviceFlash = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FLASH)
+        return only.takeIf { it.lens == null && deviceFlash }
+    }
+
     /** Turns the automatic spotlight off once its window lapses, and fires due reminders. */
     private fun maintainResponses() {
         val now = System.currentTimeMillis()
         if (autoSpotlightOn && now > spotlightOffAtMs) {
-            capture.setTorch(false)
+            (autoTorch ?: capture).setTorch(false)
             autoSpotlightOn = false
             noteSpotlight(on = false, auto = true)
+            autoTorch = null
         }
         val settings = graph.settings.current
         val reminder = settings.detectionReminder
@@ -788,18 +998,22 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         if (!on) spotlightSinceMs = 0L
         spotlightLoggedOn = on
         spotlightLoggedAuto = auto
-        val luma = if (::detection.isInitialized) detection.averageLuma else 0f
+        val luma = when {
+            auto && autoTorch != null ->
+                pipelines().firstOrNull { it.capture === autoTorch }?.detection?.averageLuma ?: 0f
+            ::primary.isInitialized -> detection.averageLuma
+            else -> 0f
+        }
         graph.diagnostics.spotlight(on, auto, luma, durationMs)
     }
-
-    private fun hasFlash(): Boolean =
-        selectedLens()?.hasFlash ?: packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FLASH)
 
     /**
      * A mask edited while somebody is watching has to take effect on that stream, not the
      * next one — the whole point is that the pixels never leave.
      */
-    override fun setPrivacyMask(mask: com.homecam.proto.PrivacyMask) = capture.setPrivacyMask(mask)
+    override fun setPrivacyMask(mask: com.homecam.proto.PrivacyMask) {
+        captures().forEach { it.setPrivacyMask(mask) }
+    }
 
     // ------------------------------------------------ SignalingServer.Listener
 

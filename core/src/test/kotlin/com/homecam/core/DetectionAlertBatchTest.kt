@@ -86,6 +86,16 @@ class DetectionAlertBatchTest {
     }
 
     @Test
+    fun `a decorated person label and a distress sound within the window are still urgent`() {
+        assertTrue(batch.add(listOf("person"), null, 0, display = listOf("person · Front")))
+        assertFalse(batch.add(listOf("glass"), null, 6_000))
+
+        val held = batch.flush()!!
+        assertEquals(listOf("person · Front", "glass"), held.labels)
+        assertTrue(held.urgent)
+    }
+
+    @Test
     fun `urgency does not carry into the next batch`() {
         batch.add(listOf("person"), null, 0)
         batch.add(listOf("glass"), null, 1_000)

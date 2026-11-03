@@ -269,6 +269,12 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
         result.keys().forEach { put(it, result.get(it)) }
     }
 
+    /** [state] is "on" or "off". [reason] is "selection", "health", or "bind_failed". */
+    fun secondaryLens(state: String, reason: String) = event("secondary_lens") {
+        put("state", state)
+        put("reason", reason)
+    }
+
     private inline fun event(type: String, build: JSONObject.() -> Unit) {
         val line = JSONObject()
             .put("ts", System.currentTimeMillis())
