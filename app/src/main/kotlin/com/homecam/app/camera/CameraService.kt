@@ -152,7 +152,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             live = LiveSessionThrottle(
                 session = { live?.media },
                 format = { capture.format },
-                applyFormat = { applyCaptureFormat(it) },
+                applyFormat = { capture.setFormat(it) },
             ),
             screen = screen,
         ).also { created ->
@@ -600,11 +600,14 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         // The proven pair names the largest size both lenses held. The second lens also
         // stays at or below whatever the primary is running right now.
         val format = cappedFormat(entry.id, capture.format)
-        secondary = openPipeline(entry.id, entry, reportManual = false, format = format)
+        val pipeline = openPipeline(entry.id, entry, reportManual = false, format = format)
+        secondary = pipeline
+        live?.media?.onCaptureRunning(entry.id, pipeline.capture)
     }
 
     private fun stopSecondary() {
         val stopping = secondary ?: return
+        live?.media?.onCaptureStopped(stopping.lensId)
         if (autoSpotlightOn && autoTorch === stopping.capture) {
             stopping.capture.setTorch(false)
             autoSpotlightOn = false
@@ -786,11 +789,16 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
         if (!admitted) throw IllegalStateException("viewer $viewerFingerprint is not admitted")
 
-        endLive(Bye.Reason.SESSION_REPLACED, "replaced by $viewerFingerprint")
+        val previous = live
+        if (previous?.peer === peer) endLive(Bye.Reason.HANGUP, "new lens set", previous)
+        else endLive(Bye.Reason.SESSION_REPLACED, "replaced by $viewerFingerprint")
 
+        val opened = arrayOfNulls<LiveSession>(1)
+        val primaryId = LensSelections.primaryOf(graph.settings.current)
+        val secondaryId = validatedSecondary()?.id
+        val secondaryCapture = secondary?.takeIf { it.lensId == secondaryId }?.capture
         val media = CameraMediaSession(
             context = this,
-            capture = capture,
             config = CameraMediaSession.Config(
                 audio = config.audio && graph.settings.current.microphone,
             ),
@@ -802,17 +810,26 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                     peer.send(SignalMessage.newBuilder().setCandidate(candidate).build())
 
                 override fun tearDown(reason: Bye.Reason, detail: String) {
-                    graph.scope.launch { endLive(reason, detail) }
+                    val mine = opened[0] ?: return
+                    graph.scope.launch { endLive(reason, detail, mine) }
                 }
             },
         )
-        live = LiveSession(peer, media)
+        val session = LiveSession(peer, media)
+        opened[0] = session
+        live = session
         // A revoke during setup closed the socket before this session was visible to its teardown.
         if (!peer.socket.isOpen) {
             endLive(Bye.Reason.REVOKED, "viewer gone during setup")
             throw IllegalStateException("viewer $viewerFingerprint disconnected during setup")
         }
-        media.start(throttle.bitrateCapBps)
+        media.start(
+            buildList {
+                add(CameraMediaSession.LensVideo(primaryId, capture))
+                if (secondaryId != null) add(CameraMediaSession.LensVideo(secondaryId, secondaryCapture))
+            },
+            throttle.bitrateCapBps,
+        )
         throttle.onSessionOpen()
         powerSaving.release(PowerSavingReason.VIEWER)
         audioDetection.setLive(true)
@@ -853,6 +870,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     override fun setTorch(on: Boolean) = capture.setTorch(on) ?: Unit
 
     override fun setZoom(ratio: Float) = capture.setZoom(ratio) ?: Unit
+
+    override fun setLiveLenses(shown: List<String>) {
+        live?.media?.setShown(shown)
+    }
 
     override fun setPushToTalk(active: Boolean) = Unit
 
@@ -1033,8 +1054,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         if (live?.peer === session) graph.scope.launch { endLive(reason, "connection closed") }
     }
 
-    private suspend fun endLive(reason: Bye.Reason, detail: String) {
-        val ending = live ?: return
+    private suspend fun endLive(reason: Bye.Reason, detail: String, expected: LiveSession? = live) {
+        val ending = expected ?: return
+        if (live !== ending) return
         live = null
         ending.media.close()
         if (::throttle.isInitialized) throttle.onSessionClose()

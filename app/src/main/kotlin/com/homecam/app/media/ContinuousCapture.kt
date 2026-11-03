@@ -92,9 +92,9 @@ open class ContinuousCapture(
         return textureHelper to videoSource
     }
 
-    /** A track per media session; they all draw from the one capture. */
-    fun newTrack(): VideoTrack? = source?.let {
-        factory.createVideoTrack("homecam-video-${trackCounter.incrementAndGet()}", it)
+    /** A track per media session; they all draw from the one capture. [trackId] keeps two lenses apart. */
+    fun newTrack(trackId: String? = null): VideoTrack? = source?.let {
+        factory.createVideoTrack(trackId ?: "homecam-video-${trackCounter.incrementAndGet()}", it)
     }
 
     /** The recorder attaches here, so it sees exactly the frames a viewer would. */

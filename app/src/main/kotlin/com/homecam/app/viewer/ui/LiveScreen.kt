@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,10 +16,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import com.homecam.app.ui.kit.FullScreen
 import com.homecam.app.ui.kit.isLandscape
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,6 +37,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.homecam.app.R
 import com.homecam.app.ui.LensSelector
+import com.homecam.app.ui.SecondLens
+import com.homecam.core.lens.LensSelections
 import com.homecam.app.ui.RecordingPanel
 import com.homecam.app.ui.RecordingPanelState
 import com.homecam.app.ui.formatBytes
@@ -50,6 +56,7 @@ import com.homecam.app.ui.kit.PrimaryButton
 import com.homecam.app.ui.kit.QuietButton
 import com.homecam.app.ui.kit.Rule
 import com.homecam.app.ui.kit.Stat
+import com.homecam.app.ui.kit.Tag
 import com.homecam.app.ui.kit.Tone
 import com.homecam.app.ui.theme.Ethan
 import com.homecam.app.ui.theme.EthanRadius
@@ -67,6 +74,8 @@ sealed interface LiveState {
         val video: VideoTrack?,
         /** "Home network" or "Remote": which path this session took to the camera. */
         val via: String = "",
+        /** Every lens track in the session, keyed by lens id. [video] is the primary picture. */
+        val videos: Map<String, VideoTrack> = emptyMap(),
     ) : LiveState
     data class Failed(val message: String) : LiveState
 }
@@ -92,6 +101,9 @@ data class LiveControls(
     val onSiren: (Boolean) -> Unit = {},
     val recording: RecordingPanelState? = null,
     val health: List<HealthItem> = emptyList(),
+    /** The selected second lens, when one is recording beside the primary. */
+    val secondaryLens: String? = null,
+    val secondLens: SecondLens? = null,
 )
 
 @Composable
@@ -103,6 +115,8 @@ fun LiveScreen(
     onSetRemoteAddress: (() -> Unit)? = null,
     /** Leaves the camera; drawn only where the shell's own bar is not, in landscape. */
     onBack: () -> Unit = {},
+    /** Lens ids currently on screen. Hiding one stops its sender; recording continues. */
+    onShownLenses: (List<String>) -> Unit = {},
     /** Stands in for the video where there is no track to render, as in a preview. */
     videoPlaceholder: (@Composable () -> Unit)? = null,
 ) {
@@ -121,8 +135,11 @@ fun LiveScreen(
         }
 
         is LiveState.Connected ->
-            if (state.video != null || videoPlaceholder != null) LiveVideo(state, controls, videoPlaceholder, onBack)
-            else Waiting(state, controls)
+            if (state.video != null || state.videos.isNotEmpty() || videoPlaceholder != null) {
+                LiveVideo(state, controls, videoPlaceholder, onBack, onShownLenses)
+            } else {
+                Waiting(state, controls)
+            }
     }
 }
 
@@ -164,13 +181,43 @@ private fun LiveVideo(
     controls: LiveControls?,
     videoPlaceholder: (@Composable () -> Unit)?,
     onBack: () -> Unit,
+    onShownLenses: (List<String>) -> Unit,
 ) {
+    val primaryId = controls?.lens?.takeIf { it.isNotEmpty() }.orEmpty()
+    val secondaryId = controls?.secondaryLens?.takeIf { it.isNotEmpty() }
+    var swapped by remember(primaryId, secondaryId) { mutableStateOf(false) }
+    var userClosed by remember(primaryId, secondaryId) { mutableStateOf(false) }
+    val bigId = if (swapped && secondaryId != null) secondaryId else primaryId
+    val smallId = if (swapped && secondaryId != null) primaryId else secondaryId
+    val paused = state.status?.secondaryPaused == true
+    val shown = when {
+        secondaryId == null -> listOf(primaryId)
+        userClosed -> listOf(bigId)
+        else -> listOf(primaryId, secondaryId)
+    }.filter { it.isNotEmpty() }
+    val shownKey = shown.sorted().joinToString("\u0000")
+    LaunchedEffect(shownKey) { if (shown.isNotEmpty()) onShownLenses(shown.sorted()) }
+
     val picture: @Composable (Modifier) -> Unit = { modifier ->
         Box(modifier.background(Color.Black)) {
-            if (state.video != null) VideoSurface(state.video, Modifier.fillMaxSize()) else videoPlaceholder?.invoke()
+            val big = trackFor(state, bigId, otherId = smallId)
+            if (big != null) VideoSurface(big, Modifier.fillMaxSize()) else videoPlaceholder?.invoke()
             Row(Modifier.align(Alignment.TopStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Badge("Live", Tone.ACCENT, dot = true)
                 if (state.via.isNotBlank()) Badge(state.via, Tone.NEUTRAL)
+            }
+            val pip = smallId?.let { trackFor(state, it, otherId = bigId) }
+            val showPip = secondaryId != null && smallId != null && !userClosed && !paused &&
+                (pip != null || videoPlaceholder != null)
+            if (showPip) {
+                LensPip(pip, videoPlaceholder, onSwap = { swapped = !swapped }, onClose = { userClosed = true })
+            } else if (secondaryId != null && userClosed && !paused) {
+                Tag(
+                    "Show ${LensSelections.labelOf(secondaryId)}",
+                    selected = false,
+                    onClick = { userClosed = false },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
+                )
             }
         }
     }
@@ -210,6 +257,54 @@ private fun LiveVideo(
     }
 }
 
+/** The other lens, small, in the corner that does not cover the live badge. */
+@Composable
+private fun BoxScope.LensPip(
+    track: VideoTrack?,
+    placeholder: (@Composable () -> Unit)?,
+    onSwap: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Box(
+        Modifier
+            .align(Alignment.BottomEnd)
+            .padding(10.dp)
+            .width(132.dp)
+            .aspectRatio(16f / 9f)
+            .clip(RoundedCornerShape(EthanRadius.card))
+            .background(Color.Black)
+            .border(1.dp, Ethan.colors.borderSubtle, RoundedCornerShape(EthanRadius.card)),
+    ) {
+        if (track != null) VideoSurface(track, Modifier.fillMaxSize()) else placeholder?.invoke()
+        Box(Modifier.fillMaxSize().clickable(onClick = onSwap))
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(4.dp)
+                .size(30.dp)
+                .clip(RoundedCornerShape(EthanRadius.control))
+                .background(Ethan.colors.surfaceCard)
+                .clickable(onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            LucideIcon(R.drawable.lucide_x, "Hide", size = 16.dp, tint = Ethan.colors.textBody)
+        }
+    }
+}
+
+/**
+ * The track for [lensId]. A one-lens session may deliver its only track under another key;
+ * a second lens never borrows the other picture, or a swap would show the same view twice.
+ */
+private fun trackFor(state: LiveState.Connected, lensId: String, otherId: String?): VideoTrack? {
+    val videos = state.videos
+    videos[lensId]?.let { return it }
+    if (otherId != null) return null
+    videos[""]?.let { return it }
+    if (videos.size == 1) return videos.values.first()
+    return state.video
+}
+
 @Composable
 private fun CameraStats(status: RuntimeStatus, health: List<HealthItem>) {
     if (health.isEmpty()) {
@@ -233,7 +328,13 @@ private fun CameraStats(status: RuntimeStatus, health: List<HealthItem>) {
 
 @Composable
 private fun Controls(controls: LiveControls) {
-    LensSelector(controls.lenses, controls.lens, controls.onLens, Modifier.padding(bottom = 8.dp))
+    LensSelector(
+        controls.lenses,
+        controls.lens,
+        controls.onLens,
+        Modifier.padding(bottom = 8.dp),
+        secondLens = controls.secondLens,
+    )
     val range = controls.lenses.firstOrNull { it.id == controls.lens }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("ZOOM", style = Ethan.type.micro, color = Ethan.colors.textFaint)

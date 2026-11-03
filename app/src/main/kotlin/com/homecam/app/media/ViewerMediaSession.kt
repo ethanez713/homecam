@@ -25,7 +25,7 @@ class ViewerMediaSession(
     interface Transport {
         fun sendAnswer(sdp: Sdp)
         fun sendCandidate(candidate: Candidate)
-        fun onVideoTrack(track: VideoTrack)
+        fun onVideoTrack(track: VideoTrack, lensId: String)
         fun tearDown(reason: Bye.Reason, detail: String)
     }
 
@@ -147,8 +147,16 @@ class ViewerMediaSession(
         override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
             val track = receiver.track()
             if (track is VideoTrack && track.kind() == MediaStreamTrack.VIDEO_TRACK_KIND) {
-                transport.onVideoTrack(track)
+                val lensId = streams.firstNotNullOfOrNull { stream ->
+                    CameraMediaSession.lensIdOf(stream.id).takeIf { it.isNotEmpty() }
+                }.orEmpty()
+                transport.onVideoTrack(track, lensId)
             }
+        }
+
+        override fun onAddStream(stream: MediaStream) {
+            val lensId = CameraMediaSession.lensIdOf(stream.id)
+            stream.videoTracks.forEach { track -> transport.onVideoTrack(track, lensId) }
         }
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {

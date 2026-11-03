@@ -26,12 +26,12 @@ import com.homecam.app.camera.ui.PairingScreen
 import com.homecam.app.camera.ui.RosterScreen
 import com.homecam.app.ui.NetworkActivityScreen
 import com.homecam.app.ui.PermissionGate
+import com.homecam.app.ui.SecondLens
 import com.homecam.app.data.toRetentionLimits
 import com.homecam.app.ui.cameraEgress
 import com.homecam.core.audit.AuditChain
 import com.homecam.core.lens.LensSelections
 import com.homecam.proto.AuditEvent
-import com.homecam.proto.LensSelection
 import com.homecam.core.retention.ClipRef
 import com.homecam.core.retention.RetentionPlanner
 import kotlinx.coroutines.flow.first
@@ -155,9 +155,39 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
             lens = LensSelections.primaryOf(settings),
             onLens = { id ->
                 scope.launch {
-                    graph.settings.update { setLens(LensSelection.newBuilder().setPrimary(id)) }
+                    val pairs = ConcurrentPairs.read(context)
+                    val current = graph.settings.current.lens.secondaryList.firstOrNull()
+                    graph.settings.update { setLens(LensSelections.withSecondary(id, current, pairs)) }
                     graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = LensControl.AUDIT_DETAIL)
                 }
+            },
+            secondLens = LensSelections.partner(
+                LensSelections.primaryOf(settings),
+                ConcurrentPairs.read(context),
+                settings.lens.secondaryList.firstOrNull(),
+            )?.let { partner ->
+                SecondLens(
+                    partnerId = partner,
+                    on = settings.lens.secondaryList.contains(partner),
+                    onChange = { on ->
+                        scope.launch {
+                            val now = graph.settings.current
+                            val primaryNow = LensSelections.primaryOf(now)
+                            val pairsNow = ConcurrentPairs.read(context)
+                            val partnerNow = LensSelections.partner(
+                                primaryNow, pairsNow, now.lens.secondaryList.firstOrNull(),
+                            ) ?: return@launch
+                            graph.settings.update {
+                                setLens(LensSelections.withSecondary(primaryNow, if (on) partnerNow else null, pairsNow))
+                            }
+                            graph.audit.record(
+                                AuditEvent.Kind.SETTINGS_CHANGED,
+                                viewerLabel = ON_THIS_CAMERA,
+                                detail = LensControl.AUDIT_DETAIL,
+                            )
+                        }
+                    },
+                )
             },
             onManage = { screen = CameraScreen.ROSTER },
             onPair = { screen = CameraScreen.PAIRING },

@@ -21,6 +21,7 @@ interface MediaController {
     suspend fun sessionStatus(viewerFingerprint: String): SessionStatus
     fun setTorch(on: Boolean)
     fun setZoom(ratio: Float)
+    fun setLiveLenses(shown: List<String>)
     fun setPushToTalk(active: Boolean)
     fun setPrivacyMask(mask: PrivacyMask)
     suspend fun setResolution(resolution: Resolution): SessionStatus

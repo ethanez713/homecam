@@ -22,6 +22,7 @@ object Controls {
         const val ZOOM = 9
         const val LENS = 10
         const val SNAPSHOT = 12
+        const val LIVE_LENSES = 13
     }
 
     object Capability {

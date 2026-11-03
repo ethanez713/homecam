@@ -29,6 +29,7 @@ import com.homecam.app.camera.ui.RosterScreen
 import com.homecam.app.data.CameraEntity
 import com.homecam.app.data.ViewerEntity
 import com.homecam.app.ui.NetworkActivityScreen
+import com.homecam.app.ui.SecondLens
 import com.homecam.app.ui.RolePickerScreen
 import com.homecam.app.ui.formatStamp
 import com.homecam.app.ui.theme.HomecamTheme
@@ -211,6 +212,16 @@ private fun Screen(name: String) {
         "viewer_home_empty" -> ViewerHomeScreen(emptyList(), {}, {}, {}, {}, {})
         "live" -> Shell(CameraTab.LIVE) {
             LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Home network"), controls(), {}) { Scene() }
+        }
+        "live_two_lens" -> Shell(CameraTab.LIVE) {
+            LiveScreen(
+                LiveState.Connected("amber-otter-seven", null, status, null, "Home network"),
+                controls().copy(
+                    secondaryLens = "front",
+                    secondLens = SecondLens("front", on = true, onChange = {}),
+                ),
+                {},
+            ) { Scene() }
         }
         "live_paused" -> Shell(CameraTab.LIVE) {
             LiveScreen(LiveState.Connected("amber-otter-seven", null, pausedStatus, null, "Home network"), controls(from = pausedStatus), {}) { Scene() }

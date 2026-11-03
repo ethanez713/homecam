@@ -34,6 +34,10 @@ message Lens { enum Facing { BACK = 0; FRONT = 1; } Facing facing = 1; }
 // alongside the primary, and only a pair this camera has shown can run together.
 message LensSelection { string primary = 1; repeated string secondary = 2; }
 
+// Which of a live session's lens tracks the viewer has on screen. A lens left out is
+// not sent; its recording is unaffected.
+message LiveLenses { repeated string shown = 1; }
+
 // Two lenses a trial has shown can capture at once, and the largest size that held.
 message LensPair {
   string a = 1;

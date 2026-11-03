@@ -52,6 +52,7 @@ import com.homecam.proto.SoundDetection
 import com.homecam.proto.SoundRecognition
 import com.homecam.proto.Thumbnail
 import com.homecam.proto.LensSelection
+import com.homecam.proto.LiveLenses
 import com.homecam.proto.TimelineCount
 import com.homecam.proto.TimelineQuery
 import com.homecam.proto.Torch
@@ -267,6 +268,10 @@ class CameraServices(
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.LENS) { request ->
             lensControl.select(Lens.parseFrom(request.payload).facing, viewerFingerprint, viewerLabel)
+            request.payload
+        }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.LIVE_LENSES) { request ->
+            media().setLiveLenses(LiveLenses.parseFrom(request.payload).shownList)
             request.payload
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.PUSH_TO_TALK) { request ->

@@ -80,9 +80,9 @@ class ThermalThrottle(
 }
 
 /**
- * Lowers the live bitrate cap whenever throttling is on, and the capture resolution
- * only while a session is actually open. The resolution is the shared capture, so it
- * is put back when the session ends even if the phone is still hot.
+ * Lowers the live bitrate cap whenever throttling is on, and the primary capture's
+ * resolution only while a session is actually open. A second lens is not resized here.
+ * The resolution is put back when the session ends even if the phone is still hot.
  */
 class LiveSessionThrottle(
     private val session: () -> CameraMediaSession?,

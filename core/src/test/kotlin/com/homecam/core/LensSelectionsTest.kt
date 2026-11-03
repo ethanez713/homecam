@@ -63,6 +63,18 @@ class LensSelectionsTest {
     }
 
     @Test
+    fun `a primary with no pair drops the secondary`() {
+        val pairs = listOf(pair("back-wide", "front"))
+
+        assertEquals(listOf("front"), LensSelections.withSecondary("back-wide", "front", pairs).secondaryList)
+        assertEquals(0, LensSelections.withSecondary("back-ultrawide", "front", pairs).secondaryCount)
+        assertEquals("back-ultrawide", LensSelections.withSecondary("back-ultrawide", "front", pairs).primary)
+        assertEquals("front", LensSelections.partner("back-wide", pairs))
+        assertEquals("front", LensSelections.partner("back-wide", pairs, current = "front"))
+        assertNull(LensSelections.partner("back-ultrawide", pairs))
+    }
+
+    @Test
     fun `a proven pair is accepted in either order`() {
         val pairs = listOf(pair("front", "back-wide"))
 

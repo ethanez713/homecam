@@ -20,6 +20,7 @@ import com.homecam.proto.RecordingModeSetting
 import com.homecam.proto.RevokeViewer
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.RuntimeStatus
+import com.homecam.proto.LensSelection
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Thumbnail
 import com.homecam.proto.ViewerList
@@ -266,11 +267,11 @@ class CameraLink(private val peer: RpcPeer) {
         )
     }
 
-    suspend fun setLens(id: String): SettingsSnapshot = SettingsSnapshot.parseFrom(
+    suspend fun setLens(selection: LensSelection): SettingsSnapshot = SettingsSnapshot.parseFrom(
         peer.request(
             RpcMessage.Service.SETTINGS,
             Controls.Settings.LENS,
-            com.homecam.proto.LensSelection.newBuilder().setPrimary(id).build().toByteString(),
+            selection.toByteString(),
         )
     )
 

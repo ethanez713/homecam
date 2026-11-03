@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -45,6 +46,7 @@ import com.homecam.core.audit.AuditChain
 import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.HealthReadout
 import com.homecam.app.ui.RecordingPanelState
+import com.homecam.app.ui.SecondLens
 import com.homecam.app.ui.formatStamp
 import com.homecam.core.lens.LensCatalog
 import com.homecam.core.lens.LensSelections
@@ -55,6 +57,7 @@ import com.homecam.core.sound.SoundClasses
 import com.homecam.proto.Capabilities
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Viewer
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private const val TAG = "CameraScreen"
@@ -94,7 +97,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     var siren by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
     var zoom by remember(camera.fingerprint, attempt, foreground) { mutableFloatStateOf(0f) }
     val selectedLens = settings?.let(LensSelections::primaryOf) ?: LensCatalog.DEFAULT
+    val lensPairs = capabilities?.concurrentLensesList.orEmpty()
+    val secondaryLens = settings?.lens?.secondaryList?.firstOrNull()
+    val partnerId = LensSelections.partner(selectedLens, lensPairs, secondaryLens)
     val lensInfo = capabilities?.lensesList?.firstOrNull { it.id == selectedLens }
+    var negotiatedLenses by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<List<String>?>(null) }
     val alertKeys = remember { AlertKeys(context) }
     var alertsOn by remember { mutableStateOf(AlertPreferences.enabled(context)) }
     var healthAlertsOn by remember { mutableStateOf(AlertPreferences.health(context)) }
@@ -141,7 +148,9 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
             )
             settings = runCatching { client.link.settings() }.getOrNull()
             capabilities = client.link.capabilities()
+            val startingLenses = settings?.lens?.secondaryList?.toList()
             opened.start()
+            negotiatedLenses = startingLenses ?: emptyList()
         }.onFailure {
             Log.w(TAG, "live session to ${camera.alias} failed at ${state::class.simpleName}", it)
             state = LiveState.Failed(describeFailure(it))
@@ -150,15 +159,26 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
 
     val open = session
     if (open != null) {
-        val video by open.video.collectAsState()
+        val videos by open.videos.collectAsState()
         val presence by open.presence.collectAsState()
         val ended by open.ended.collectAsState()
-        LaunchedEffect(video, presence, ended) {
+        LaunchedEffect(videos, presence, ended, selectedLens) {
             val connected = state as? LiveState.Connected ?: return@LaunchedEffect
             ended?.let { Log.w(TAG, "live session to ${camera.alias} ended: $it") }
+            val picture = videos[selectedLens] ?: videos[""] ?: videos.values.firstOrNull()
             state = ended?.let { LiveState.Failed(describeBye(it.first, it.second)) }
-                ?: connected.copy(presence = presence, video = video)
+                ?: connected.copy(presence = presence, video = picture, videos = videos)
         }
+    }
+
+    LaunchedEffect(open, settings?.lens?.secondaryList) {
+        val session = open ?: return@LaunchedEffect
+        snapshotFlow { negotiatedLenses }.first { it != null }
+        val baseline = negotiatedLenses ?: return@LaunchedEffect
+        val current = settings?.lens?.secondaryList?.toList() ?: return@LaunchedEffect
+        if (baseline == current) return@LaunchedEffect
+        negotiatedLenses = current
+        runCatching { session.restart() }.onFailure { Log.w(TAG, "live session restart failed", it) }
     }
 
     // The picture of the camera's health is only as good as its last reading, and a pause or a
@@ -260,10 +280,30 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         lens = selectedLens,
                         onLens = { id ->
                             edit(scope, it, say) { session ->
-                                settings = session.link.setLens(id)
+                                settings = session.link.setLens(
+                                    LensSelections.withSecondary(id, secondaryLens, lensPairs),
+                                )
                                 zoom = 0f
                                 torch = false
                             }
+                        },
+                        secondaryLens = secondaryLens,
+                        secondLens = partnerId?.let { partner ->
+                            SecondLens(
+                                partnerId = partner,
+                                on = settings?.lens?.secondaryList?.contains(partner) == true,
+                                onChange = { on ->
+                                    edit(scope, it, say) { session ->
+                                        settings = session.link.setLens(
+                                            LensSelections.withSecondary(
+                                                selectedLens,
+                                                if (on) partner else null,
+                                                lensPairs,
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
                         },
                         onRotate = { edit(scope, it, say) { session -> session.rotateQuarterTurn() } },
                         onSnapshot = {
@@ -303,6 +343,13 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 onRetry = { attempt++ },
                 onSetRemoteAddress = { editingRemote = true },
                 onBack = onExit,
+                onShownLenses = showing@{ shown ->
+                    val session = open ?: return@showing
+                    scope.launch {
+                        runCatching { session.setShownLenses(shown) }
+                            .onFailure { error -> Log.w(TAG, "live lenses", error) }
+                    }
+                },
             )
 
             CameraTab.CLIPS -> {

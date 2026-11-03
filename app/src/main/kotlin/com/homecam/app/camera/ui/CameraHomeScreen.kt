@@ -45,6 +45,7 @@ import com.homecam.app.ui.theme.Ethan
 import com.homecam.app.ui.theme.EthanRadius
 import com.homecam.core.health.HealthConfig
 import com.homecam.app.ui.LensSelector
+import com.homecam.app.ui.SecondLens
 import com.homecam.proto.HardwareProtection
 import com.homecam.proto.LensInfo
 import com.homecam.proto.RecordingMode
@@ -78,6 +79,7 @@ fun CameraHomeScreen(
     lenses: List<LensInfo> = emptyList(),
     lens: String = "",
     onLens: (String) -> Unit = {},
+    secondLens: SecondLens? = null,
     onSwitchRole: () -> Unit = {},
     canDrawOverlays: Boolean = true,
     onAllowOverlay: () -> Unit = {},
@@ -118,9 +120,17 @@ fun CameraHomeScreen(
                 )
             }
 
-            if (lenses.size > 1) {
+            if (lenses.size > 1 || secondLens != null) {
                 Eyebrow("Lens")
-                PaperCard { LensSelector(lenses, lens, onLens) }
+                PaperCard(padding = 0.dp) {
+                    if (lenses.size > 1) {
+                        LensSelector(lenses, lens, onLens, Modifier.padding(12.dp))
+                    }
+                    if (secondLens != null) {
+                        if (lenses.size > 1) Rule()
+                        LensSelector(emptyList(), lens, {}, secondLens = secondLens)
+                    }
+                }
             }
 
             Eyebrow("Recording")
