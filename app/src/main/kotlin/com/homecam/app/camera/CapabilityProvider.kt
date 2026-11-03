@@ -33,6 +33,7 @@ object CapabilityProvider {
             .setSpotlight(hasFlash)
             .setMultiLens(lenses.size > 1)
             .addAllLenses(lenses.map { it.toProto(LensSource.resolutions(context, it)) })
+            .addAllConcurrentLenses(ConcurrentPairs.read(context))
             .setAudioIn(pm.hasSystemFeature(PackageManager.FEATURE_MICROPHONE))
             .setAudioOut(false)
             .setSoundDetection(false)

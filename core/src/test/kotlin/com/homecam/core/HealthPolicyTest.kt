@@ -1,6 +1,7 @@
 package com.homecam.core
 
 import com.homecam.core.health.Axis
+import com.homecam.core.health.AxisState
 import com.homecam.core.health.Cap
 import com.homecam.core.health.HealthConfig
 import com.homecam.core.health.HealthPolicy
@@ -398,5 +399,14 @@ class HealthPolicyTest {
         assertTrue(HealthThresholds.TEMP_PAUSE_C < HealthThresholds.TEMP_CRITICAL_C)
         assertEquals(ThermalStatus.SEVERE, ThermalStatus.fromPlatform(3))
         assertEquals(ThermalStatus.SHUTDOWN, ThermalStatus.fromPlatform(99))
+    }
+
+    @Test
+    fun `a second lens is refused while throttled or capped`() {
+        assertTrue(HealthState.INITIAL.secondaryAllowed)
+        assertFalse(HealthState.INITIAL.copy(thermal = AxisState(Level.THROTTLE, 0)).secondaryAllowed)
+        assertFalse(HealthState.INITIAL.copy(cap = Cap.NO_CONTINUOUS, capReason = Axis.STORAGE).secondaryAllowed)
+        assertFalse(HealthState.INITIAL.copy(cap = Cap.NO_RECORDING, capReason = Axis.BATTERY).secondaryAllowed)
+        assertTrue(HealthState.INITIAL.copy(thermal = AxisState(Level.WARN, 0)).secondaryAllowed)
     }
 }

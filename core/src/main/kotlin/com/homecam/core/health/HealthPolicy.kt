@@ -101,6 +101,9 @@ data class HealthState(
      */
     val throttled: Boolean get() = thermal.level >= Level.THROTTLE
 
+    /** A second lens may run only while heat is below [Level.THROTTLE] and nothing is capped. */
+    val secondaryAllowed: Boolean get() = thermal.level < Level.THROTTLE && cap == Cap.NONE
+
     val drainPercentPerHour: Float get() = maxOf(0f, -(netPercentPerHour ?: 0f))
 
     fun level(axis: Axis): Level = when (axis) {

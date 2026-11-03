@@ -6,6 +6,7 @@ import com.homecam.core.lens.LensSelections
 import com.homecam.core.rpc.RpcException
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.Lens
+import com.homecam.proto.LensPair
 import com.homecam.proto.LensSelection
 import com.homecam.proto.RpcError
 
@@ -14,10 +15,11 @@ class LensControl(
     private val settings: SettingsStore,
     private val audit: AuditLog,
     private val advertised: () -> Collection<String>,
+    private val pairs: () -> Collection<LensPair>,
 ) {
 
     fun validated(selection: LensSelection): LensSelection {
-        LensSelections.rejection(selection, advertised())?.let { throw RpcException(RpcError.Code.INVALID_ARGUMENT, it) }
+        LensSelections.rejection(selection, advertised(), pairs())?.let { throw RpcException(RpcError.Code.INVALID_ARGUMENT, it) }
         return selection
     }
 

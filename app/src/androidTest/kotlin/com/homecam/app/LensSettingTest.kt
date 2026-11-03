@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.homecam.app.camera.ConcurrentPairs
 import com.homecam.app.camera.LensControl
 import com.homecam.app.camera.LensSource
 import com.homecam.app.data.AuditLog
@@ -51,7 +52,12 @@ class LensSettingTest {
         sandbox.deleteRecursively()
     }
 
-    private fun control(store: SettingsStore) = LensControl(store, audit) { LensSource.lenses(real).map { it.id } }
+    private fun control(store: SettingsStore) = LensControl(
+        store,
+        audit,
+        advertised = { LensSource.lenses(real).map { it.id } },
+        pairs = { ConcurrentPairs.read(real) },
+    )
 
     @Test
     fun aFreshStoreIsOnTheBackWideLens() {

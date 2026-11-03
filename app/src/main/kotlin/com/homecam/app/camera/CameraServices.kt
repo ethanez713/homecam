@@ -75,7 +75,12 @@ class CameraServices(
     private val viewerIp: String = "",
 ) {
     private val actor = Actor(viewerFingerprint, viewerLabel, viewerIp)
-    private val lensControl = LensControl(graph.settings, graph.audit) { LensSource.lenses(graph.app).map { it.id } }
+    private val lensControl = LensControl(
+        graph.settings,
+        graph.audit,
+        advertised = { LensSource.lenses(graph.app).map { it.id } },
+        pairs = { ConcurrentPairs.read(graph.app) },
+    )
 
     fun registerOn(peer: RpcPeer) {
         registerSession(peer)

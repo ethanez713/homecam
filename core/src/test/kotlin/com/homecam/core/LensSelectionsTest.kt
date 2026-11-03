@@ -2,7 +2,9 @@ package com.homecam.core
 
 import com.homecam.core.lens.LensSelections
 import com.homecam.proto.Lens
+import com.homecam.proto.LensPair
 import com.homecam.proto.LensSelection
+import com.homecam.proto.Resolution
 import com.homecam.proto.SettingsSnapshot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -27,17 +29,56 @@ class LensSelectionsTest {
 
     @Test
     fun `a lens the camera does not have is rejected, not ignored`() {
-        assertNotNull(LensSelections.rejection(LensSelection.newBuilder().setPrimary("back-macro").build(), advertised))
-        assertNotNull(LensSelections.rejection(LensSelection.getDefaultInstance(), advertised))
-        assertNull(LensSelections.rejection(LensSelection.newBuilder().setPrimary("front").build(), advertised))
+        assertNotNull(LensSelections.rejection(LensSelection.newBuilder().setPrimary("back-macro").build(), advertised, emptyList()))
+        assertNotNull(LensSelections.rejection(LensSelection.getDefaultInstance(), advertised, emptyList()))
+        assertNotNull(LensSelections.rejection(selection("front", "back-macro"), advertised, listOf(pair("front", "back-macro"))))
+        assertNull(LensSelections.rejection(LensSelection.newBuilder().setPrimary("front").build(), advertised, emptyList()))
     }
 
     @Test
-    fun `secondary lenses are refused until concurrent capture exists`() {
-        val both = LensSelection.newBuilder().setPrimary("back-wide").addSecondary("back-ultrawide").build()
+    fun `a secondary outside the proven pairs is rejected`() {
+        val pairs = listOf(pair("back-wide", "front"))
 
-        assertNotNull(LensSelections.rejection(both, advertised))
+        assertNotNull(LensSelections.rejection(selection("back-wide", "back-ultrawide"), advertised, pairs))
+        assertNotNull(LensSelections.rejection(selection("back-ultrawide", "front"), advertised, pairs))
     }
+
+    @Test
+    fun `a secondary equal to the primary is rejected`() {
+        val pairs = listOf(pair("back-wide", "back-wide"))
+
+        assertNotNull(LensSelections.rejection(selection("back-wide", "back-wide"), advertised, pairs))
+    }
+
+    @Test
+    fun `two secondaries are rejected`() {
+        val pairs = listOf(pair("back-wide", "front"), pair("back-wide", "back-ultrawide"))
+
+        assertNotNull(LensSelections.rejection(selection("back-wide", "front", "back-ultrawide"), advertised, pairs))
+    }
+
+    @Test
+    fun `no proven pairs rejects every secondary`() {
+        assertNotNull(LensSelections.rejection(selection("back-wide", "front"), advertised, emptyList()))
+    }
+
+    @Test
+    fun `a proven pair is accepted in either order`() {
+        val pairs = listOf(pair("front", "back-wide"))
+
+        assertNull(LensSelections.rejection(selection("back-wide", "front"), advertised, pairs))
+        assertNull(LensSelections.rejection(selection("front", "back-wide"), advertised, pairs))
+        assertNull(LensSelections.rejection(selection("back-ultrawide"), advertised, pairs))
+    }
+
+    private fun selection(primary: String, vararg secondary: String): LensSelection =
+        LensSelection.newBuilder().setPrimary(primary).addAllSecondary(secondary.toList()).build()
+
+    private fun pair(a: String, b: String): LensPair = LensPair.newBuilder()
+        .setA(a)
+        .setB(b)
+        .setMax(Resolution.newBuilder().setWidth(1920).setHeight(1080))
+        .build()
 
     @Test
     fun `the facing-only control maps onto a lens id`() {

@@ -30,9 +30,16 @@ message Resolution { uint32 width = 1; uint32 height = 2; uint32 fps = 3; }
 message Zoom { float ratio = 1; }
 message Lens { enum Facing { BACK = 0; FRONT = 1; } Facing facing = 1; }
 
-// Which lens the camera captures through. `secondary` is for lenses recorded alongside the
-// primary and stays empty until concurrent capture exists.
+// Which lens the camera captures through. `secondary` is at most one lens recorded
+// alongside the primary, and only a pair this camera has shown can run together.
 message LensSelection { string primary = 1; repeated string secondary = 2; }
+
+// Two lenses a trial has shown can capture at once, and the largest size that held.
+message LensPair {
+  string a = 1;
+  string b = 2;
+  Resolution max = 3;
+}
 
 // One lens a camera can open (Phase 12). Ids are stable names, never raw camera ids.
 message LensInfo {
@@ -218,6 +225,8 @@ message RuntimeStatus {
   RecordingMode recording_revert_to = 28;
   // The recording_mode setting as asked for; effective_recording_mode is what it came to.
   RecordingMode requested_recording_mode = 29;
+  // True while a selected second lens is paused for heat or a recording cap.
+  bool secondary_paused = 30;
 
   // THERMAL_UNKNOWN is below API 29, where only battery_temp_c speaks for heat.
   enum Thermal {
@@ -279,6 +288,8 @@ message Clip {
   uint32 width = 7;
   uint32 height = 8;
   bool has_audio = 9;
+  // Which lens recorded the clip. Empty until a clip knows.
+  string lens_id = 10;
 }
 
 message ClipList {
@@ -477,6 +488,8 @@ message Capabilities {
   bool thermal_status_supported = 13;
   // Phase 12: every lens that opens. multi_lens is true exactly when this has more than one.
   repeated LensInfo lenses = 14;
+  // Lens pairs a trial has shown can capture at once, with the largest size that held.
+  repeated LensPair concurrent_lenses = 15;
 
   enum EncoderTier {
     ENCODER_NONE = 0;  // software encode only

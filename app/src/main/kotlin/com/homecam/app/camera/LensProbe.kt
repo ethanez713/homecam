@@ -56,18 +56,24 @@ class LensProbe(
 
     fun run(): JSONObject {
         val candidates = candidates()
+        val proven = mutableListOf<ConcurrentPairs.Proven>()
         val sets = JSONArray()
         candidates.forEach { candidate ->
             val trials = sizes.map { runTrial(candidate.members, it) }
+            val best = ConcurrencyVerdict.best(trials)
+            if (best != null) {
+                proven += ConcurrentPairs.Proven(candidate.members.map { it.cameraId }, best.width, best.height)
+            }
             sets.put(
                 JSONObject()
                     .put("kind", candidate.kind)
                     .put("members", JSONArray(candidate.members.map { it.label() }))
                     .put("trials", JSONArray(trials.map(::trialJson)))
-                    .put("best", ConcurrencyVerdict.best(trials)?.let { "${it.width}x${it.height}" } ?: JSONObject.NULL)
-                    .put("feasible", ConcurrencyVerdict.best(trials) != null),
+                    .put("best", best?.let { "${it.width}x${it.height}" } ?: JSONObject.NULL)
+                    .put("feasible", best != null),
             )
         }
+        ConcurrentPairs.record(context, LensSource.lenses(context), proven)
         return survey()
             .put("trial_seconds", trialSeconds)
             .put("sets", sets)

@@ -1,6 +1,7 @@
 package com.homecam.core.lens
 
 import com.homecam.proto.Lens
+import com.homecam.proto.LensPair
 import com.homecam.proto.LensSelection
 import com.homecam.proto.SettingsSnapshot
 
@@ -18,10 +19,21 @@ object LensSelections {
         else -> id
     }
 
-    /** Why [selection] cannot be taken on a camera that opens [advertised], or null if it can. */
-    fun rejection(selection: LensSelection, advertised: Collection<String>): String? = when {
-        selection.primary !in advertised -> "this camera has no lens named '${selection.primary}'"
-        selection.secondaryCount > 0 -> "this camera does not capture from more than one lens"
-        else -> null
+    /** Why [selection] cannot be taken, or null if it can. An empty [pairs] refuses every secondary. */
+    fun rejection(selection: LensSelection, advertised: Collection<String>, pairs: Collection<LensPair>): String? {
+        if (selection.primary !in advertised) return "this camera has no lens named '${selection.primary}'"
+        if (selection.secondaryCount > 1) return "this camera can record at most one other lens"
+        if (selection.secondaryCount == 0) return null
+        val secondary = selection.getSecondary(0)
+        return when {
+            secondary == selection.primary -> "this camera cannot record a lens alongside itself"
+            secondary !in advertised -> "this camera has no lens named '$secondary'"
+            pairs.none { samePair(it, selection.primary, secondary) } ->
+                "this camera has not shown it can record '${selection.primary}' and '$secondary' together"
+            else -> null
+        }
     }
+
+    private fun samePair(pair: LensPair, x: String, y: String): Boolean =
+        (pair.a == x && pair.b == y) || (pair.a == y && pair.b == x)
 }
