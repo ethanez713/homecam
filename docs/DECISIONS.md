@@ -385,3 +385,22 @@ provider's own counter (`GET /v1/account`, which does not spend it) and holds th
 it would cut into the reserve; `held` and `remaining` on the `alert` line in `camera.jsonl` say
 when that happened. An unreadable counter, or a server that reports no limit, holds nothing:
 dropping an alert on a guess is worse than spending the reserve.
+
+## D21 — Lenses: the ultra-wide is its own camera id, and a second lens runs only on proven pairs
+
+On the S20U the ultra-wide is a separate back camera (`LensInfo.Reach.CAMERA_ID`, camera id 2),
+so it opens directly rather than as a zoom ratio below 1.0 on the logical camera. No logical
+camera there exposes its physical lenses, so two back lenses can never run at once.
+
+Concurrent capture runs only a pair the camera has itself proven: `LensProbe` keeps the sets that
+held 24 fps through a full trial (`ConcurrencyVerdict`), and `ConcurrentPairs` is the only source
+`LensSelections.rejection` accepts. What the HAL lists as concurrent is a claim, not evidence; a
+listed pair that drops frames is the common case. A device that has never been probed refuses
+every second lens.
+
+Each lens detects on its own frames and a detection keeps only that lens's clip, because the two
+lenses watch different places. Sound, manual clips and continuous mode drive every lens. Urgency
+(D20) matches the raw category, while the alert text names the lens. One TFLite interpreter is
+shared between the lenses. The second lens is the first thing heat or a recording cap drops
+(`HealthState.secondaryAllowed`). One `CameraBinder` owns the camera provider: a capturer that
+calls `unbindAll` itself takes the other lens's camera down with it.
