@@ -67,7 +67,10 @@ import com.homecam.app.ui.kit.isLandscape
 import com.homecam.app.ui.theme.Ethan
 import com.homecam.app.ui.theme.EthanRadius
 import com.homecam.app.ui.theme.HomecamTheme
+import com.homecam.core.lens.LensSelections
 import com.homecam.core.media.ClipFilter
+import com.homecam.core.media.ClipGroup
+import com.homecam.core.media.ClipGrouping
 import com.homecam.core.media.ClipRun
 import com.homecam.core.media.ClipRuns
 import com.homecam.core.media.DownloadProgress
@@ -128,14 +131,19 @@ fun ClipsScreen(
     var seekToken by remember { mutableIntStateOf(0) }
     var seek by remember { mutableStateOf<Seek?>(null) }
     var unplayable by remember(playing) { mutableStateOf(false) }
+    // Which clip is on screen when several lenses cover one instant. Cleared by leaving its span.
+    var chosenClipId by remember(openAtMs) { mutableStateOf<String?>(null) }
 
     val playingClip = timeline.clips.firstOrNull { it.id == playingId }
-    val underPlayhead = timeline.clipAt(playheadMs)
 
     /** Moves to an instant and plays from it; in a gap it only moves, and says so. */
-    fun goTo(timeMs: Long, play: Boolean = true) {
+    fun goTo(timeMs: Long, play: Boolean = true, preferred: Clip? = null) {
         playheadMs = timeline.clamp(timeMs)
-        val clip = timeline.clipAt(playheadMs)
+        val held = timeline.clips.find { it.id == chosenClipId }
+        val clip = preferred?.takeIf { it.covers(playheadMs) }
+            ?: held?.takeIf { it.covers(playheadMs) }
+            ?: timeline.clipAt(playheadMs)
+        chosenClipId = clip?.id
         if (clip == null) {
             wantPlaying = false
             return
@@ -144,6 +152,9 @@ fun ClipsScreen(
         seek = Seek(++seekToken, playheadMs - clip.startedAtMs)
         if (clip.id != playingId || playing == null) onPlay(clip)
     }
+
+    val underPlayhead = timeline.clips.find { it.id == chosenClipId }?.takeIf { it.covers(playheadMs) }
+        ?: timeline.clipAt(playheadMs)
 
     val panel = PlaybackState(
         timeline = timeline,
@@ -166,7 +177,7 @@ fun ClipsScreen(
         },
         onCompleted = {
             val next = playingClip?.let(timeline::continuationOf)
-            if (next != null) goTo(next.startedAtMs) else wantPlaying = false
+            if (next != null) goTo(next.startedAtMs, preferred = next) else wantPlaying = false
         },
         onUnplayable = { unplayable = true; wantPlaying = false },
         // From a gap, play picks up at the next thing that was recorded.
@@ -175,9 +186,19 @@ fun ClipsScreen(
             else goTo(underPlayhead?.let { playheadMs } ?: timeline.firstClipFrom(playheadMs)?.startedAtMs ?: playheadMs)
         },
         onJump = { deltaMs -> goTo(playheadMs + deltaMs, play = wantPlaying) },
-        onPreviousEvent = { timeline.previousEvent(playheadMs)?.let { goTo(it.startMs) } },
-        onNextEvent = { timeline.nextEvent(playheadMs)?.let { goTo(it.startMs) } },
-        onDay = { day -> timeline.clips.firstOrNull { dayOf(it.startedAtMs) == day }?.let { goTo(it.startedAtMs, play = false) } },
+        onPreviousEvent = {
+            timeline.previousEvent(playheadMs)?.let { event ->
+                goTo(event.startMs, preferred = timeline.clips.find { it.id == event.clipId })
+            }
+        },
+        onNextEvent = {
+            timeline.nextEvent(playheadMs)?.let { event ->
+                goTo(event.startMs, preferred = timeline.clips.find { it.id == event.clipId })
+            }
+        },
+        onDay = { day ->
+            timeline.clips.firstOrNull { dayOf(it.startedAtMs) == day }?.let { goTo(it.startedAtMs, play = false, preferred = it) }
+        },
     )
 
     if (isLandscape()) {
@@ -200,7 +221,7 @@ fun ClipsScreen(
             projectedDays = projectedDays,
             pinnedNearCeiling = pinnedNearCeiling,
             loadThumbnail = loadThumbnail,
-            onOpen = { goTo(it.startedAtMs) },
+            onOpen = { goTo(it.startedAtMs, preferred = it) },
             onPin = onPin,
             onDelete = onDelete,
             onExport = onExport,
@@ -363,9 +384,10 @@ private fun DayButton(state: PlaybackState) {
             Spacer(Modifier.height(6.dp))
             days.entries.forEachIndexed { index, (date, thatDay) ->
                 if (index > 0) Rule()
+                val events = ClipGrouping.group(thatDay).count { group -> group.clips.any { it.labelsCount > 0 } }
                 ListRow(
                     dayLabel(date),
-                    meta = "${thatDay.size} clips · ${thatDay.count { it.labelsCount > 0 }} events",
+                    meta = "${thatDay.size} clips · $events events",
                     metaMono = true,
                     onClick = { choosing = false; state.onDay(date) },
                 ) { if (date == day) LucideIcon(R.drawable.lucide_check, "Showing", tint = Ethan.colors.textAccent) }
@@ -419,7 +441,7 @@ private fun ClipList(
     val shown = listed
         .let { if (activeLabel != null) ClipFilter.withLabel(it, activeLabel!!) else it }
         .let { if (pinnedOnly) it.filter { clip -> clip.pinned } else it }
-    val runs = remember(shown) { ClipRuns.group(shown) }
+    val runs = remember(shown) { ClipRuns.group(shown).map { it to ClipGrouping.group(it.clips) } }
     val chosen = clips.filter { it.id in selected }
 
     fun toggle(ids: List<String>) {
@@ -460,20 +482,17 @@ private fun ClipList(
             EmptyState("No clips match.", detail = "Clear the filter to see every detection.", modifier = Modifier.height(160.dp))
         }
         LazyColumn(Modifier.weight(1f)) {
-            runs.groupBy { dayOf(it.startedAtMs) }.forEach { (day, runsThatDay) ->
-                stickyHeader(key = "day-$day") { DayHeader(day, runsThatDay.sumOf { it.clips.size }) }
-                runsThatDay.forEach { run ->
+            runs.groupBy { dayOf(it.first.startedAtMs) }.forEach { (day, runsThatDay) ->
+                stickyHeader(key = "day-$day") { DayHeader(day, runsThatDay.sumOf { it.first.clips.size }) }
+                runsThatDay.forEach { (run, groups) ->
                     val ids = run.clips.map { it.id }
-                    if (run.clips.size == 1) {
-                        val clip = run.clips.single()
-                        item(key = clip.id) {
-                            ClipRow(
-                                clip, clip.id == playingId, downloadingId, downloadProgress, loadThumbnail,
-                                mark = if (selecting) clip.id in selected else null,
-                                onClick = { if (selecting) toggle(ids) else onOpen(clip) },
-                                onPin = onPin, onMenu = { menuFor = it },
+                    if (groups.size == 1) {
+                        item(key = groups.single().key) {
+                            EventRow(
+                                groups.single(), playingId, downloadingId, downloadProgress, loadThumbnail,
+                                selecting, selected, onOpen, onPin, onMenu = { menuFor = it },
+                                onToggle = { toggle(listOf(it.id)) },
                             )
-                            Rule()
                         }
                     } else {
                         val open = run.startedAtMs in expanded
@@ -487,14 +506,12 @@ private fun ClipList(
                             Rule()
                         }
                         if (open) {
-                            items(run.clips, key = { it.id }) { clip ->
-                                ClipRow(
-                                    clip, clip.id == playingId, downloadingId, downloadProgress, loadThumbnail,
-                                    mark = if (selecting) clip.id in selected else null,
-                                    onClick = { if (selecting) toggle(listOf(clip.id)) else onOpen(clip) },
-                                    onPin = onPin, onMenu = { menuFor = it }, indented = true,
+                            items(groups, key = { it.key }) { group ->
+                                EventRow(
+                                    group, playingId, downloadingId, downloadProgress, loadThumbnail,
+                                    selecting, selected, onOpen, onPin, onMenu = { menuFor = it },
+                                    onToggle = { toggle(listOf(it.id)) }, indented = true,
                                 )
-                                Rule(Modifier.padding(start = 20.dp))
                             }
                         }
                     }
@@ -542,6 +559,8 @@ private fun ClipList(
 }
 
 private fun dayOf(atMs: Long): LocalDate = Instant.ofEpochMilli(atMs).atZone(ZoneId.systemDefault()).toLocalDate()
+
+private fun Clip.covers(timeMs: Long): Boolean = timeMs >= startedAtMs && timeMs < startedAtMs + durationMs
 
 private val clock = DateTimeFormatter.ofPattern("HH:mm")
 private val clockWithSeconds = DateTimeFormatter.ofPattern("HH:mm:ss")
@@ -632,6 +651,49 @@ private fun RunRow(
     }
 }
 
+/** One event. Several lenses of it share the row and a switcher; the row acts on the lens it is showing. */
+@Composable
+private fun EventRow(
+    group: ClipGroup,
+    playingId: String?,
+    downloadingId: String?,
+    downloadProgress: DownloadProgress?,
+    loadThumbnail: (suspend (String) -> ByteArray?)?,
+    selecting: Boolean,
+    selected: Set<String>,
+    onOpen: (Clip) -> Unit,
+    onPin: (Clip) -> Unit,
+    onMenu: (Clip) -> Unit,
+    onToggle: (Clip) -> Unit,
+    indented: Boolean = false,
+) {
+    var pickedId by remember(group.key) { mutableStateOf<String?>(null) }
+    val clip = shownClip(group, pickedId, playingId, selecting)
+    ClipRow(
+        clip,
+        current = group.clips.any { it.id == playingId },
+        downloadingId, downloadProgress, loadThumbnail,
+        mark = if (selecting) clip.id in selected else null,
+        onClick = { if (selecting) onToggle(clip) else onOpen(clip) },
+        onPin = onPin,
+        onMenu = onMenu,
+        indented = indented,
+        lenses = group.clips,
+        onLens = { lens ->
+            pickedId = lens.id
+            if (!selecting) onOpen(lens)
+        },
+    )
+    Rule(Modifier.padding(start = if (indented) 20.dp else 0.dp))
+}
+
+/** While selecting, the lens last picked wins; otherwise the lens actually playing does. */
+private fun shownClip(group: ClipGroup, pickedId: String?, playingId: String?, selecting: Boolean): Clip {
+    val picked = group.clips.find { it.id == pickedId }
+    val playing = group.clips.find { it.id == playingId }
+    return if (selecting) picked ?: playing ?: group.primary else playing ?: picked ?: group.primary
+}
+
 /** Tapping the row plays it from the timeline; everything else is behind the pin and the menu. */
 @Composable
 private fun ClipRow(
@@ -645,6 +707,8 @@ private fun ClipRow(
     onPin: (Clip) -> Unit,
     onMenu: (Clip) -> Unit,
     indented: Boolean = false,
+    lenses: List<Clip> = emptyList(),
+    onLens: (Clip) -> Unit = {},
 ) {
     Row(
         Modifier
@@ -668,6 +732,16 @@ private fun ClipRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(clipMeta(clip), style = Ethan.type.monoSmall, color = Ethan.colors.textMuted, maxLines = 1)
+            if (lenses.size >= 2) {
+                Row(
+                    Modifier.padding(top = 6.dp).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    lenses.forEach { lens ->
+                        Tag(LensSelections.labelOf(lens.lensId), selected = lens.id == clip.id, onClick = { onLens(lens) })
+                    }
+                }
+            }
         }
         if (downloadingId == clip.id) {
             DownloadIndicator(downloadProgress, 18.dp)

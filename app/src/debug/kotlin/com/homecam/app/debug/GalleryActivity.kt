@@ -97,13 +97,23 @@ private val status = RuntimeStatus.newBuilder()
     .setFreeBytes(84_000_000_000).setClipBytes(360_000_000).setArmed(true).setViewersWithAccess(2)
     .build()
 
-private fun clip(id: String, minutesAgo: Long, seconds: Int, megabytes: Double, vararg labels: String, pinned: Boolean = false) =
-    Clip.newBuilder().setId(id).setStartedAtMs(System.currentTimeMillis() - minutesAgo * MINUTE)
-        .setDurationMs(seconds * 1000).setSizeBytes((megabytes * 1024 * 1024).toLong())
-        .setWidth(1920).setHeight(1080).addAllLabels(labels.toList()).setPinned(pinned).build()
+private fun clip(
+    id: String,
+    minutesAgo: Long,
+    seconds: Int,
+    megabytes: Double,
+    vararg labels: String,
+    pinned: Boolean = false,
+    lensId: String = "",
+    startOffsetMs: Long = 0,
+) = Clip.newBuilder().setId(id).setStartedAtMs(System.currentTimeMillis() - minutesAgo * MINUTE + startOffsetMs)
+    .setDurationMs(seconds * 1000).setSizeBytes((megabytes * 1024 * 1024).toLong())
+    .setWidth(1920).setHeight(1080).addAllLabels(labels.toList()).setPinned(pinned).setLensId(lensId).build()
 
 private val clips = buildList {
     repeat(9) { add(clip("run-a-$it", 4L + it * 2, 120, 11.5 + it % 3, *(if (it == 3) arrayOf("person") else emptyArray()))) }
+    add(clip("pair-wide", 40, 18, 6.2, "person", lensId = "back-wide"))
+    add(clip("pair-front", 40, 18, 5.4, "person", lensId = "front", startOffsetMs = 1_000))
     add(clip("solo-1", 95, 14, 5.1, "person", pinned = true))
     add(clip("solo-2", 190, 19, 11.1, "person", "pet"))
     repeat(5) { add(clip("run-b-$it", 600L + it * 2, 120, 12.0)) }

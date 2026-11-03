@@ -54,6 +54,15 @@ class TimelineTest {
     }
 
     @Test
+    fun `playback continues on the same lens when the other lens overlaps the join`() {
+        val wide = clip("w1", 0, 120).toBuilder().setLensId("back-wide").build()
+        val front = Clip.newBuilder().setId("front").setStartedAtMs(119_600).setDurationMs(120_000).setLensId("front").build()
+        val next = clip("w2", 120, 120).toBuilder().setLensId("back-wide").build()
+
+        assertEquals("w2", Timeline(listOf(wide, front, next)).continuationOf(wide)?.id)
+    }
+
+    @Test
     fun `events are the labelled clips, in order`() {
         assertEquals(listOf("b", "c"), timeline.events.map { it.clipId })
         assertEquals("b", timeline.nextEvent(0)?.clipId)

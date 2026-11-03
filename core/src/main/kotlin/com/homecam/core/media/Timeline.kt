@@ -33,10 +33,16 @@ class Timeline(clips: List<Clip>, spans: List<EventSpan> = emptyList()) {
     /**
      * The clip that carries straight on from [clip], if recording did: back-to-back
      * segments play through as one recording, and a pause in recording stops playback.
+     * A clip that names its lens continues on that lens. The other lens of a simultaneous
+     * recording is a different angle, not the next segment.
      */
     fun continuationOf(clip: Clip, maxGapMs: Long = ClipRuns.DEFAULT_MAX_GAP_MS): Clip? =
-        clips.firstOrNull { it.startedAtMs >= clip.endMs - OVERLAP_SLACK_MS && it.id != clip.id }
-            ?.takeIf { it.startedAtMs - clip.endMs <= maxGapMs }
+        clips.firstOrNull { candidate ->
+            candidate.id != clip.id &&
+                candidate.startedAtMs >= clip.endMs - OVERLAP_SLACK_MS &&
+                candidate.startedAtMs - clip.endMs <= maxGapMs &&
+                (clip.lensId.isEmpty() || candidate.lensId.isEmpty() || candidate.lensId == clip.lensId)
+        }
 
     fun nextEvent(afterMs: Long): EventSpan? = events.firstOrNull { it.startMs > afterMs }
 
