@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -53,7 +54,7 @@ class LiveLensSenderTest {
     private val context get() = instrumentation.targetContext
 
     @Test
-    fun hidingTheSecondaryStopsItsSenderWhileItsRecorderKeepsWriting() {
+    fun aSecondaryPausedAtStartSendsOnceRunningAndStopsWhenHiddenWhileItKeepsRecording() {
         val pair = provenPair()
         assumeTrue("device has no proven pair", pair != null)
         val (primaryLens, secondaryLens) = pair!!
@@ -126,10 +127,12 @@ class LiveLensSenderTest {
                 },
             )
             media = session
+            // The secondary starts paused, as when health holds it off: its sender is negotiated
+            // with no track and gains one once the capture runs, without a new offer.
             session.start(
                 listOf(
                     CameraMediaSession.LensVideo(primaryLens.id, primaryCapture),
-                    CameraMediaSession.LensVideo(secondaryLens.id, secondaryCapture),
+                    CameraMediaSession.LensVideo(secondaryLens.id, null),
                 ),
             )
             assertTrue("camera produced no offer", offerLatch.await(OFFER_TIMEOUT_MS, TimeUnit.MILLISECONDS))
@@ -163,11 +166,14 @@ class LiveLensSenderTest {
             synchronized(iceLock) {
                 fromAnswerer.forEach { session.onCandidate(candidateOf(it)) }
             }
+            assertNull("session tore down: ${teardown.get()}", teardown.get())
+            session.onCaptureRunning(secondaryLens.id, secondaryCapture)
 
             val sent = awaitBytes(session, secondaryLens.id) {
                 synchronized(iceLock) { fromAnswerer.forEach { session.onCandidate(candidateOf(it)) } }
             }
             assertTrue("secondary sender produced no bytes (${teardown.get()})", sent > 0)
+            assertTrue("primary sender produced no bytes", awaitBytes(session, primaryLens.id) > 0)
             session.setShown(listOf(primaryLens.id))
             Thread.sleep(SETTLE_MS)
             val settled = bytesSent(session, secondaryLens.id)

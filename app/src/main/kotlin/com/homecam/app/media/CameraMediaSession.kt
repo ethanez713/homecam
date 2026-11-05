@@ -119,27 +119,22 @@ class CameraMediaSession(
         // A selected lens that is not running still occupies an m-line, so attaching its
         // track later is not a renegotiation. The primary with no capture adds nothing,
         // which is the single-lens session with no picture.
-        val sender = if (track != null) {
-            connection.addTrack(track, listOf(stream))
-        } else if (!primary) {
-            val transceiver = connection.addTransceiver(
-                MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
-                RtpTransceiver.RtpTransceiverInit(
-                    RtpTransceiver.RtpTransceiverDirection.SEND_ONLY,
-                    listOf(stream),
-                ),
-            )
-            transceiver.sender.apply {
-                setStreams(listOf(stream))
-                setTrack(null, false)
-            }
+        if (track == null && primary) return
+        val init = RtpTransceiver.RtpTransceiverInit(
+            RtpTransceiver.RtpTransceiverDirection.SEND_ONLY,
+            listOf(stream),
+        )
+        // Never PeerConnection.getTransceivers(): the Java binding disposes every transceiver
+        // it handed out before, senders included, and a kept sender then throws "RtpSender
+        // has been disposed" on its next call.
+        val transceiver = if (track != null) {
+            connection.addTransceiver(track, init)
         } else {
-            return
-        } ?: return
+            connection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, init)
+        }
+        transceiver.setCodecPreferences(hardwareH264First())
         if (track != null) tracks[lens.id] = track
-        senders[lens.id] = sender
-        connection.transceivers.firstOrNull { it.sender.id() == sender.id() }
-            ?.setCodecPreferences(hardwareH264First())
+        senders[lens.id] = transceiver.sender
     }
 
     private fun allowed(lensId: String): Boolean = shown?.contains(lensId) ?: true
