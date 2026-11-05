@@ -164,7 +164,10 @@ class CameraXVideoCapturer(
     @SuppressLint("UnsafeOptInUsageError")
     private fun selectorFor(lens: LensEntry?): CameraSelector {
         if (lens == null) return CameraSelector.DEFAULT_BACK_CAMERA
+        // CameraX's concurrent bind reads two selectors with equal lensFacing — null included —
+        // as one logical camera and binds only one, so the facing must be set explicitly.
         return CameraSelector.Builder()
+            .requireLensFacing(if (lens.front) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK)
             .addCameraFilter { infos -> infos.filter { Camera2CameraInfo.from(it).cameraId == lens.cameraId } }
             .also { builder -> lens.physicalId?.let(builder::setPhysicalCameraId) }
             .build()

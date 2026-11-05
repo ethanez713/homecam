@@ -111,6 +111,7 @@ class CameraBinder(
         }
         try {
             val cameras = cameraProvider.bindToLifecycle(configs).cameras
+            check(cameras.size == bound.size) { "concurrent bind opened ${cameras.size} of ${bound.size} cameras" }
             bound.forEachIndexed { index, (_, slot) -> slot.onCamera(cameras[index]) }
         } catch (e: IllegalArgumentException) {
             fallBackToFirst(cameraProvider, bound, e)
