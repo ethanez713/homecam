@@ -83,8 +83,8 @@ message SettingsSnapshot {
   LensSelection lens = 10;
   DetectionMode detection_mode = 16;
   DetectionSchedule detection_schedule = 17;
-  DetectionZone detection_zone = 18;
-  PrivacyMask privacy_mask = 19;
+  reserved 18, 19;
+  reserved "detection_zone", "privacy_mask";
   bool bounding_box_overlay = 22;
   DetectionReminder detection_reminder = 23;
   SoundDetection sound_detection = 24;
@@ -95,6 +95,9 @@ message SettingsSnapshot {
   HardwareProtection hardware_protection = 35;
   // Set while a timed recording mode is running; the camera enforces it (Phase 11.7).
   RecordingRevert recording_revert = 36;
+  // Keyed by lens id. A lens with no entry has no zone, or no mask.
+  map<string, DetectionZone> detection_zones = 37;
+  map<string, PrivacyMask> privacy_masks = 38;
 }
 
 // The decibel half of sound detection (Phase 6): a loud noise above [threshold_db] fires,
@@ -172,13 +175,22 @@ message DetectionSchedule {
 message Point { float x = 1; float y = 2; }
 
 // Normalised polygon; detection runs only inside it.
-message DetectionZone { repeated Point points = 1; bool enabled = 2; }
+// [lens_id] is how an edit names its lens and is cleared when the zone is stored.
+// Empty means the primary lens at the time of the call.
+message DetectionZone {
+  repeated Point points = 1;
+  bool enabled = 2;
+  string lens_id = 3;
+}
 
 // Normalised rectangles blanked in the frame before it reaches the encoder, so
 // masked areas exist in neither the live stream nor the recording (§2.8).
+// [lens_id] is how an edit names its lens and is cleared when the mask is stored.
+// Empty means the primary lens at the time of the call.
 message PrivacyMask {
   message Rect { float left = 1; float top = 2; float right = 3; float bottom = 4; }
   repeated Rect rects = 1;
+  string lens_id = 2;
 }
 
 message BoundingBoxOverlay { bool enabled = 1; }

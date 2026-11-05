@@ -23,7 +23,8 @@ interface MediaController {
     fun setZoom(ratio: Float)
     fun setLiveLenses(shown: List<String>)
     fun setPushToTalk(active: Boolean)
-    fun setPrivacyMask(mask: PrivacyMask)
+    /** Applies [mask] to captures currently on [lensId]. Other lenses keep their own. */
+    fun setPrivacyMask(lensId: String, mask: PrivacyMask)
     suspend fun setResolution(resolution: Resolution): SessionStatus
     fun setOrientation(degrees: Int)
     fun recordManually(seconds: Int, start: Boolean)

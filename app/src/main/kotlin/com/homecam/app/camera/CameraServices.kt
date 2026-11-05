@@ -7,6 +7,8 @@ import com.homecam.app.data.toProto
 import com.homecam.core.crypto.AlertEndpoint
 import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.RecordingTimer
+import com.homecam.core.lens.LensRegions
+import com.homecam.core.lens.LensSelections
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcException
 import com.homecam.core.rpc.RpcPeer
@@ -325,8 +327,18 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.LENS) { setLens(lensControl.validated(LensSelection.parseFrom(it))) }
         settingSetter(peer, Controls.Settings.DETECTION_MODE) { setDetectionMode(DetectionMode.parseFrom(it)) }
         settingSetter(peer, Controls.Settings.DETECTION_SCHEDULE) { setDetectionSchedule(DetectionSchedule.parseFrom(it)) }
-        settingSetter(peer, Controls.Settings.DETECTION_ZONE) { setDetectionZone(DetectionZone.parseFrom(it)) }
-        settingSetter(peer, Controls.Settings.PRIVACY_MASK) { setPrivacyMask(PrivacyMask.parseFrom(it)) }
+        settingSetter(peer, Controls.Settings.DETECTION_ZONE) {
+            val zone = DetectionZone.parseFrom(it)
+            LensRegions.edit(this, zone, lensIds())?.let { reason ->
+                throw RpcException(RpcError.Code.INVALID_ARGUMENT, reason)
+            }
+        }
+        settingSetter(peer, Controls.Settings.PRIVACY_MASK) {
+            val mask = PrivacyMask.parseFrom(it)
+            LensRegions.edit(this, mask, lensIds())?.let { reason ->
+                throw RpcException(RpcError.Code.INVALID_ARGUMENT, reason)
+            }
+        }
         settingSetter(peer, Controls.Settings.BOUNDING_BOX_OVERLAY) {
             setBoundingBoxOverlay(BoundingBoxOverlay.parseFrom(it).enabled)
         }
@@ -372,17 +384,30 @@ class CameraServices(
         peer.register(RpcMessage.Service.SETTINGS, control) { request ->
             val updated = graph.settings.update { edit(request.payload) }
             if (control == Controls.Settings.PRIVACY_MASK) {
-                media?.setPrivacyMask(updated.privacyMask)
+                val lensId = LensRegions.resolvedLens(updated, PrivacyMask.parseFrom(request.payload).lensId)
+                media?.setPrivacyMask(lensId, LensRegions.maskFor(updated, lensId))
             }
             graph.audit.record(
                 if (control == Controls.Settings.PRIVACY_MASK) AuditEvent.Kind.PRIVACY_MASK_EDITED
                 else AuditEvent.Kind.SETTINGS_CHANGED,
                 viewerFingerprint = viewerFingerprint,
                 viewerLabel = viewerLabel,
-                detail = nameOfSetting(control),
+                detail = auditDetail(control, request.payload, updated),
             )
             updated.toByteString()
         }
+    }
+
+    private fun lensIds(): Collection<String> = LensSource.lenses(graph.app).map { it.id }
+
+    private fun auditDetail(control: Int, payload: ByteString, settings: SettingsSnapshot): String {
+        val name = nameOfSetting(control)
+        val requested = when (control) {
+            Controls.Settings.DETECTION_ZONE -> DetectionZone.parseFrom(payload).lensId
+            Controls.Settings.PRIVACY_MASK -> PrivacyMask.parseFrom(payload).lensId
+            else -> return name
+        }
+        return "$name · ${LensRegions.resolvedLens(settings, requested)}"
     }
 
     private fun registerAccess(peer: RpcPeer) {

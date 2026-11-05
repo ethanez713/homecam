@@ -91,6 +91,10 @@ class CameraXVideoCapturer(
     }
 
     override fun startCapture(width: Int, height: Int, framerate: Int) {
+        openCapture(width, height, framerate, onBound = null)
+    }
+
+    private fun openCapture(width: Int, height: Int, framerate: Int, onBound: (() -> Unit)?) {
         format = Triple(width, height, framerate)
         val helper = helper ?: return
         val observer = observer ?: return
@@ -157,6 +161,7 @@ class CameraXVideoCapturer(
                 watchCameraState(bound)
                 applyFrameRate(bound)
                 applyRememberedControls(bound)
+                if (generation == bindGeneration) onBound?.invoke()
             }
         }
     }
@@ -248,16 +253,21 @@ class CameraXVideoCapturer(
         ContextCompat.getMainExecutor(context).execute { source.removeObserver(stateObserver) }
     }
 
-    /** Opens [next] by the means its catalog entry names; a switch is a rebind, about a second without frames. */
-    fun setLens(next: LensEntry) {
+    /**
+     * Opens [next] by the means its catalog entry names; a switch is a rebind, about a second
+     * without frames. [onBound] runs when this bind generation's camera is bound, not when an
+     * older rebind catches up.
+     */
+    fun setLens(next: LensEntry, onBound: () -> Unit = {}) {
         if (next == lens) return
         lens = next
-        rebind()
+        rebind(onBound)
     }
 
-    private fun rebind() {
+    private fun rebind(onBound: () -> Unit) {
         val (width, height, framerate) = format
-        changeCaptureFormat(width, height, framerate)
+        stopCapture()
+        openCapture(width, height, framerate, onBound)
     }
 
     fun setTorch(on: Boolean) {
@@ -307,7 +317,7 @@ class CameraXVideoCapturer(
 
     override fun changeCaptureFormat(width: Int, height: Int, framerate: Int) {
         stopCapture()
-        startCapture(width, height, framerate)
+        openCapture(width, height, framerate, onBound = null)
     }
 
     override fun dispose() {

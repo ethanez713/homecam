@@ -32,6 +32,7 @@ import com.homecam.app.media.WebRtc
 import com.homecam.core.diagnostics.PowerSavingReason
 import com.homecam.core.health.Axis
 import com.homecam.core.lens.LensEntry
+import com.homecam.core.lens.LensRegions
 import com.homecam.core.lens.LensSelections
 import com.homecam.core.media.PowerSaving
 import com.homecam.core.health.HealthProtocol
@@ -45,6 +46,7 @@ import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
 import com.homecam.proto.Sdp
 import com.homecam.proto.SessionConfig
+import com.homecam.proto.PrivacyMask
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.SessionStatus
 import com.homecam.proto.SignalMessage
@@ -459,10 +461,13 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         lifecycleScope.launch {
             try {
                 endLive(Bye.Reason.CAMERA_DISABLED, "restarting capture")
-                val mask = graph.settings.current.privacyMask
+                val settings = graph.settings.current
                 pipelines().forEach { pipeline ->
                     pipeline.capture.stop()
-                    pipeline.capture.start(mask = mask, lens = pipeline.lens)
+                    pipeline.capture.start(
+                        mask = LensRegions.maskFor(settings, pipeline.lensId),
+                        lens = pipeline.lens,
+                    )
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -545,7 +550,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         primary.recorder.lensId = id
         val entry = LensSource.lens(this, id) ?: return
         primary.lens = entry
-        primary.capture.setLens(entry)
+        primary.capture.setLens(entry) { LensRegions.maskFor(graph.settings.current, id) }
     }
 
     /** A stored secondary that the proven pairs no longer cover is not selected. */
@@ -674,7 +679,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
         pipeCapture.start(
             format = format ?: pipeCapture.format,
-            mask = graph.settings.current.privacyMask,
+            mask = LensRegions.maskFor(graph.settings.current, lensId),
             lens = lens,
         )
         val pipeRecorder = Recorder(graph, pipeCapture, clips, lensId).also { created ->
@@ -688,6 +693,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val pipeDetection = DetectionPipeline(
             context = this,
             settings = { graph.settings.current },
+            lensId = { pipeline?.lensId ?: lensId },
             onMotion = { powerSaving.release(PowerSavingReason.MOTION) },
             detect = detector.attach(),
             onEvent = event@{ detections, thumbnailJpeg ->
@@ -1030,10 +1036,11 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     /**
      * A mask edited while somebody is watching has to take effect on that stream, not the
-     * next one — the whole point is that the pixels never leave.
+     * next one — the whole point is that the pixels never leave. Only the lens that was
+     * edited changes; the other keeps the mask it is already applying.
      */
-    override fun setPrivacyMask(mask: com.homecam.proto.PrivacyMask) {
-        captures().forEach { it.setPrivacyMask(mask) }
+    override fun setPrivacyMask(lensId: String, mask: PrivacyMask) {
+        pipelines().filter { it.lensId == lensId }.forEach { it.capture.setPrivacyMask(mask) }
     }
 
     // ------------------------------------------------ SignalingServer.Listener

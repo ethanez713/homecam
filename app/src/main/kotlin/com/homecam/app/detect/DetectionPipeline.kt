@@ -7,6 +7,8 @@ import com.homecam.core.crypto.AlertLimits
 import com.homecam.core.detect.Detection
 import com.homecam.core.detect.DetectionPolicy
 import com.homecam.core.detect.MotionGate
+import com.homecam.core.lens.LensCatalog
+import com.homecam.core.lens.LensRegions
 import com.homecam.proto.SettingsSnapshot
 import org.webrtc.VideoFrame
 import org.webrtc.VideoSink
@@ -26,6 +28,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DetectionPipeline(
     context: Context,
     private val settings: () -> SettingsSnapshot,
+    /** Read per frame. A primary switch changes the lens without rebuilding this pipeline. */
+    private val lensId: () -> String = { LensCatalog.DEFAULT },
     /**
      * The motion gate accepted this frame and no object class did. Movement releases
      * power saving on its own, including when the detector does not run or accepts nothing.
@@ -129,8 +133,11 @@ class DetectionPipeline(
             }
 
             val accepted = detections.mapNotNull { detection ->
-                DetectionPolicy.accepts(snapshot.detectionMode, snapshot.detectionZone, detection)
-                    ?.let { LabelledDetection(it, detection) }
+                DetectionPolicy.accepts(
+                    snapshot.detectionMode,
+                    LensRegions.zoneFor(snapshot, lensId()),
+                    detection,
+                )?.let { LabelledDetection(it, detection) }
             }
             if (previousDetectAtMs > 0) {
                 measuredFps = 1000f / (now - previousDetectAtMs).coerceAtLeast(1)

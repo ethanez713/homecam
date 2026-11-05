@@ -1,8 +1,11 @@
 package com.homecam.app.media
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.LifecycleOwner
 import com.homecam.core.lens.LensEntry
+import com.homecam.core.lens.LensRegions
 import com.homecam.proto.PrivacyMask
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
@@ -35,6 +38,15 @@ open class ContinuousCapture(
     private val maskProcessor = PrivacyMaskProcessor()
     private val trackCounter = AtomicInteger(0)
     private val deliveredFrames = AtomicLong()
+    private val maskLock = Any()
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+
+    /** The mask this lens settles on once a switch is no longer covering the lens it left. */
+    private var steadyMask: PrivacyMask = PrivacyMask.getDefaultInstance()
+
+    /** Non-zero while a switch is still masking every lens it has touched. */
+    private var coverToken = 0
+    private var pendingDrop: Runnable? = null
 
     private var helper: SurfaceTextureHelper? = null
     private var capturer: CameraXVideoCapturer? = null
@@ -58,7 +70,11 @@ open class ContinuousCapture(
         if (running) return
         this.format = format
         this.lens = lens
-        maskProcessor.mask = mask
+        synchronized(maskLock) {
+            coverToken = 0
+            steadyMask = mask
+            maskProcessor.mask = mask
+        }
 
         val videoCapturer = createCapturer()
         val (textureHelper, videoSource) = attachCapturer(videoCapturer, format)
@@ -102,7 +118,14 @@ open class ContinuousCapture(
 
     fun removeSink(sink: VideoSink) = maskProcessor.removeSink(sink)
 
-    fun setPrivacyMask(mask: PrivacyMask) { maskProcessor.mask = mask }
+    fun setPrivacyMask(mask: PrivacyMask) {
+        synchronized(maskLock) {
+            steadyMask = mask
+            // A switch is still covering the lens we left. Adding rects must take effect now;
+            // dropping rects waits until that cover ends, so an in-flight frame stays blanked.
+            maskProcessor.mask = if (coverToken == 0) mask else LensRegions.union(maskProcessor.mask, mask)
+        }
+    }
 
     val orientationDegrees: Int get() = maskProcessor.orientationDegrees
 
@@ -163,10 +186,47 @@ open class ContinuousCapture(
 
     fun setZoom(ratio: Float) = capturer?.setZoom(ratio)
 
-    /** Kept across a capture restart, which builds a new capturer. */
-    fun setLens(next: LensEntry) {
-        lens = next
-        capturer?.setLens(next)
+    /**
+     * Kept across a capture restart, which builds a new capturer.
+     *
+     * A running switch masks with the union of the outgoing mask and [incomingMask] before
+     * the rebind is requested. Frames from either lens can still arrive until the new camera
+     * has been bound for a second, and both masks have to cover them. A newer switch during
+     * that window restarts it and widens the cover to every lens involved.
+     */
+    fun setLens(next: LensEntry, incomingMask: () -> PrivacyMask = { steadyMask }) {
+        val active = capturer
+        if (active == null || next == lens) {
+            lens = next
+            active?.setLens(next)
+            return
+        }
+        val token = synchronized(maskLock) {
+            val incoming = incomingMask()
+            steadyMask = incoming
+            maskProcessor.mask = LensRegions.union(maskProcessor.mask, incoming)
+            lens = next
+            coverToken = if (coverToken == Int.MAX_VALUE) 1 else coverToken + 1
+            coverToken
+        }
+        active.setLens(next) { scheduleDrop(token) }
+    }
+
+    private fun scheduleDrop(token: Int) {
+        val drop = Runnable {
+            synchronized(maskLock) {
+                if (coverToken != token) return@Runnable
+                coverToken = 0
+                pendingDrop = null
+                maskProcessor.mask = steadyMask
+            }
+        }
+        synchronized(maskLock) {
+            if (coverToken != token) return
+            pendingDrop?.let { mainHandler.removeCallbacks(it) }
+            pendingDrop = drop
+            mainHandler.postDelayed(drop, SWITCH_COVER_MS)
+        }
     }
 
     private var lens: LensEntry? = null
@@ -177,6 +237,11 @@ open class ContinuousCapture(
     }
 
     fun stop() {
+        synchronized(maskLock) {
+            coverToken = 0
+            pendingDrop?.let { mainHandler.removeCallbacks(it) }
+            pendingDrop = null
+        }
         runCatching { capturer?.dispose() }
         runCatching { source?.dispose() }
         runCatching { helper?.dispose() }
@@ -188,6 +253,7 @@ open class ContinuousCapture(
     companion object {
         private const val SNAPSHOT_QUALITY = 85
         private const val SNAPSHOT_TIMEOUT_MS = 2_000L
+        private const val SWITCH_COVER_MS = 1_000L
 
         /**
          * Puts [mask] in front of [source] rather than installing it with
