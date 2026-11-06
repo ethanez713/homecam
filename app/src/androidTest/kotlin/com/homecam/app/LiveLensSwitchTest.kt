@@ -75,6 +75,8 @@ class LiveLensSwitchTest {
             val binder = CameraBinder(context, registry)
             val primary = ContinuousCapture(context, registry, binder)
             capture = primary
+            // A rotated camera rewraps every frame before the encoder, so test that path.
+            primary.setOrientation(270)
             primary.start(format = ContinuousCapture.Format(1920, 1080, 30), lens = wide)
             awaitFrames(primary, wide.id)
 
@@ -146,18 +148,29 @@ class LiveLensSwitchTest {
                 synchronized(iceLock) { fromAnswerer.forEach { session.onCandidate(candidateOf(it)) } }
             }
             assertTrue("no live video before the switch (${teardown.get()})", first > 0)
-
-            primary.setLens(ultra!!)
-            Thread.sleep(SWITCH_SETTLE_MS)
+            // Rapid switching through every lens soon after the session opens, while the bandwidth
+            // estimate is still ramping, is the hardest case for the encoder to recover from.
+            val front = LensSource.lens(context, LensCatalog.FRONT)
+            val sequence = listOfNotNull(ultra, wide, ultra, front, ultra, wide, ultra, front)
+            Thread.sleep(1_500)
+            for (lens in sequence) {
+                primary.setLens(lens!!)
+                Thread.sleep(1_200)
+            }
+            val perSecond = (1..12).map {
+                Thread.sleep(1_000)
+                statsOf(session)
+            }
+            android.util.Log.i("LiveLensSwitchTest", "after the last switch: " +
+                perSecond.joinToString { "%.0ffps/%s".format(it.framesPerSecond, it.qualityLimitation) } + " teardown=${teardown.get()}")
             val mainFree = CountDownLatch(1)
             instrumentation.runOnMainSync { mainFree.countDown() }
-            assertTrue("main thread blocked after the switch", mainFree.await(1, TimeUnit.SECONDS))
-            val framesBefore = primary.frameCount
-            val before = bytesSent(session, wide.id)
-            Thread.sleep(GROW_MS)
-            val after = bytesSent(session, wide.id)
-            assertTrue("capture stopped delivering after the switch", primary.frameCount > framesBefore)
-            assertTrue("live video stopped after the switch ($before -> $after, ${teardown.get()})", after > before)
+            assertTrue("main thread blocked after the switches", mainFree.await(1, TimeUnit.SECONDS))
+            assertTrue(
+                "live video did not recover to 15 fps within 12 s of the last switch: " +
+                    perSecond.joinToString { "%.0f/%s".format(it.framesPerSecond, it.qualityLimitation) },
+                perSecond.takeLast(4).all { it.framesPerSecond >= 15 },
+            )
         } finally {
             runCatching { media?.close() }
             runCatching { answerer?.dispose() }
@@ -269,6 +282,17 @@ class LiveLensSwitchTest {
         .setSdpMLineIndex(candidate.sdpMLineIndex)
         .setCandidate(candidate.sdp)
         .build()
+
+    private fun statsOf(media: CameraMediaSession): CameraMediaSession.Stats {
+        val latch = CountDownLatch(1)
+        val value = java.util.concurrent.atomic.AtomicReference(CameraMediaSession.Stats())
+        media.stats {
+            value.set(it)
+            latch.countDown()
+        }
+        assertTrue("stats timed out", latch.await(STATS_TIMEOUT_MS, TimeUnit.MILLISECONDS))
+        return value.get()
+    }
 
     private fun dirBytes(dir: File) = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
 

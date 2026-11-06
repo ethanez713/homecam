@@ -283,6 +283,9 @@ class CameraMediaSession(
         var packetsLost = 0
         var width = 0
         var height = 0
+        var framesPerSecond = 0.0
+        var framesEncoded = 0L
+        var limitation = ""
 
         report.statsMap.values.forEach { entry ->
             when (entry.type) {
@@ -290,6 +293,9 @@ class CameraMediaSession(
                     if (entry.members["kind"] == "audio") return@forEach
                     (entry.members["frameWidth"] as? Long)?.let { width = it.toInt() }
                     (entry.members["frameHeight"] as? Long)?.let { height = it.toInt() }
+                    (entry.members["framesPerSecond"] as? Double)?.let { framesPerSecond = it }
+                    framesEncoded = bytesOf(entry.members["framesEncoded"])
+                    (entry.members["qualityLimitationReason"] as? String)?.let { limitation = it }
                     val sent = bytesOf(entry.members["bytesSent"])
                     val now = System.currentTimeMillis()
                     val elapsed = (now - lastStatsAtMs).coerceAtLeast(1)
@@ -303,7 +309,7 @@ class CameraMediaSession(
                 }
             }
         }
-        onStats(Stats(bitrateKbps, rttMs, packetsLost, width, height))
+        onStats(Stats(bitrateKbps, rttMs, packetsLost, width, height, framesPerSecond, framesEncoded, limitation))
     }
 
     data class Stats(
@@ -312,6 +318,10 @@ class CameraMediaSession(
         val packetsLost: Int = 0,
         val width: Int = 0,
         val height: Int = 0,
+        val framesPerSecond: Double = 0.0,
+        val framesEncoded: Long = 0,
+        /** libwebrtc's qualityLimitationReason: none, cpu, bandwidth or other. */
+        val qualityLimitation: String = "",
     )
 
     fun onCandidate(candidate: Candidate) {
