@@ -546,6 +546,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     private fun applyPrimaryLens(id: String) {
+        if (primary.lensId != id) graph.diagnostics.lensSwitch(primary.lensId, id, primary.capture.running)
         primary.lensId = id
         primary.recorder.lensId = id
         val entry = LensSource.lens(this, id) ?: return
@@ -836,6 +837,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             },
             throttle.bitrateCapBps,
         )
+        graph.diagnostics.liveStart(media.id, listOfNotNull(primaryId, secondaryId))
         throttle.onSessionOpen()
         powerSaving.release(PowerSavingReason.VIEWER)
         audioDetection.setLive(true)
@@ -1065,6 +1067,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val ending = expected ?: return
         if (live !== ending) return
         live = null
+        graph.diagnostics.liveEnd(ending.media.id, reason.name, detail, System.currentTimeMillis() - ending.startedAtMs)
         ending.media.close()
         if (::throttle.isInitialized) throttle.onSessionClose()
         audioDetection.setLive(false)

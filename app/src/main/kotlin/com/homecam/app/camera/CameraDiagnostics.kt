@@ -270,6 +270,26 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
     }
 
     /** [state] is "on" or "off". [reason] is "selection", "health", or "bind_failed". */
+    fun lensSwitch(from: String, to: String, captureRunning: Boolean) = event("lens_switch") {
+        put("from", from)
+        put("to", to)
+        put("capture_running", captureRunning)
+    }
+
+    fun liveStart(sessionId: String, lenses: List<String>) = event("live") {
+        put("state", "start")
+        put("session", sessionId)
+        put("lenses", lenses.joinToString(","))
+    }
+
+    fun liveEnd(sessionId: String, reason: String, detail: String, durationMs: Long) = event("live") {
+        put("state", "end")
+        put("session", sessionId)
+        put("reason", reason)
+        put("detail", detail)
+        put("duration_ms", durationMs)
+    }
+
     fun secondaryLens(state: String, reason: String) = event("secondary_lens") {
         put("state", state)
         put("reason", reason)
