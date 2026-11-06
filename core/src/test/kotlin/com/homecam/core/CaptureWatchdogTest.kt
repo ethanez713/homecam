@@ -178,4 +178,16 @@ class CaptureWatchdogTest {
         assertEquals(0f, stopped.framesPerSecond, 0.001f)
         assertNull(stopped.signal)
     }
+
+    @Test
+    fun `reset clears blindness so a later stop is not a stalled capture`() {
+        sample(nowMs = 0, frameCount = 1)
+        sample(nowMs = 15_000, frameCount = 1)
+        assertTrue(watchdog.isBlind)
+        watchdog.reset()
+        assertFalse(watchdog.isBlind)
+        assertNull(sample(nowMs = 16_000, frameCount = 1, running = false).signal)
+        assertNull(sample(nowMs = 40_000, frameCount = 1, running = true).signal)
+        assertFalse(watchdog.isBlind)
+    }
 }

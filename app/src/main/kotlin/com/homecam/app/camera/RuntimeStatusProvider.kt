@@ -46,6 +46,7 @@ class RuntimeStatusProvider(private val graph: AppGraph, private val node: Camer
             .setViewersWithAccess(node.accessCount.value)
             .setCameraAlias(graph.settings.current.alias)
             .setSecondaryPaused(secondaryPaused)
+            .setPrivacyMode(graph.settings.current.privacyMode)
             .also { hardware?.fill(it) }
             .build()
     }

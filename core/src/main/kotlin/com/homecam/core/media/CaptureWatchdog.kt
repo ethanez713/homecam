@@ -41,6 +41,18 @@ class CaptureWatchdog(
         attemptAtMs = nowMs
     }
 
+    /** Forgets a stall. A capture that was stopped on purpose is not waiting to be restarted. */
+    fun reset() {
+        blind = false
+        wasRunning = false
+        hasSample = false
+        lastCount = 0L
+        lastFrameAtMs = 0L
+        lastSampleAtMs = 0L
+        attemptAtMs = null
+        escalated = false
+    }
+
     fun observe(sample: Sample): Observation {
         val framesAdvanced = hasSample && sample.frameCount > lastCount
         val elapsed = if (hasSample) sample.nowMs - lastSampleAtMs else 0L

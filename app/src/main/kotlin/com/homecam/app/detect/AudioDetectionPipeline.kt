@@ -31,13 +31,14 @@ class AudioDetectionPipeline(
 
     private val inference = Any()
     @Volatile private var closed = false
+    @Volatile private var privacy = false
     @Volatile private var gate = SoundGate(DEFAULT_THRESHOLD_DB)
     @Volatile private var gateThreshold = DEFAULT_THRESHOLD_DB
 
     val classifierAvailable: Boolean get() = classifier != null
 
     /** Whether a microphone path is actually feeding detection — the privacy check for GATE-E. */
-    val listening: Boolean get() = tap.running || (live && shouldListen(settings()))
+    val listening: Boolean get() = !privacy && (tap.running || (live && shouldListen(settings())))
 
     var onListen: (feed: String, started: Boolean, reason: String) -> Unit = { _, _, _ -> }
 
@@ -66,6 +67,13 @@ class AudioDetectionPipeline(
         apply(AudioListen.VIEWER_LIVE)
     }
 
+    /** Privacy mode releases the microphone even when the mic and sound settings stay on. */
+    fun setPrivacy(on: Boolean) {
+        if (closed) return
+        privacy = on
+        apply(if (on) AudioListen.PRIVACY else AudioListen.ENABLED)
+    }
+
     /** Called on WebRTC's audio thread with whatever its recorder captured. */
     fun onLiveSamples(samples: JavaAudioDeviceModule.AudioSamples) {
         if (!live || !shouldListen(settings())) return
@@ -74,7 +82,7 @@ class AudioDetectionPipeline(
     }
 
     private fun shouldListen(snapshot: SettingsSnapshot) =
-        snapshot.microphone && snapshot.soundDetection.enabled
+        !privacy && snapshot.microphone && snapshot.soundDetection.enabled
 
     /** The tap thread may be mid-classification; see [DetectionPipeline.close]. */
     fun close() {
@@ -96,6 +104,7 @@ class AudioDetectionPipeline(
         val snapshot = settings()
         val shouldListen = shouldListen(snapshot)
         val reason = when {
+            privacy -> AudioListen.PRIVACY
             !snapshot.microphone -> AudioListen.MIC_OFF
             !snapshot.soundDetection.enabled -> AudioListen.SOUND_DETECTION_OFF
             else -> trigger
@@ -117,6 +126,7 @@ class AudioDetectionPipeline(
     }
 
     private fun onWindow(waveform: FloatArray, levelDb: Float, nowMs: Long) {
+        if (privacy) return
         val snapshot = settings()
         if (!snapshot.microphone || !snapshot.soundDetection.enabled) return
         // Armed gates acting on sound just as it gates acting on vision — a disarmed camera

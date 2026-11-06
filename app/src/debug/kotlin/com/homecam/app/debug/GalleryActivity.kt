@@ -235,6 +235,9 @@ private fun Screen(name: String) {
             LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null), null, {})
         }
         "live_finding" -> Shell(CameraTab.LIVE, armed = false) { LiveScreen(LiveState.Locating("Front door"), null, {}) }
+        "live_privacy" -> Shell(CameraTab.LIVE) {
+            LiveScreen(LiveState.Privacy, null, {}, onTurnOffPrivacy = {})
+        }
         "live_failed" -> Shell(CameraTab.LIVE) {
             LiveScreen(
                 LiveState.Failed(

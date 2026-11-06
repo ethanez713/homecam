@@ -37,6 +37,7 @@ object Controls {
         const val LOW_LIGHT = 4
         const val ROTATION = 7
         const val LENS = 10
+        const val PRIVACY_MODE = 11
         const val DETECTION_MODE = 16
         const val DETECTION_SCHEDULE = 17
         const val DETECTION_ZONE = 18

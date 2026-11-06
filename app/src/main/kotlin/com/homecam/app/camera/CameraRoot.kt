@@ -142,6 +142,18 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
                     graph.audit.record(AuditEvent.Kind.SETTINGS_CHANGED, viewerLabel = ON_THIS_CAMERA, detail = "recording ${mode.name.lowercase()}")
                 }
             },
+            privacyMode = settings.privacyMode,
+            onPrivacyMode = { on ->
+                scope.launch {
+                    CameraService.privacyChangeSource = CameraService.PRIVACY_SOURCE_LOCAL
+                    graph.settings.update { setPrivacyMode(on) }
+                    graph.audit.record(
+                        AuditEvent.Kind.SETTINGS_CHANGED,
+                        viewerLabel = ON_THIS_CAMERA,
+                        detail = "privacy mode",
+                    )
+                }
+            },
             protection = HealthProtocol.configOf(settings),
             onProtection = { protection ->
                 scope.launch {

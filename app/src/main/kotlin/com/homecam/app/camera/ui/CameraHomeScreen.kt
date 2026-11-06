@@ -70,6 +70,8 @@ fun CameraHomeScreen(
     projectedDays: Double?,
     onArmedChange: (Boolean) -> Unit,
     onRecordingMode: (RecordingMode) -> Unit,
+    privacyMode: Boolean = false,
+    onPrivacyMode: (Boolean) -> Unit = {},
     protection: HealthConfig,
     onProtection: (HardwareProtection) -> Unit,
     onManage: () -> Unit,
@@ -143,7 +145,16 @@ fun CameraHomeScreen(
             }
 
             Eyebrow("Recording")
-            PaperCard(padding = 0.dp) { RecordingModeControl(recordingMode, projectedDays, onRecordingMode) }
+            PaperCard(padding = 0.dp) {
+                SwitchRow(
+                    "Privacy mode — camera off",
+                    privacyMode,
+                    onPrivacyMode,
+                    meta = "Stops the camera capturing anything",
+                )
+                Rule()
+                RecordingModeControl(recordingMode, projectedDays, onRecordingMode)
+            }
 
             Eyebrow("Protection")
             PaperCard(padding = 0.dp) { HardwareProtectionControl(protection, onProtection) }

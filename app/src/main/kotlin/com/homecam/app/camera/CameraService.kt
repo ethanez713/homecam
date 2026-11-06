@@ -45,7 +45,9 @@ import com.homecam.core.health.RecordingTimer
 import com.homecam.core.media.AutoRotation
 import com.homecam.core.media.CaptureWatchdog
 import com.homecam.core.rpc.Controls
+import com.homecam.core.rpc.RpcException
 import com.homecam.proto.AuditEvent
+import com.homecam.proto.RpcError
 import com.homecam.proto.Rotation
 import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
@@ -108,6 +110,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     private var spotlightSinceMs = 0L
     @Volatile private var lastReminderMs = 0L
     private val watchdog = CaptureWatchdog()
+    private val captureLock = Any()
+    /** What onCreate already applied, so the first settings replay is not a second change. */
+    private var privacyApplied = false
     private var lastResumeAtMs: Long? = null
     private val rotationLock = Any()
     private val rotationHandler = Handler(Looper.getMainLooper())
@@ -138,6 +143,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val sirenInterrupted = Siren.recoverInterrupted(this)
         graph = AppGraph.get(this)
         node = graph.cameraNode
+        privacyApplied = graph.settings.current.privacyMode
         graph.diagnostics.start(startReason, sirenInterrupted = sirenInterrupted)
         startReason = "restart"
         createChannel()
@@ -150,6 +156,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             lensId = LensSelections.primaryOf(graph.settings.current),
             lens = selectedLens(),
             reportManual = true,
+            startCapture = !privacyApplied,
         )
         powerSaving = PowerSaving(
             setSaving = { saving ->
@@ -201,7 +208,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         ).also {
             it.onSound = { powerSaving.release(PowerSavingReason.SOUND) }
             it.onListen = { feed, started, reason -> graph.diagnostics.audioListen(feed, started, reason) }
-            it.sync()
+            if (privacyApplied) it.setPrivacy(true) else it.sync()
         }
         WebRtc.capturedAudio = { audioDetection.onLiveSamples(it) }
         ClipPruneWorker.schedule(this)
@@ -211,7 +218,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         observeHardwareProtection()
         observeSoundSettings()
         observeRotation()
+        observePrivacy()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
+        runningInstance = this
         running.value = true
         watchFrames()
     }
@@ -232,6 +241,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     override fun onDestroy() {
+        if (runningInstance === this) runningInstance = null
         stopOrientationListener()
         running.value = false
         blind.value = false
@@ -276,9 +286,15 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
     }
 
+    private fun statusBody(viewerLabel: String?): String = when {
+        privacyOn() -> "Privacy mode"
+        viewerLabel == null -> "Watching. No one is connected."
+        else -> "● LIVE — $viewerLabel is watching"
+    }
+
     private fun idleNotification(): Notification = notification(
         title = graph.settings.current.alias,
-        body = "Watching. No one is connected.",
+        body = statusBody(null),
     )
 
     private fun notification(title: String, body: String): Notification {
@@ -306,8 +322,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(
             NOTIFICATION_ID,
-            if (viewerLabel == null) idleNotification()
-            else notification(graph.settings.current.alias, "● LIVE — $viewerLabel is watching"),
+            notification(graph.settings.current.alias, statusBody(viewerLabel)),
         )
     }
 
@@ -407,6 +422,17 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     private fun watchFrames() {
+        if (privacyOn()) {
+            watchdog.observe(
+                CaptureWatchdog.Sample(
+                    nowMs = SystemClock.elapsedRealtime(),
+                    running = false,
+                    frameCount = if (::primary.isInitialized) capture.frameCount else 0L,
+                ),
+            )
+            server?.statusProvider?.captureFps = 0f
+            return
+        }
         val observation = watchdog.observe(
             CaptureWatchdog.Sample(
                 nowMs = SystemClock.elapsedRealtime(),
@@ -457,7 +483,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
      * [RESUME_COOLDOWN_MS] is ignored.
      */
     private fun resumeCapture(done: () -> Unit) {
-        if (!::primary.isInitialized || !watchdog.isBlind) {
+        if (privacyOn() || !::primary.isInitialized || !watchdog.isBlind) {
             done()
             return
         }
@@ -478,13 +504,17 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         lifecycleScope.launch {
             try {
                 endLive(Bye.Reason.CAMERA_DISABLED, "restarting capture")
-                val settings = graph.settings.current
-                pipelines().forEach { pipeline ->
-                    pipeline.capture.stop()
-                    pipeline.capture.start(
-                        mask = LensRegions.maskFor(settings, pipeline.lensId),
-                        lens = pipeline.lens,
-                    )
+                synchronized(captureLock) {
+                    if (!privacyOn()) {
+                        val settings = graph.settings.current
+                        pipelines().forEach { pipeline ->
+                            pipeline.capture.stop()
+                            pipeline.capture.start(
+                                mask = LensRegions.maskFor(settings, pipeline.lensId),
+                                lens = pipeline.lens,
+                            )
+                        }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -498,11 +528,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
     }
 
-    private fun currentForegroundNotification(): Notification {
-        val viewer = liveViewer.value
-        return if (viewer == null) idleNotification()
-        else notification(graph.settings.current.alias, "● LIVE — $viewer is watching")
-    }
+    private fun currentForegroundNotification(): Notification =
+        notification(graph.settings.current.alias, statusBody(liveViewer.value))
 
     private fun showCameraPausedNotification() {
         getSystemService(NotificationManager::class.java)
@@ -588,6 +615,17 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     private fun reconcileSecondary(reason: String) {
+        if (privacyOn()) {
+            if (reason == "selection") secondaryBindFailed = false
+            val wanted = validatedSecondary()
+            val running = secondary
+            if (running != null && (wanted == null || running.lensId != wanted.id)) {
+                stopSecondary()
+                announceSecondary(on = false, reason = "selection")
+            }
+            publishPaused(wanted != null && secondary == null)
+            return
+        }
         if (reason == "selection") secondaryBindFailed = false
         val wanted = validatedSecondary()
         if (secondaryBindFailed) {
@@ -627,12 +665,20 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     private fun startSecondary(entry: LensEntry) {
-        // The proven pair names the largest size both lenses held. The second lens also
-        // stays at or below whatever the primary is running right now.
-        val format = cappedFormat(entry.id, capture.format)
-        val pipeline = openPipeline(entry.id, entry, reportManual = false, format = format)
-        secondary = pipeline
-        live?.media?.onCaptureRunning(entry.id, pipeline.capture)
+        if (privacyOn()) return
+        synchronized(captureLock) {
+            if (privacyOn()) return
+            // The proven pair names the largest size both lenses held. The second lens also
+            // stays at or below whatever the primary is running right now.
+            val format = cappedFormat(entry.id, capture.format)
+            val pipeline = openPipeline(entry.id, entry, reportManual = false, format = format)
+            if (privacyOn()) {
+                pipeline.stop()
+                return
+            }
+            secondary = pipeline
+            live?.media?.onCaptureRunning(entry.id, pipeline.capture)
+        }
     }
 
     private fun stopSecondary() {
@@ -692,6 +738,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         lens: LensEntry?,
         reportManual: Boolean,
         format: ContinuousCapture.Format? = null,
+        startCapture: Boolean = true,
     ): LensPipeline {
         val pipeCapture = ContinuousCapture(this, this, binder, bindFirst = !::primary.isInitialized)
         val inherit = ::primary.isInitialized
@@ -700,13 +747,17 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             pipeCapture.setPowerSaving(powerSaving.isEngaged)
             pipeCapture.setThermalThrottle(captureThrottled)
         }
-        pipeCapture.start(
-            format = format ?: pipeCapture.format,
-            mask = LensRegions.maskFor(graph.settings.current, lensId),
-            lens = lens,
-        )
+        if (startCapture) {
+            pipeCapture.start(
+                format = format ?: pipeCapture.format,
+                mask = LensRegions.maskFor(graph.settings.current, lensId),
+                lens = lens,
+            )
+        } else if (format != null) {
+            pipeCapture.setFormat(format)
+        }
         val pipeRecorder = Recorder(graph, pipeCapture, clips, lensId).also { created ->
-            created.start()
+            if (startCapture) created.start() else created.setSuppressed(true)
             created.setArmed(graph.settings.current.armed)
             created.setMode(graph.settings.current.recordingMode)
             if (inherit) created.setCap(hardware.state.cap)
@@ -798,6 +849,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     // ------------------------------------------------------- MediaController
 
     override suspend fun startSession(viewerFingerprint: String, config: SessionConfig): SessionStatus {
+        refusePrivate()
         val peer = server?.sessionOf(viewerFingerprint)
             ?: throw IllegalStateException("no authenticated connection for $viewerFingerprint")
 
@@ -1027,6 +1079,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     override suspend fun snapshot(): com.homecam.proto.Snapshot {
+        refusePrivate()
         val jpeg = capture.snapshotJpeg()
             ?: throw com.homecam.core.rpc.RpcException(
                 com.homecam.proto.RpcError.Code.UNAVAILABLE, "capture is not running",
@@ -1039,6 +1092,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     override fun recordManually(seconds: Int, start: Boolean) {
+        if (start) refusePrivate()
         if (start && recorder.manualRecordingRefused) {
             throw com.homecam.core.rpc.RpcException(
                 com.homecam.proto.RpcError.Code.UNAVAILABLE,
@@ -1054,6 +1108,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     override fun setSiren(on: Boolean, seconds: Int, by: Actor?) {
+        if (on) refusePrivate()
         graph.diagnostics.siren(on, seconds)
         if (on) {
             siren.start(seconds.takeIf { it > 0 } ?: 30)
@@ -1185,6 +1240,83 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         if (live?.peer === session) graph.scope.launch { endLive(reason, "connection closed") }
     }
 
+    private fun privacyOn(): Boolean = ::graph.isInitialized && graph.settings.current.privacyMode
+
+    private fun refusePrivate() {
+        if (!privacyOn()) return
+        throw RpcException(RpcError.Code.FAILED_PRECONDITION, "CAMERA_DISABLED: ${PRIVACY_DETAIL}")
+    }
+
+    /** A stored flag is not a change until it differs from what this process already applied. */
+    private fun observePrivacy() {
+        lifecycleScope.launch {
+            graph.settings.settings.map { it.privacyMode }.distinctUntilChanged().collect { on ->
+                val source = privacyChangeSource.also { privacyChangeSource = PRIVACY_SOURCE_LOCAL }
+                if (on == privacyApplied) return@collect
+                privacyApplied = on
+                graph.diagnostics.privacyMode(on, source)
+                if (on) enterPrivacy() else resumeFromPrivacy()
+            }
+        }
+    }
+
+    private suspend fun enterPrivacy() {
+        if (!::primary.isInitialized) return
+        endLive(Bye.Reason.CAMERA_DISABLED, PRIVACY_DETAIL)
+        synchronized(captureLock) {
+            pipelines().forEach { quiesce(it) }
+        }
+        if (::audioDetection.isInitialized) audioDetection.setPrivacy(true)
+        watchdog.reset()
+        blind.value = false
+        cancelCameraPausedNotification()
+        showLive(null)
+    }
+
+    private fun resumeFromPrivacy() {
+        synchronized(captureLock) {
+            if (!privacyOn() && ::primary.isInitialized) {
+                reopen(primary)
+                val second = secondary
+                if (second != null && !secondaryBindFailed && hardware.state.secondaryAllowed) reopen(second)
+            }
+        }
+        if (!privacyOn()) {
+            if (::audioDetection.isInitialized) audioDetection.setPrivacy(false)
+            reconcileSecondary("privacy")
+        }
+        showLive(liveViewer.value)
+    }
+
+    private fun quiesce(pipeline: LensPipeline) {
+        pipeline.recorder.setSuppressed(true)
+        pipeline.capture.removeSink(pipeline.detection)
+        pipeline.capture.stop()
+    }
+
+    private fun reopen(pipeline: LensPipeline) {
+        val settings = graph.settings.current
+        pipeline.capture.setOrientation(appliedDegrees(pipeline.lens?.front == true))
+        if (!pipeline.capture.running) {
+            pipeline.capture.start(
+                mask = LensRegions.maskFor(settings, pipeline.lensId),
+                lens = pipeline.lens,
+            )
+        }
+        pipeline.capture.addSink(pipeline.detection)
+        pipeline.recorder.setArmed(settings.armed)
+        pipeline.recorder.setMode(settings.recordingMode)
+        if (::hardware.isInitialized) pipeline.recorder.setCap(hardware.state.cap)
+        pipeline.recorder.setSuppressed(false)
+    }
+
+    /** True when any lens still has the camera open. */
+    fun captureRunning(): Boolean = ::primary.isInitialized && pipelines().any { it.capture.running }
+
+    /** Frames delivered since this process opened the pipelines. Stopping capture does not reset it. */
+    fun deliveredFrames(): Long =
+        if (::primary.isInitialized) pipelines().sumOf { it.capture.frameCount } else 0L
+
     private suspend fun endLive(reason: Bye.Reason, detail: String, expected: LiveSession? = live) {
         val ending = expected ?: return
         if (live !== ending) return
@@ -1241,6 +1373,16 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
          * after killing it — the event GATE-C point 4 looks for.
          */
         @Volatile var startReason: String = "system"
+
+        const val PRIVACY_DETAIL = "privacy mode"
+        const val PRIVACY_SOURCE_LOCAL = "local"
+        const val PRIVACY_SOURCE_VIEWER = "viewer"
+
+        /** Set before a settings write publishes, so the observer can say who changed it. */
+        @Volatile var privacyChangeSource: String = PRIVACY_SOURCE_LOCAL
+
+        @Volatile var runningInstance: CameraService? = null
+            private set
 
         private val running = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = running.asStateFlow()

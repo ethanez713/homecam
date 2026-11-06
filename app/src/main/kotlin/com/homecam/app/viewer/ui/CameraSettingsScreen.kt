@@ -55,6 +55,7 @@ fun CameraSettingsScreen(
     onMicrophone: (Boolean) -> Unit,
     onAutoRotate: (Boolean) -> Unit,
     onRecordingMode: (RecordingMode) -> Unit,
+    onPrivacyMode: (Boolean) -> Unit = {},
     projectedDays: Double?,
     onDetectionMode: (person: Boolean, vehicle: Boolean, pet: Boolean, packages: Boolean) -> Unit,
     autoSpotlightSupported: Boolean,
@@ -104,7 +105,16 @@ fun CameraSettingsScreen(
         }
 
         Eyebrow("Recording")
-        PaperCard(padding = 0.dp) { RecordingModeControl(settings.recordingMode, projectedDays, onRecordingMode) }
+        PaperCard(padding = 0.dp) {
+            SwitchRow(
+                "Privacy mode — camera off",
+                settings.privacyMode,
+                onPrivacyMode,
+                meta = "Stops the camera capturing anything",
+            )
+            Rule()
+            RecordingModeControl(settings.recordingMode, projectedDays, onRecordingMode)
+        }
 
         if (protection != null) {
             Eyebrow("Protection")

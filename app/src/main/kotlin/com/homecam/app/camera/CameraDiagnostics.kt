@@ -276,6 +276,12 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
         put("source", source)
     }
 
+    /** [state] is "on" or "off". [source] is "viewer" or "local". */
+    fun privacyMode(on: Boolean, source: String) = event("privacy_mode") {
+        put("state", if (on) "on" else "off")
+        put("source", source)
+    }
+
     fun lensSwitch(from: String, to: String, captureRunning: Boolean) = event("lens_switch") {
         put("from", from)
         put("to", to)

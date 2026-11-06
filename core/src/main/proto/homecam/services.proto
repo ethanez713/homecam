@@ -83,6 +83,8 @@ message SettingsSnapshot {
   Rotation rotation = 7;
   // Absent until chosen, which reads as back-wide (Phase 12).
   LensSelection lens = 10;
+  // The camera captures nothing while this is set. Off when absent.
+  bool privacy_mode = 11;
   DetectionMode detection_mode = 16;
   DetectionSchedule detection_schedule = 17;
   reserved 18, 19;
@@ -157,6 +159,8 @@ message Rotation {
   bool auto = 1;
   uint32 degrees = 2;
 }
+
+message PrivacyMode { bool enabled = 1; }
 
 message DetectionMode {
   bool person = 1;
@@ -250,6 +254,8 @@ message RuntimeStatus {
   RecordingMode requested_recording_mode = 29;
   // True while a selected second lens is paused for heat or a recording cap.
   bool secondary_paused = 30;
+  // Set while privacy mode is on, so a viewer can show that without opening a session.
+  bool privacy_mode = 31;
 
   // THERMAL_UNKNOWN is below API 29, where only battery_temp_c speaks for heat.
   enum Thermal {

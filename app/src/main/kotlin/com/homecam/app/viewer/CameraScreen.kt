@@ -27,6 +27,7 @@ import androidx.lifecycle.compose.currentStateAsState
 import androidx.activity.compose.BackHandler
 import com.homecam.app.AppGraph
 import com.homecam.app.alerts.AlertKeys
+import com.homecam.app.camera.CameraService
 import com.homecam.app.alerts.AlertPreferences
 import com.homecam.app.alerts.AlertSubscriber
 import com.homecam.app.camera.ui.AuditScreen
@@ -102,6 +103,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     val partnerId = LensSelections.partner(selectedLens, lensPairs, secondaryLens)
     val lensInfo = capabilities?.lensesList?.firstOrNull { it.id == selectedLens }
     var negotiatedLenses by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<List<String>?>(null) }
+    var phrase by remember(camera.fingerprint, attempt, foreground) { mutableStateOf("") }
+    var via by remember(camera.fingerprint, attempt, foreground) { mutableStateOf("") }
+    var mediaStarted by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
+    // Survives a reconnect: Turn off asks the next connection to clear privacy before watching.
+    var disarmPrivacy by remember(camera.fingerprint) { mutableStateOf(false) }
     val alertKeys = remember { AlertKeys(context) }
     var alertsOn by remember { mutableStateOf(AlertPreferences.enabled(context)) }
     var healthAlertsOn by remember { mutableStateOf(AlertPreferences.health(context)) }
@@ -139,21 +145,36 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
             val client = node.connect(camera)
             val opened = ViewerSession(context, client)
             session = opened
-            state = LiveState.Connected(
-                client.verificationPhrase.orEmpty(),
-                null,
-                runCatching { client.link.runtimeStatus() }.getOrNull(),
-                null,
-                via = if (address.host == camera.remoteHost) "Remote" else "Home network",
-            )
+            val status = runCatching { client.link.runtimeStatus() }.getOrNull()
             settings = runCatching { client.link.settings() }.getOrNull()
             capabilities = client.link.capabilities()
+            phrase = client.verificationPhrase.orEmpty()
+            via = if (address.host == camera.remoteHost) "Remote" else "Home network"
+            val turningOff = disarmPrivacy
+            if (turningOff) {
+                settings = client.link.setPrivacyMode(false)
+                disarmPrivacy = false
+            }
+            // Status is what the camera is doing now. A settings read can lag behind it.
+            val privateNow = !turningOff && (status?.privacyMode == true || settings?.privacyMode == true)
+            if (privateNow) {
+                state = LiveState.Privacy
+                return@runCatching
+            }
+            val fresh = if (turningOff) runCatching { client.link.runtimeStatus() }.getOrNull() else status
+            state = LiveState.Connected(phrase, null, fresh, null, via)
+            mediaStarted = true
             val startingLenses = settings?.lens?.secondaryList?.toList()
             opened.start()
             negotiatedLenses = startingLenses ?: emptyList()
         }.onFailure {
             Log.w(TAG, "live session to ${camera.alias} failed at ${state::class.simpleName}", it)
-            state = LiveState.Failed(describeFailure(it))
+            mediaStarted = false
+            state = if (it.message?.contains(CameraService.PRIVACY_DETAIL) == true) {
+                LiveState.Privacy
+            } else {
+                LiveState.Failed(describeFailure(it))
+            }
         }
     }
 
@@ -163,6 +184,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
         val presence by open.presence.collectAsState()
         val ended by open.ended.collectAsState()
         LaunchedEffect(videos, presence, ended, selectedLens) {
+            if (ended?.second == CameraService.PRIVACY_DETAIL) {
+                mediaStarted = false
+                state = LiveState.Privacy
+                return@LaunchedEffect
+            }
             val connected = state as? LiveState.Connected ?: return@LaunchedEffect
             ended?.let { Log.w(TAG, "live session to ${camera.alias} ended: $it") }
             val picture = videos[selectedLens] ?: videos[""] ?: videos.values.firstOrNull()
@@ -184,11 +210,37 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     // The picture of the camera's health is only as good as its last reading, and a pause or a
     // timed revert can happen while this screen is open.
     LaunchedEffect(open) {
-        val link = open?.link ?: return@LaunchedEffect
+        val watching = open ?: return@LaunchedEffect
+        val link = watching.link
         while (true) {
-            kotlinx.coroutines.delay(STATUS_REFRESH_MS)
+            kotlinx.coroutines.delay(if (state is LiveState.Privacy) PRIVACY_STATUS_REFRESH_MS else STATUS_REFRESH_MS)
             val fresh = runCatching { link.runtimeStatus() }.getOrNull() ?: continue
-            (state as? LiveState.Connected)?.let { state = it.copy(status = fresh) }
+            when {
+                fresh.privacyMode -> {
+                    if (state !is LiveState.Privacy) {
+                        mediaStarted = false
+                        state = LiveState.Privacy
+                    }
+                }
+                state is LiveState.Privacy && !mediaStarted && watching.ended.value == null -> {
+                    mediaStarted = true
+                    state = LiveState.Connected(phrase, null, fresh, null, via)
+                    val lenses = settings?.lens?.secondaryList?.toList()
+                    runCatching {
+                        watching.start()
+                        negotiatedLenses = lenses ?: emptyList()
+                    }.onFailure { error ->
+                        Log.w(TAG, "live session to ${camera.alias} failed", error)
+                        mediaStarted = false
+                        state = if (error.message?.contains(CameraService.PRIVACY_DETAIL) == true) {
+                            LiveState.Privacy
+                        } else {
+                            LiveState.Failed(describeFailure(error))
+                        }
+                    }
+                }
+                else -> (state as? LiveState.Connected)?.let { state = it.copy(status = fresh) }
+            }
             runCatching { link.settings() }.getOrNull()?.let { settings = it }
         }
     }
@@ -243,6 +295,31 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
         return
     }
 
+    suspend fun turnPrivacyOff() {
+        val opened = session
+        if (opened == null || opened.ended.value != null) {
+            disarmPrivacy = true
+            attempt++
+            return
+        }
+        runCatching {
+            settings = opened.link.setPrivacyMode(false)
+            if (!mediaStarted) {
+                mediaStarted = true
+                val fresh = runCatching { opened.link.runtimeStatus() }.getOrNull()
+                state = LiveState.Connected(phrase, null, fresh, null, via)
+                val lenses = settings?.lens?.secondaryList?.toList()
+                opened.start()
+                negotiatedLenses = lenses ?: emptyList()
+            }
+        }.onFailure {
+            Log.w(TAG, "could not turn privacy mode off", it)
+            mediaStarted = false
+            disarmPrivacy = true
+            attempt++
+        }
+    }
+
     BackHandler { if (tab == CameraTab.LIVE) onExit() else tab = CameraTab.LIVE }
 
     CameraShell(
@@ -252,6 +329,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
             is LiveState.Connecting -> "Connecting"
             is LiveState.Connected -> "Connected · ${now.via.lowercase()}"
             is LiveState.Failed -> "Not connected"
+            is LiveState.Privacy -> "Privacy mode"
         },
         armed = settings?.armed,
         tab = tab,
@@ -346,6 +424,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                     )
                 },
                 onRetry = { attempt++ },
+                onTurnOffPrivacy = { scope.launch { turnPrivacyOff() } },
                 onSetRemoteAddress = { editingRemote = true },
                 onBack = onExit,
                 onShownLenses = showing@{ shown ->
@@ -453,6 +532,13 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         settings = it.link.setRotation(on, settings?.rotation?.degrees ?: 0)
                     }
                 },
+                onPrivacyMode = { on ->
+                    if (!on && state is LiveState.Privacy) {
+                        scope.launch { turnPrivacyOff() }
+                    } else {
+                        edit(scope, open, say) { settings = it.link.setPrivacyMode(on) }
+                    }
+                },
                 onRecordingMode = { mode ->
                     edit(scope, open, say) { settings = it.link.setRecordingMode(mode) }
                 },
@@ -525,7 +611,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 onDevices = { showingDevices = true },
                 onLog = { showingLog = true },
                 onForget = { scope.launch { node.forget(camera.fingerprint); onExit() } },
-                verificationPhrase = (state as? LiveState.Connected)?.phrase.orEmpty(),
+                verificationPhrase = phrase.ifBlank { (state as? LiveState.Connected)?.phrase.orEmpty() },
                 fingerprint = camera.fingerprint,
             )
         }
@@ -549,6 +635,7 @@ private fun edit(
 
 private const val TOAST_MS = 2_800L
 private const val STATUS_REFRESH_MS = 20_000L
+private const val PRIVACY_STATUS_REFRESH_MS = 2_000L
 
 /**
  * Off the home network the remote address is the only way to the camera, and the Settings

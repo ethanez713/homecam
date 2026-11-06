@@ -40,6 +40,7 @@ import com.homecam.proto.ManualRecord
 import com.homecam.proto.Microphone
 import com.homecam.proto.Orientation
 import com.homecam.proto.PrivacyMask
+import com.homecam.proto.PrivacyMode
 import com.homecam.proto.PushToTalk
 import com.homecam.proto.Resolution
 import com.homecam.proto.RecordingModeSetting
@@ -346,6 +347,11 @@ class CameraServices(
                     .build(),
             )
         }
+        settingSetter(peer, Controls.Settings.PRIVACY_MODE) {
+            val enabled = PrivacyMode.parseFrom(it).enabled
+            CameraService.privacyChangeSource = CameraService.PRIVACY_SOURCE_VIEWER
+            setPrivacyMode(enabled)
+        }
         settingSetter(peer, Controls.Settings.LENS) { setLens(lensControl.validated(LensSelection.parseFrom(it))) }
         settingSetter(peer, Controls.Settings.DETECTION_MODE) { setDetectionMode(DetectionMode.parseFrom(it)) }
         settingSetter(peer, Controls.Settings.DETECTION_SCHEDULE) { setDetectionSchedule(DetectionSchedule.parseFrom(it)) }
@@ -524,6 +530,7 @@ class CameraServices(
         Controls.Settings.MICROPHONE -> "microphone"
         Controls.Settings.LOW_LIGHT -> "low light"
         Controls.Settings.ROTATION -> "rotation"
+        Controls.Settings.PRIVACY_MODE -> "privacy mode"
         Controls.Settings.LENS -> LensControl.AUDIT_DETAIL
         Controls.Settings.DETECTION_MODE -> "detection mode"
         Controls.Settings.DETECTION_SCHEDULE -> "detection schedule"

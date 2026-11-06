@@ -78,6 +78,7 @@ sealed interface LiveState {
         val videos: Map<String, VideoTrack> = emptyMap(),
     ) : LiveState
     data class Failed(val message: String) : LiveState
+    data object Privacy : LiveState
 }
 
 data class LiveControls(
@@ -111,6 +112,7 @@ fun LiveScreen(
     state: LiveState,
     controls: LiveControls?,
     onRetry: () -> Unit,
+    onTurnOffPrivacy: () -> Unit = {},
     /** Offered when the connection fails: the address lives on this phone, so it needs no camera. */
     onSetRemoteAddress: (() -> Unit)? = null,
     /** Leaves the camera; drawn only where the shell's own bar is not, in landscape. */
@@ -132,6 +134,13 @@ fun LiveScreen(
                 PrimaryButton("Try again", onRetry, icon = R.drawable.lucide_refresh_cw)
                 if (onSetRemoteAddress != null) QuietButton("Set remote address", onSetRemoteAddress)
             }
+        }
+
+        is LiveState.Privacy -> EmptyState(
+            line = "Privacy mode is on",
+            icon = R.drawable.lucide_video,
+        ) {
+            PrimaryButton("Turn off", onTurnOffPrivacy)
         }
 
         is LiveState.Connected ->

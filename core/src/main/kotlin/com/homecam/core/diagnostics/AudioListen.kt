@@ -7,6 +7,7 @@ object AudioListen {
 
     const val MIC_OFF = "mic_off"
     const val SOUND_DETECTION_OFF = "sound_detection_off"
+    const val PRIVACY = "privacy"
     const val VIEWER_LIVE = "viewer_live"
     const val SERVICE_STOP = "service_stop"
 

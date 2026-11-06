@@ -36,6 +36,9 @@ class Recorder(
     @Volatile private var armed = false
     @Volatile private var mode = RecordingMode.DETECTION
     @Volatile private var cap = Cap.NONE
+    /** Privacy mode: the encoder stays up, but no clip may open or stay open. */
+    @Volatile private var suppressed = false
+    @Volatile private var recordingStarted = false
     @Volatile private var manualUntilMs = 0L
     @Volatile private var detectionUntilMs = 0L
     @Volatile private var pendingManualClipId: String? = null
@@ -73,13 +76,26 @@ class Recorder(
     }
 
     fun start() {
+        if (recordingStarted) return
         recorder.start(WebRtc.eglBase.eglBaseContext)
         capture.addSink(recorder)
+        recordingStarted = true
+    }
+
+    /**
+     * Holds recording without releasing the encoder. Stopping it forgets the format the
+     * muxer needs, and the next tick would open a clip that can never be written.
+     */
+    fun setSuppressed(on: Boolean) {
+        suppressed = on
+        if (on) endClip() else if (!recordingStarted) start()
     }
 
     fun stop() {
+        suppressed = true
         capture.removeSink(recorder)
         recorder.stop()
+        recordingStarted = false
     }
 
     fun setArmed(armed: Boolean) {
@@ -112,6 +128,7 @@ class Recorder(
      * nothing detected and nobody watching.
      */
     fun tick() {
+        if (suppressed) return
         if (recorder.recording && !shouldKeepRecording()) endClip()
         else if (!recorder.recording && shouldKeepRecording()) beginClip()
     }
@@ -124,7 +141,7 @@ class Recorder(
         // OFF keeps nothing, so a detection is not recorded — the alert path is separate
         // and still fires. In CONTINUOUS beginClip is a no-op on the already-open segment,
         // and the detection is labelled and written into it just the same.
-        if (effectiveMode == RecordingMode.OFF) return
+        if (suppressed || effectiveMode == RecordingMode.OFF) return
         detectionUntilMs = nowMs + DETECTION_TAIL_MS
         detections.forEach { labelsInClip += it.category }
         beginClip()
@@ -147,7 +164,7 @@ class Recorder(
      * carries no bounding box — only a label, so the viewer can tell why the clip exists.
      */
     fun onSoundEvent(category: String, nowMs: Long) {
-        if (effectiveMode == RecordingMode.OFF) return
+        if (suppressed || effectiveMode == RecordingMode.OFF) return
         detectionUntilMs = nowMs + DETECTION_TAIL_MS
         labelsInClip += category
         beginClip()
@@ -175,7 +192,7 @@ class Recorder(
 
     /** A viewer asking for a clip right now, independent of arming. */
     fun recordManually(seconds: Int) {
-        if (manualRecordingRefused) return
+        if (suppressed || manualRecordingRefused) return
         manualUntilMs = System.currentTimeMillis() + seconds.coerceIn(5, 300) * 1000L
         beginClip()
         // The open clip — freshly begun, or the continuous segment already running — is
@@ -204,7 +221,7 @@ class Recorder(
      * a gap-free record is worth that cost, and retention is what makes it survivable — but
      * it is a choice the user makes, not the default. A manual request overrides the mode.
      */
-    private fun shouldKeepRecording(): Boolean = RecordingGate.shouldKeepRecording(
+    private fun shouldKeepRecording(): Boolean = !suppressed && RecordingGate.shouldKeepRecording(
         mode, cap, armed, System.currentTimeMillis(), manualUntilMs, detectionUntilMs,
     )
 
