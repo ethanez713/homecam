@@ -393,7 +393,8 @@ so it opens directly rather than as a zoom ratio below 1.0 on the logical camera
 camera there exposes its physical lenses, so two back lenses can never run at once.
 
 The S20U's 4× telephoto is not reachable and is not to be re-investigated: it is HAL camera 52
-(19 mm, inside logical cameras 20 and 21), and Samsung lists only ids 0–4 to third-party apps —
+(19 mm, inside logical cameras 20 and 21), and Samsung lists only ids 0–4 to apps outside a
+package allowlist compiled into `libcameraservice.so` (its own camera app, Snapchat, …) —
 `getCameraCharacteristics` and `openCamera` on 52, 20, 21 and 23 throw "Unknown camera ID". Id 4
 is the depth (ToF) sensor, `DEPTH_OUTPUT` only. Reach beyond the wide is the wide's own zoom
 (ratio 1–8, digital on id 0).
