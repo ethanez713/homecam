@@ -101,6 +101,21 @@ class CameraMediaSession(
         tracks.remove(lensId)?.let { runCatching { it.dispose() } }
     }
 
+    /**
+     * The primary pipeline now films [lensId]. Its sender keeps the stream id it was negotiated
+     * with, so only the key moves: the viewer names lenses in [setShown], and a sender still
+     * keyed by the lens the session opened on would read as hidden and stop.
+     */
+    fun onPrimaryLens(lensId: String) {
+        val old = primaryLensId
+        // A primary taking the secondary's lens changes the secondary too, and the viewer opens a new session.
+        if (lensId == old || old.isEmpty() || senders.containsKey(lensId)) return
+        senders.remove(old)?.let { senders[lensId] = it }
+        tracks.remove(old)?.let { tracks[lensId] = it }
+        captures.remove(old)?.let { captures[lensId] = it }
+        primaryLensId = lensId
+    }
+
     /** Lenses the viewer has on screen. Any other sender drops its track; recorders are not involved. */
     fun setShown(lensIds: Collection<String>) {
         shown = lensIds.toSet()

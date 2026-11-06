@@ -591,6 +591,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     private fun applyPrimaryLens(id: String) {
         if (primary.lensId != id) graph.diagnostics.lensSwitch(primary.lensId, id, primary.capture.running)
+        live?.media?.onPrimaryLens(id)
         primary.lensId = id
         primary.recorder.lensId = id
         val entry = LensSource.lens(this, id) ?: return

@@ -44,8 +44,9 @@ import org.webrtc.PeerConnection
 import org.webrtc.SessionDescription
 
 /**
- * A primary lens switch during a live view rebinds the camera under a running WebRTC track.
- * The live video has to keep flowing on the same session, and the main thread has to stay free.
+ * A primary lens switch during a live view rebinds the camera under a running WebRTC track, and
+ * the viewer then names the new lens as the one on screen. The live video has to keep flowing on
+ * the same session, and the main thread has to stay free.
  */
 @RunWith(AndroidJUnit4::class)
 class LiveLensSwitchTest {
@@ -155,6 +156,10 @@ class LiveLensSwitchTest {
             Thread.sleep(1_500)
             for (lens in sequence) {
                 primary.setLens(lens!!)
+                // What the service and the viewer do on a switch: the service re-keys the primary
+                // sender, and the viewer reports the new lens as the one on screen.
+                session.onPrimaryLens(lens.id)
+                session.setShown(listOf(lens.id))
                 Thread.sleep(1_200)
             }
             val perSecond = (1..12).map {

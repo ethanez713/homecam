@@ -209,13 +209,13 @@ private fun LiveVideo(
 
     val picture: @Composable (Modifier) -> Unit = { modifier ->
         Box(modifier.background(Color.Black)) {
-            val big = trackFor(state, bigId, otherId = smallId)
+            val big = trackFor(state, bigId, primaryId, secondaryId)
             if (big != null) VideoSurface(big, Modifier.fillMaxSize()) else videoPlaceholder?.invoke()
             Row(Modifier.align(Alignment.TopStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Badge("Live", Tone.ACCENT, dot = true)
                 if (state.via.isNotBlank()) Badge(state.via, Tone.NEUTRAL)
             }
-            val pip = smallId?.let { trackFor(state, it, otherId = bigId) }
+            val pip = smallId?.let { trackFor(state, it, primaryId, secondaryId) }
             val showPip = secondaryId != null && smallId != null && !userClosed && !paused &&
                 (pip != null || videoPlaceholder != null)
             if (showPip) {
@@ -305,12 +305,13 @@ private fun BoxScope.LensPip(
  * The track for [lensId]. A one-lens session may deliver its only track under another key;
  * a second lens never borrows the other picture, or a swap would show the same view twice.
  */
-private fun trackFor(state: LiveState.Connected, lensId: String, otherId: String?): VideoTrack? {
+private fun trackFor(state: LiveState.Connected, lensId: String, primaryId: String, secondaryId: String?): VideoTrack? {
     val videos = state.videos
     videos[lensId]?.let { return it }
-    if (otherId != null) return null
-    videos[""]?.let { return it }
-    if (videos.size == 1) return videos.values.first()
+    // The primary's track keeps the stream id of the lens the session opened on: a primary
+    // switch changes what it films, not the track.
+    if (lensId == primaryId) videos.entries.firstOrNull { it.key != secondaryId }?.let { return it.value }
+    if (secondaryId != null) return null
     return state.video
 }
 
