@@ -53,6 +53,7 @@ fun CameraSettingsScreen(
     onArmed: (Boolean) -> Unit,
     onAlias: (String) -> Unit,
     onMicrophone: (Boolean) -> Unit,
+    onAutoRotate: (Boolean) -> Unit,
     onRecordingMode: (RecordingMode) -> Unit,
     projectedDays: Double?,
     onDetectionMode: (person: Boolean, vehicle: Boolean, pet: Boolean, packages: Boolean) -> Unit,
@@ -152,6 +153,13 @@ fun CameraSettingsScreen(
 
         Eyebrow("Camera")
         PaperCard(padding = 0.dp) {
+            SwitchRow(
+                "Auto-rotate",
+                settings.rotation.auto,
+                onAutoRotate,
+                meta = "Keep the picture upright as the camera turns",
+            )
+            Rule()
             ListRow("Name", meta = settings.alias, onClick = { editing = Field.NAME }) { Chevron() }
             Rule()
             ListRow(

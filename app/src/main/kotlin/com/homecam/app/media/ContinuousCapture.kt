@@ -6,6 +6,7 @@ import android.os.Looper
 import androidx.lifecycle.LifecycleOwner
 import com.homecam.core.lens.LensEntry
 import com.homecam.core.lens.LensRegions
+import com.homecam.core.media.AutoRotation
 import com.homecam.proto.PrivacyMask
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
@@ -17,7 +18,6 @@ import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.math.roundToInt
 
 /**
  * Capture runs for as long as the camera service does, not for as long as somebody is
@@ -131,7 +131,7 @@ open class ContinuousCapture(
 
     /** Coerces to the nearest quarter-turn; anything else is not a rotation a camera does. */
     fun setOrientation(degrees: Int) {
-        maskProcessor.orientationDegrees = (((degrees % 360) + 360) % 360 / 90.0).roundToInt() % 4 * 90
+        maskProcessor.orientationDegrees = AutoRotation.quarter(degrees)
     }
 
     /**

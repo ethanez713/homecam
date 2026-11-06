@@ -79,6 +79,8 @@ message SettingsSnapshot {
   string alias = 2;
   bool microphone = 3;
   bool low_light = 4;
+  // While auto is set the camera follows the phone. degrees is the manual quarter used otherwise.
+  Rotation rotation = 7;
   // Absent until chosen, which reads as back-wide (Phase 12).
   LensSelection lens = 10;
   DetectionMode detection_mode = 16;
@@ -150,6 +152,11 @@ message Armed { bool armed = 1; }
 message Alias { string alias = 1; }
 message Microphone { bool enabled = 1; }
 message LowLight { bool enabled = 1; }
+
+message Rotation {
+  bool auto = 1;
+  uint32 degrees = 2;
+}
 
 message DetectionMode {
   bool person = 1;

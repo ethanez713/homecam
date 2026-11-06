@@ -1,7 +1,9 @@
 package com.homecam.app.data
 
 import android.content.Context
+import com.homecam.core.media.AutoRotation
 import com.homecam.proto.RetentionPolicy
+import com.homecam.proto.Rotation
 import com.homecam.proto.SettingsSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,7 +16,7 @@ import java.io.File
  * Camera settings, held as the same [SettingsSnapshot] that goes over the wire so there
  * is one shape rather than a persistence model plus a transport model plus a mapper.
  */
-class SettingsStore(context: Context) {
+class SettingsStore(private val context: Context) {
 
     private val file = File(context.filesDir, "settings.pb")
     private val mutex = Mutex()
@@ -31,11 +33,26 @@ class SettingsStore(context: Context) {
         next
     }
 
-    private fun read(): SettingsSnapshot = runCatching {
-        SettingsSnapshot.parseFrom(file.readBytes())
-    }.getOrElse { defaults() }
+    private fun read(): SettingsSnapshot {
+        val stored = runCatching { SettingsSnapshot.parseFrom(file.readBytes()) }.getOrNull()
+        if (stored != null && stored.hasRotation()) {
+            clearLegacyOrientation()
+            return stored
+        }
+        // A quarter someone already set by hand, from before rotation lived in settings.
+        val degrees = legacyDegrees()
+        val rotation = if (degrees != 0) {
+            Rotation.newBuilder().setAuto(false).setDegrees(AutoRotation.quarter(degrees)).build()
+        } else {
+            Rotation.newBuilder().setAuto(true).build()
+        }
+        val next = (stored?.toBuilder() ?: fresh()).setRotation(rotation).build()
+        if (stored != null || degrees != 0) file.writeBytes(next.toByteArray())
+        clearLegacyOrientation()
+        return next
+    }
 
-    private fun defaults(): SettingsSnapshot = SettingsSnapshot.newBuilder()
+    private fun fresh(): SettingsSnapshot.Builder = SettingsSnapshot.newBuilder()
         .setArmed(true)
         .setAlias("Camera")
         .setMicrophone(true)
@@ -51,5 +68,19 @@ class SettingsStore(context: Context) {
                 .setMaxSizeGb(32)
                 .setMinFreeSpaceGb(8)
         )
-        .build()
+
+    private fun legacyDegrees(): Int = capturePrefs().getInt(KEY_ORIENTATION, 0)
+
+    private fun clearLegacyOrientation() {
+        val prefs = capturePrefs()
+        if (!prefs.contains(KEY_ORIENTATION)) return
+        prefs.edit().remove(KEY_ORIENTATION).commit()
+    }
+
+    private fun capturePrefs() = context.getSharedPreferences(CAPTURE_PREFS, Context.MODE_PRIVATE)
+
+    private companion object {
+        const val CAPTURE_PREFS = "homecam.capture"
+        const val KEY_ORIENTATION = "orientation_degrees"
+    }
 }

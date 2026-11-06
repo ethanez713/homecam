@@ -63,6 +63,8 @@ fun CameraHomeScreen(
     liveViewerLabel: String?,
     serving: Boolean,
     armed: Boolean,
+    autoRotate: Boolean,
+    onAutoRotate: (Boolean) -> Unit,
     hardwareBacked: Boolean,
     recordingMode: RecordingMode,
     projectedDays: Double?,
@@ -117,6 +119,13 @@ fun CameraHomeScreen(
                 SwitchRow(
                     if (armed) "Armed" else "Disarmed", armed, onArmedChange,
                     meta = if (armed) "Detecting, recording events and alerting" else "Not detecting. Nothing is recorded or alerted",
+                )
+                Rule()
+                SwitchRow(
+                    "Auto-rotate",
+                    autoRotate,
+                    onAutoRotate,
+                    meta = "Keep the picture upright as this phone turns",
                 )
             }
 

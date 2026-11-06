@@ -9,6 +9,7 @@ import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.RecordingTimer
 import com.homecam.core.lens.LensRegions
 import com.homecam.core.lens.LensSelections
+import com.homecam.core.media.AutoRotation
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcException
 import com.homecam.core.rpc.RpcPeer
@@ -43,6 +44,7 @@ import com.homecam.proto.PushToTalk
 import com.homecam.proto.Resolution
 import com.homecam.proto.RecordingModeSetting
 import com.homecam.proto.RetentionPolicy
+import com.homecam.proto.Rotation
 import com.homecam.proto.RpcError
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.RevokeViewer
@@ -281,7 +283,18 @@ class CameraServices(
             request.payload
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.ORIENTATION) { request ->
-            media().setOrientation(Orientation.parseFrom(request.payload).degrees)
+            val degrees = AutoRotation.quarter(Orientation.parseFrom(request.payload).degrees)
+            // Applied first so the status below reports it. The setting is what turns auto off and survives a restart.
+            media().setOrientation(degrees)
+            graph.settings.update {
+                setRotation(Rotation.newBuilder().setAuto(false).setDegrees(degrees).build())
+            }
+            graph.audit.record(
+                AuditEvent.Kind.SETTINGS_CHANGED,
+                viewerFingerprint = viewerFingerprint,
+                viewerLabel = viewerLabel,
+                detail = nameOfSetting(Controls.Settings.ROTATION),
+            )
             media().sessionStatus(viewerFingerprint).toByteString()
         }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.SIREN) { request ->
@@ -324,6 +337,15 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.ALIAS) { setAlias(Alias.parseFrom(it).alias) }
         settingSetter(peer, Controls.Settings.MICROPHONE) { setMicrophone(Microphone.parseFrom(it).enabled) }
         settingSetter(peer, Controls.Settings.LOW_LIGHT) { setLowLight(LowLight.parseFrom(it).enabled) }
+        settingSetter(peer, Controls.Settings.ROTATION) {
+            val asked = Rotation.parseFrom(it)
+            setRotation(
+                Rotation.newBuilder()
+                    .setAuto(asked.auto)
+                    .setDegrees(AutoRotation.quarter(asked.degrees))
+                    .build(),
+            )
+        }
         settingSetter(peer, Controls.Settings.LENS) { setLens(lensControl.validated(LensSelection.parseFrom(it))) }
         settingSetter(peer, Controls.Settings.DETECTION_MODE) { setDetectionMode(DetectionMode.parseFrom(it)) }
         settingSetter(peer, Controls.Settings.DETECTION_SCHEDULE) { setDetectionSchedule(DetectionSchedule.parseFrom(it)) }
@@ -501,6 +523,7 @@ class CameraServices(
         Controls.Settings.ALIAS -> "alias"
         Controls.Settings.MICROPHONE -> "microphone"
         Controls.Settings.LOW_LIGHT -> "low light"
+        Controls.Settings.ROTATION -> "rotation"
         Controls.Settings.LENS -> LensControl.AUDIT_DETAIL
         Controls.Settings.DETECTION_MODE -> "detection mode"
         Controls.Settings.DETECTION_SCHEDULE -> "detection schedule"

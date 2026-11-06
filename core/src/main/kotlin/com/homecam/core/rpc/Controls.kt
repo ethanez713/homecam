@@ -35,6 +35,7 @@ object Controls {
         const val ALIAS = 2
         const val MICROPHONE = 3
         const val LOW_LIGHT = 4
+        const val ROTATION = 7
         const val LENS = 10
         const val DETECTION_MODE = 16
         const val DETECTION_SCHEDULE = 17

@@ -270,6 +270,12 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
     }
 
     /** [state] is "on" or "off". [reason] is "selection", "health", or "bind_failed". */
+    fun rotation(auto: Boolean, degrees: Int, source: String) = event("rotation") {
+        put("auto", auto)
+        put("degrees", degrees)
+        put("source", source)
+    }
+
     fun lensSwitch(from: String, to: String, captureRunning: Boolean) = event("lens_switch") {
         put("from", from)
         put("to", to)

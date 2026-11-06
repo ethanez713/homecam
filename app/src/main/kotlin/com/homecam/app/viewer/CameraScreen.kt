@@ -305,7 +305,12 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                                 },
                             )
                         },
-                        onRotate = { edit(scope, it, say) { session -> session.rotateQuarterTurn() } },
+                        onRotate = {
+                            edit(scope, it, say) { session ->
+                                session.rotateQuarterTurn()
+                                runCatching { settings = session.link.settings() }
+                            }
+                        },
                         onSnapshot = {
                             edit(scope, it, say) { session ->
                                 val still = session.link.snapshot()
@@ -442,6 +447,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 onAlias = { alias -> edit(scope, open, say) { settings = it.link.setAlias(alias) } },
                 onMicrophone = { on ->
                     edit(scope, open, say) { settings = it.link.setMicrophone(on) }
+                },
+                onAutoRotate = { on ->
+                    edit(scope, open, say) {
+                        settings = it.link.setRotation(on, settings?.rotation?.degrees ?: 0)
+                    }
                 },
                 onRecordingMode = { mode ->
                     edit(scope, open, say) { settings = it.link.setRecordingMode(mode) }

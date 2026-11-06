@@ -115,6 +115,18 @@ private fun CameraContent(onSwitchRole: () -> Unit) {
             liveViewerLabel = liveViewer,
             serving = serviceRunning,
             armed = settings.armed,
+            autoRotate = settings.rotation.auto,
+            onAutoRotate = { on ->
+                scope.launch {
+                    val current = graph.settings.current.rotation
+                    graph.settings.update { setRotation(current.toBuilder().setAuto(on).build()) }
+                    graph.audit.record(
+                        AuditEvent.Kind.SETTINGS_CHANGED,
+                        viewerLabel = ON_THIS_CAMERA,
+                        detail = "rotation",
+                    )
+                }
+            },
             hardwareBacked = graph.identity.hardwareBacked,
             recordingMode = settings.recordingMode,
             projectedDays = projectedDays,

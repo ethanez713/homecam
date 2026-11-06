@@ -17,6 +17,7 @@ import com.homecam.proto.DetectionMode
 import com.homecam.proto.Microphone
 import com.homecam.proto.RecordingMode
 import com.homecam.proto.RecordingModeSetting
+import com.homecam.proto.Rotation
 import com.homecam.proto.RevokeViewer
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.RuntimeStatus
@@ -91,6 +92,14 @@ class CameraLink(private val peer: RpcPeer) {
                 protection.toByteString(),
             )
         )
+
+    suspend fun setRotation(auto: Boolean, degrees: Int): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.ROTATION,
+            Rotation.newBuilder().setAuto(auto).setDegrees(degrees).build().toByteString(),
+        )
+    )
 
     suspend fun setMicrophone(enabled: Boolean): SettingsSnapshot = SettingsSnapshot.parseFrom(
         peer.request(

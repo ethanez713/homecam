@@ -50,6 +50,7 @@ import com.homecam.proto.AuditEvent
 import com.homecam.proto.Clip
 import com.homecam.proto.DetectionMode
 import com.homecam.proto.RecordingMode
+import com.homecam.proto.Rotation
 import com.homecam.proto.RuntimeStatus
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.SoundDetection
@@ -87,6 +88,7 @@ private val cameras = listOf(
 
 private val settings = SettingsSnapshot.newBuilder()
     .setArmed(true).setAlias("Front door").setMicrophone(true)
+    .setRotation(Rotation.newBuilder().setAuto(true).build())
     .setDetectionMode(DetectionMode.newBuilder().setPerson(true).setVehicle(true).setPet(true))
     .setSoundDetection(SoundDetection.newBuilder().setEnabled(true))
     .setSoundRecognition(SoundRecognition.newBuilder().addClasses("alarm").addClasses("glass"))
@@ -272,7 +274,7 @@ private fun Screen(name: String) {
 @Composable
 private fun Settings(snapshot: SettingsSnapshot, remote: String) {
     CameraSettingsScreen(
-        settings = snapshot, onArmed = {}, onAlias = {}, onMicrophone = {}, onRecordingMode = {},
+        settings = snapshot, onArmed = {}, onAlias = {}, onMicrophone = {}, onAutoRotate = {}, onRecordingMode = {},
         projectedDays = 14.0, onDetectionMode = { _, _, _, _ -> }, autoSpotlightSupported = true,
         autoSpotlight = false, onAutoSpotlight = {}, reminderEnabled = false, onDetectionReminder = {},
         soundDetectionEnabled = snapshot.soundDetection.enabled, onSoundDetection = {},
@@ -287,6 +289,7 @@ private fun Settings(snapshot: SettingsSnapshot, remote: String) {
 private fun CameraHome(watcher: String?) {
     CameraHomeScreen(
         alias = "Front door", accessCount = 2, liveViewerLabel = watcher, serving = true, armed = true,
+        autoRotate = true, onAutoRotate = {},
         hardwareBacked = true, recordingMode = RecordingMode.CONTINUOUS, projectedDays = 14.0,
         onArmedChange = {}, onRecordingMode = {}, protection = com.homecam.core.health.HealthConfig(), onProtection = {},
         onManage = {}, onPair = {}, onLog = {}, onNetwork = {},

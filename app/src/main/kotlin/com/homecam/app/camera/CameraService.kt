@@ -9,9 +9,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import android.view.OrientationEventListener
 import com.homecam.app.AppGraph
 import com.homecam.app.BootReceiver
 import com.homecam.app.MainActivity
@@ -39,9 +42,11 @@ import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.HealthSample
 import com.homecam.core.health.HealthState
 import com.homecam.core.health.RecordingTimer
+import com.homecam.core.media.AutoRotation
 import com.homecam.core.media.CaptureWatchdog
 import com.homecam.core.rpc.Controls
 import com.homecam.proto.AuditEvent
+import com.homecam.proto.Rotation
 import com.homecam.proto.Bye
 import com.homecam.proto.Candidate
 import com.homecam.proto.Sdp
@@ -104,6 +109,16 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     @Volatile private var lastReminderMs = 0L
     private val watchdog = CaptureWatchdog()
     private var lastResumeAtMs: Long? = null
+    private val rotationLock = Any()
+    private val rotationHandler = Handler(Looper.getMainLooper())
+    private val hysteresis = AutoRotation.Hysteresis()
+    private var orientationListener: OrientationEventListener? = null
+    private var rotationAuto = false
+    private var deviceQuarter: Int? = null
+    private var heldAngle = AutoRotation.UNKNOWN
+    private var manualEcho: Int? = null
+    private var loggedRotation: Triple<Boolean, Int, String>? = null
+    private val confirmHold = Runnable { confirmHeldAngle() }
 
     /**
      * At most one media session at a time, and the newest wins. A camera that answers
@@ -195,6 +210,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         observeRecordingMode()
         observeHardwareProtection()
         observeSoundSettings()
+        observeRotation()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
         running.value = true
         watchFrames()
@@ -216,6 +232,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     override fun onDestroy() {
+        stopOrientationListener()
         running.value = false
         blind.value = false
         // First, so a later teardown failure cannot skip putting the alarm volume back.
@@ -552,6 +569,13 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val entry = LensSource.lens(this, id) ?: return
         primary.lens = entry
         primary.capture.setLens(entry) { LensRegions.maskFor(graph.settings.current, id) }
+        // The front lens uses the opposite quarter of the same device turn.
+        primary.capture.setOrientation(appliedDegrees(entry.front))
+        synchronized(rotationLock) {
+            val rotation = graph.settings.current.rotation
+            val source = if (rotation.auto && deviceQuarter != null) "sensor" else "setting"
+            noteRotation(rotation.auto, capture.orientationDegrees, source)
+        }
     }
 
     /** A stored secondary that the proven pairs no longer cover is not selected. */
@@ -671,9 +695,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     ): LensPipeline {
         val pipeCapture = ContinuousCapture(this, this, binder, bindFirst = !::primary.isInitialized)
         val inherit = ::primary.isInitialized
-        pipeCapture.setOrientation(
-            if (inherit) capture.orientationDegrees else capturePrefs().getInt(KEY_ORIENTATION, 0),
-        )
+        pipeCapture.setOrientation(appliedDegrees(lens?.front == true))
         if (inherit) {
             pipeCapture.setPowerSaving(powerSaving.isEngaged)
             pipeCapture.setThermalThrottle(captureThrottled)
@@ -897,12 +919,112 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     override fun setOrientation(degrees: Int) {
-        captures().forEach { it.setOrientation(degrees) }
-        // A camera propped on its side stays on its side across a restart.
-        capturePrefs().edit().putInt(KEY_ORIENTATION, capture.orientationDegrees).apply()
+        val quarter = AutoRotation.quarter(degrees)
+        synchronized(rotationLock) {
+            rotationAuto = false
+            manualEcho = quarter
+            applyManualLocked(quarter, "manual")
+        }
+        stopOrientationListener()
     }
 
-    private fun capturePrefs() = getSharedPreferences("homecam.capture", MODE_PRIVATE)
+    private fun observeRotation() {
+        lifecycleScope.launch {
+            graph.settings.settings.map { it.rotation }.distinctUntilChanged().collect { onRotationSetting(it) }
+        }
+    }
+
+    private fun onRotationSetting(rotation: Rotation) {
+        val listen = synchronized(rotationLock) {
+            if (rotation.auto) {
+                manualEcho = null
+                rotationAuto = true
+                val quarter = deviceQuarter
+                if (quarter != null) {
+                    applyDeviceQuarterLocked(quarter, "setting")
+                } else if (::primary.isInitialized) {
+                    noteRotation(true, capture.orientationDegrees, "setting")
+                }
+                true
+            } else {
+                rotationAuto = false
+                val quarter = AutoRotation.quarter(rotation.degrees)
+                val source = if (manualEcho == quarter) "manual" else "setting"
+                manualEcho = null
+                applyManualLocked(quarter, source)
+                false
+            }
+        }
+        if (listen) startOrientationListener() else stopOrientationListener()
+    }
+
+    private fun confirmHeldAngle() {
+        val again = synchronized(rotationLock) {
+            if (!rotationAuto || heldAngle < 0) return@synchronized false
+            publishSensorLocked(hysteresis.update(heldAngle, System.currentTimeMillis()))
+            hysteresis.pending
+        }
+        if (again) rotationHandler.postDelayed(confirmHold, AutoRotation.HOLD_MS)
+    }
+
+    private fun onDeviceAngle(orientation: Int) {
+        val known = orientation != OrientationEventListener.ORIENTATION_UNKNOWN
+        val schedule = synchronized(rotationLock) {
+            if (!rotationAuto) return@synchronized false
+            heldAngle = if (known) orientation else AutoRotation.UNKNOWN
+            publishSensorLocked(hysteresis.update(heldAngle, System.currentTimeMillis()))
+            known
+        }
+        rotationHandler.removeCallbacks(confirmHold)
+        if (schedule) rotationHandler.postDelayed(confirmHold, AutoRotation.HOLD_MS)
+    }
+
+    private fun publishSensorLocked(quarter: Int?) {
+        if (quarter == null || quarter == deviceQuarter) return
+        deviceQuarter = quarter
+        applyDeviceQuarterLocked(quarter, "sensor")
+    }
+
+    private fun applyManualLocked(quarter: Int, source: String) {
+        pipelines().forEach { it.capture.setOrientation(quarter) }
+        if (::primary.isInitialized) noteRotation(false, capture.orientationDegrees, source)
+    }
+
+    private fun applyDeviceQuarterLocked(quarter: Int, source: String) {
+        pipelines().forEach { pipeline ->
+            pipeline.capture.setOrientation(AutoRotation.extraDegrees(quarter, pipeline.lens?.front == true))
+        }
+        if (::primary.isInitialized) noteRotation(true, capture.orientationDegrees, source)
+    }
+
+    private fun appliedDegrees(front: Boolean): Int = synchronized(rotationLock) {
+        val rotation = graph.settings.current.rotation
+        val quarter = deviceQuarter
+        when {
+            rotation.auto && quarter != null -> AutoRotation.extraDegrees(quarter, front)
+            rotation.auto -> 0
+            else -> AutoRotation.quarter(rotation.degrees)
+        }
+    }
+
+    private fun noteRotation(auto: Boolean, degrees: Int, source: String) {
+        val next = Triple(auto, degrees, source)
+        if (next == loggedRotation) return
+        loggedRotation = next
+        graph.diagnostics.rotation(auto, degrees, source)
+    }
+
+    private fun startOrientationListener() {
+        val listener = orientationListener ?: object : OrientationEventListener(this) {
+            override fun onOrientationChanged(orientation: Int) = onDeviceAngle(orientation)
+        }.also { orientationListener = it }
+        if (listener.canDetectOrientation()) listener.enable()
+    }
+
+    private fun stopOrientationListener() {
+        orientationListener?.disable()
+        rotationHandler.removeCallbacks(confirmHold)
+    }
 
     override suspend fun snapshot(): com.homecam.proto.Snapshot {
         val jpeg = capture.snapshotJpeg()
@@ -1105,7 +1227,6 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         private const val NOTIFICATION_ID = 1
         private const val REMINDER_NOTIFICATION_ID = 2
         private const val PAUSED_NOTIFICATION_ID = 4
-        private const val KEY_ORIENTATION = "orientation_degrees"
         private const val PAUSED_CHANNEL_ID = "homecam.camera.paused"
         private const val AUTO_SPOTLIGHT_MS = 20_000L
         private const val SHUTDOWN_GRACE_MS = 1_000
