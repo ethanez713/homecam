@@ -29,6 +29,10 @@ class ViewerDiagnostics(
         log.append(DiagnosticsLines.streamDrop(System.currentTimeMillis(), run, backoffMs))
     }
 
+    fun liveStats(fields: List<Pair<String, Any>>) {
+        log.append(DiagnosticsLines.liveStats(System.currentTimeMillis(), run, fields))
+    }
+
     fun reconnect(backoffMs: Long) {
         log.append(DiagnosticsLines.reconnect(System.currentTimeMillis(), run, backoffMs))
     }

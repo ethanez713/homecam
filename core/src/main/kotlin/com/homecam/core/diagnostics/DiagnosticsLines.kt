@@ -52,6 +52,9 @@ object DiagnosticsLines {
     fun streamDrop(ts: Long, run: String, backoffMs: Long): String =
         line(ts, run, "stream_drop", listOf("backoff_ms" to backoffMs))
 
+    fun liveStats(ts: Long, run: String, fields: List<Pair<String, Any>>): String =
+        line(ts, run, "live_stats", fields)
+
     fun reconnect(ts: Long, run: String, backoffMs: Long): String =
         line(ts, run, "reconnect", listOf("backoff_ms" to backoffMs))
 

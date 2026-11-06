@@ -34,6 +34,40 @@ class ViewerMediaSession(
     private var connection: PeerConnection? = null
     private var microphone: AudioTrack? = null
     private var closed = false
+    private val diagnostics = com.homecam.app.AppGraph.get(context).viewerDiagnostics
+    private val statsHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val statsTick = object : Runnable {
+        override fun run() {
+            if (closed) return
+            connection?.getStats { report -> logInboundVideo(report) }
+            statsHandler.postDelayed(this, STATS_EVERY_MS)
+        }
+    }
+
+    /** What arrived, per video track: the viewer's half of telling a stalled camera from a stalled link. */
+    private fun logInboundVideo(report: org.webrtc.RTCStatsReport) {
+        report.statsMap.values
+            .filter { it.type == "inbound-rtp" && it.members["kind"] == "video" }
+            .forEach { entry ->
+                val m = entry.members
+                diagnostics.liveStats(
+                    listOf(
+                        "track" to (m["trackIdentifier"] ?: m["mid"] ?: "").toString(),
+                        "fps" to ((m["framesPerSecond"] as? Double) ?: 0.0),
+                        "frames_received" to (m["framesReceived"] ?: 0L).toString().toLong(),
+                        "frames_decoded" to (m["framesDecoded"] ?: 0L).toString().toLong(),
+                        "frames_dropped" to (m["framesDropped"] ?: 0L).toString().toLong(),
+                        "freezes" to (m["freezeCount"] ?: 0L).toString().toLong(),
+                        "freeze_s" to ((m["totalFreezesDuration"] as? Double) ?: 0.0),
+                        "pli" to (m["pliCount"] ?: 0L).toString().toLong(),
+                        "nack" to (m["nackCount"] ?: 0L).toString().toLong(),
+                        "packets_lost" to (m["packetsLost"] ?: 0L).toString().toLong(),
+                        "width" to (m["frameWidth"] ?: 0L).toString().toLong(),
+                        "height" to (m["frameHeight"] ?: 0L).toString().toLong(),
+                    ),
+                )
+            }
+    }
 
     /**
      * Push-to-talk. The track is added when the session is answered and starts disabled,
@@ -126,6 +160,7 @@ class ViewerMediaSession(
     fun close() {
         if (closed) return
         closed = true
+        statsHandler.removeCallbacks(statsTick)
         runCatching { microphone?.dispose() }
         microphone = null
         runCatching { connection?.close(); connection?.dispose() }
@@ -161,6 +196,10 @@ class ViewerMediaSession(
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             Log.i(TAG, "peer connection -> $newState")
+            if (newState == PeerConnection.PeerConnectionState.CONNECTED) {
+                statsHandler.removeCallbacks(statsTick)
+                statsHandler.postDelayed(statsTick, STATS_EVERY_MS)
+            }
             if (newState == PeerConnection.PeerConnectionState.FAILED) {
                 transport.tearDown(Bye.Reason.NO_FRAME, "ice failed")
             }
@@ -171,5 +210,6 @@ class ViewerMediaSession(
         const val TAG = "ViewerMediaSession"
         const val STREAM_ID = "homecam-viewer"
         const val MIC_TRACK_ID = "homecam-viewer-audio"
+        const val STATS_EVERY_MS = 3_000L
     }
 }

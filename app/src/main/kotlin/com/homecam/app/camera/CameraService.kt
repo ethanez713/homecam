@@ -912,12 +912,24 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             throttle.bitrateCapBps,
         )
         graph.diagnostics.liveStart(media.id, listOfNotNull(primaryId, secondaryId))
+        logLiveStats(session)
         throttle.onSessionOpen()
         powerSaving.release(PowerSavingReason.VIEWER)
         audioDetection.setLive(true)
         showLive(peer.label)
         alerts.onSessionStarted(peer.label, viewerFingerprint)
         return sessionStatus(viewerFingerprint)
+    }
+
+    /** A frozen live picture is otherwise undiagnosable afterwards: was the camera sending? */
+    private fun logLiveStats(session: LiveSession) {
+        lifecycleScope.launch {
+            while (live === session) {
+                kotlinx.coroutines.delay(LIVE_STATS_EVERY_MS)
+                if (live !== session) break
+                session.media.stats { graph.diagnostics.liveStats(session.media.id, it) }
+            }
+        }
     }
 
     override suspend fun stopSession(viewerFingerprint: String) {
@@ -1356,6 +1368,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         // 15 ticks of 2 s: a reading every 30 s is plenty for a trend measured in minutes.
         private const val HARDWARE_SAMPLE_EVERY_TICKS = 15
         private const val STATS_TIMEOUT_MS = 2_000L
+        private const val LIVE_STATS_EVERY_MS = 3_000L
         private const val NOTIFICATION_ID = 1
         private const val REMINDER_NOTIFICATION_ID = 2
         private const val PAUSED_NOTIFICATION_ID = 4

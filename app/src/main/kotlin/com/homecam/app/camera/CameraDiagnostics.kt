@@ -294,6 +294,18 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
         put("lenses", lenses.joinToString(","))
     }
 
+    fun liveStats(sessionId: String, stats: com.homecam.app.media.CameraMediaSession.Stats) = event("live_stats") {
+        put("session", sessionId)
+        put("fps", stats.framesPerSecond)
+        put("frames_encoded", stats.framesEncoded)
+        put("kbps", stats.bitrateKbps)
+        put("limitation", stats.qualityLimitation)
+        put("rtt_ms", stats.rttMs)
+        put("packets_lost", stats.packetsLost)
+        put("width", stats.width)
+        put("height", stats.height)
+    }
+
     fun liveEnd(sessionId: String, reason: String, detail: String, durationMs: Long) = event("live") {
         put("state", "end")
         put("session", sessionId)
