@@ -57,6 +57,7 @@ fun CameraSettingsScreen(
     onAlias: (String) -> Unit,
     onMicrophone: (Boolean) -> Unit,
     onAutoRotate: (Boolean) -> Unit,
+    onOsd: (Boolean) -> Unit,
     onRecordingMode: (RecordingMode) -> Unit,
     onPrivacyMode: (Boolean) -> Unit = {},
     projectedDays: Double?,
@@ -184,6 +185,13 @@ fun CameraSettingsScreen(
                 settings.rotation.auto,
                 onAutoRotate,
                 meta = "Keep the picture upright as the camera turns",
+            )
+            Rule()
+            SwitchRow(
+                "Timestamp overlay",
+                settings.osd,
+                onOsd,
+                meta = "Burn the time and camera name into the picture",
             )
             Rule()
             ListRow("Name", meta = settings.alias, onClick = { editing = Field.NAME }) { Chevron() }

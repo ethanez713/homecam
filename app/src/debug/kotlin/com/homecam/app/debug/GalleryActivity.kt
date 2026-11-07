@@ -277,7 +277,7 @@ private fun Screen(name: String) {
 @Composable
 private fun Settings(snapshot: SettingsSnapshot, remote: String) {
     CameraSettingsScreen(
-        settings = snapshot, onArmed = {}, onAlias = {}, onMicrophone = {}, onAutoRotate = {}, onRecordingMode = {},
+        settings = snapshot, onArmed = {}, onAlias = {}, onMicrophone = {}, onAutoRotate = {}, onOsd = {}, onRecordingMode = {},
         projectedDays = 14.0, onDetectionMode = { _, _, _, _ -> }, autoSpotlightSupported = true,
         autoSpotlight = false, onAutoSpotlight = {}, reminderEnabled = false, onDetectionReminder = {},
         soundDetectionEnabled = snapshot.soundDetection.enabled, onSoundDetection = {},

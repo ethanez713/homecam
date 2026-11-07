@@ -542,6 +542,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         settings = it.link.setRotation(on, settings?.rotation?.degrees ?: 0)
                     }
                 },
+                onOsd = { on -> edit(scope, open, say) { settings = it.link.setOsd(on) } },
                 onPrivacyMode = { on ->
                     if (!on && state is LiveState.Privacy) {
                         scope.launch { turnPrivacyOff() }

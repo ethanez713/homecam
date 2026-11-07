@@ -14,14 +14,20 @@ import java.util.concurrent.CopyOnWriteArrayList
  * privacy mask from a detection zone: a zone only limits where detection runs, and the
  * pixels still leave the phone.
  *
- * With no mask configured the frame is forwarded untouched. That matters for more than
- * tidiness: an untouched texture frame stays on the GPU all the way into the hardware
- * encoder, while masking forces a readback to I420. The cost is real, so it is paid only
- * by someone who actually asked for a mask.
+ * With no mask and no timestamp overlay the frame is forwarded untouched. That matters
+ * for more than tidiness: an untouched texture frame stays on the GPU all the way into
+ * the hardware encoder, while either one forces a readback to I420. The cost is real,
+ * so it is paid only when one of them is on.
  */
-class PrivacyMaskProcessor : VideoProcessor {
+class PrivacyMaskProcessor(
+    private val raster: OsdRaster = OsdRaster(),
+) : VideoProcessor {
 
     @Volatile var mask: PrivacyMask = PrivacyMask.getDefaultInstance()
+
+    @Volatile var osdEnabled: Boolean = false
+
+    @Volatile var osdAlias: String = ""
 
     /**
      * A quarter-turn added to every delivered frame's rotation. Applied here, upstream of
@@ -49,7 +55,9 @@ class PrivacyMaskProcessor : VideoProcessor {
 
     override fun onFrameCaptured(frame: VideoFrame) {
         val rects = mask.rectsList
-        if (rects.isEmpty()) {
+        val burn = osdEnabled
+        val alias = osdAlias
+        if (rects.isEmpty() && !burn) {
             // The untouched fast path keeps a texture frame on the GPU all the way to the
             // encoder, so only pay for a rewrapped frame when a rotation is actually set.
             if (orientationDegrees == 0) {
@@ -59,10 +67,9 @@ class PrivacyMaskProcessor : VideoProcessor {
             }
             return
         }
-        // A frame we cannot mask is a frame we must not forward: silently streaming the
-        // unmasked version would defeat the one control that promises the pixels never
-        // leave the phone.
-        val masked = applyMask(frame, rects, rotationOf(frame)) ?: return
+        // A frame we cannot read back is a frame we must not forward: when a mask is set,
+        // streaming the original would leak the pixels the mask promised to remove.
+        val masked = render(frame, rects, rotationOf(frame), burn, alias) ?: return
         deliver(masked)
         masked.release()
     }
@@ -74,7 +81,13 @@ class PrivacyMaskProcessor : VideoProcessor {
         extraSinks.forEach { it.onFrame(frame) }
     }
 
-    private fun applyMask(frame: VideoFrame, rects: List<PrivacyMask.Rect>, rotation: Int): VideoFrame? {
+    private fun render(
+        frame: VideoFrame,
+        rects: List<PrivacyMask.Rect>,
+        rotation: Int,
+        burn: Boolean,
+        alias: String,
+    ): VideoFrame? {
         val i420 = frame.buffer.toI420() ?: return null
         val width = i420.width
         val height = i420.height
@@ -87,6 +100,13 @@ class PrivacyMaskProcessor : VideoProcessor {
             blank(y, i420.strideY, width, height, rect, luma = true)
             blank(u, i420.strideU, (width + 1) / 2, (height + 1) / 2, rect, luma = false)
             blank(v, i420.strideV, (width + 1) / 2, (height + 1) / 2, rect, luma = false)
+        }
+        if (burn) {
+            raster.draw(
+                y, u, v,
+                i420.strideY, i420.strideU, i420.strideV,
+                width, height, rotation, alias,
+            )
         }
 
         val copy = JavaI420Buffer.wrap(

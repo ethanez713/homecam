@@ -15,6 +15,7 @@ import com.homecam.proto.ClipPin
 import com.homecam.proto.ManualRecord
 import com.homecam.proto.DetectionMode
 import com.homecam.proto.Microphone
+import com.homecam.proto.Osd
 import com.homecam.proto.RecordingMode
 import com.homecam.proto.RecordingModeSetting
 import com.homecam.proto.PrivacyMode
@@ -125,6 +126,14 @@ class CameraLink(private val peer: RpcPeer) {
             RpcMessage.Service.SETTINGS,
             Controls.Settings.MICROPHONE,
             Microphone.newBuilder().setEnabled(enabled).build().toByteString(),
+        )
+    )
+
+    suspend fun setOsd(enabled: Boolean): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.OSD,
+            Osd.newBuilder().setEnabled(enabled).build().toByteString(),
         )
     )
 

@@ -23,7 +23,8 @@ import java.util.concurrent.atomic.AtomicLong
  * Capture runs for as long as the camera service does, not for as long as somebody is
  * watching. That is what lets the recorder work with nobody connected, and it is why the
  * privacy mask sits here — upstream of every consumer, so masked pixels are never
- * available to be streamed or written (§2.8).
+ * available to be streamed or written (§2.8). The timestamp overlay is burned in at
+ * the same point, so it is in the stream and the recording together.
  */
 /** Open so a restart can be tested with a capturer that never binds the camera. */
 open class ContinuousCapture(
@@ -117,6 +118,11 @@ open class ContinuousCapture(
     fun addSink(sink: VideoSink) = maskProcessor.addSink(sink)
 
     fun removeSink(sink: VideoSink) = maskProcessor.removeSink(sink)
+
+    fun setOsd(enabled: Boolean, alias: String) {
+        maskProcessor.osdEnabled = enabled
+        maskProcessor.osdAlias = alias
+    }
 
     fun setPrivacyMask(mask: PrivacyMask) {
         synchronized(maskLock) {

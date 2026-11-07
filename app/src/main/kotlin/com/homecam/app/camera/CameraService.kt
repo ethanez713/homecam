@@ -230,6 +230,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         observeHardwareProtection()
         observeSoundSettings()
         observeRotation()
+        observeOsd()
         observePrivacy()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
         runningInstance = this
@@ -587,6 +588,17 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
     }
 
+    private fun observeOsd() {
+        lifecycleScope.launch {
+            graph.settings.settings
+                .map { it.osd to it.alias }
+                .distinctUntilChanged()
+                .collect { (enabled, alias) ->
+                    captures().forEach { it.setOsd(enabled, alias) }
+                }
+        }
+    }
+
     private fun selectedLens(): LensEntry? = LensSource.lens(this, LensSelections.primaryOf(graph.settings.current))
 
     private fun observeLens() {
@@ -819,6 +831,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val pipeCapture = ContinuousCapture(this, this, binder, bindFirst = !::primary.isInitialized)
         val inherit = ::primary.isInitialized
         pipeCapture.setOrientation(appliedDegrees(lens?.front == true))
+        pipeCapture.setOsd(graph.settings.current.osd, graph.settings.current.alias)
         if (inherit) {
             pipeCapture.setPowerSaving(powerSaving.isEngaged)
             pipeCapture.setThermalThrottle(captureThrottled)

@@ -39,6 +39,7 @@ import com.homecam.proto.Lens
 import com.homecam.proto.LowLight
 import com.homecam.proto.ManualRecord
 import com.homecam.proto.Microphone
+import com.homecam.proto.Osd
 import com.homecam.proto.Orientation
 import com.homecam.proto.PrivacyMask
 import com.homecam.proto.PrivacyMode
@@ -340,6 +341,7 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.ALIAS) { setAlias(Alias.parseFrom(it).alias) }
         settingSetter(peer, Controls.Settings.MICROPHONE) { setMicrophone(Microphone.parseFrom(it).enabled) }
         settingSetter(peer, Controls.Settings.LOW_LIGHT) { setLowLight(LowLight.parseFrom(it).enabled) }
+        settingSetter(peer, Controls.Settings.OSD) { setOsd(Osd.parseFrom(it).enabled) }
         settingSetter(peer, Controls.Settings.ROTATION) {
             val asked = Rotation.parseFrom(it)
             setRotation(
@@ -536,6 +538,7 @@ class CameraServices(
         Controls.Settings.ALIAS -> "alias"
         Controls.Settings.MICROPHONE -> "microphone"
         Controls.Settings.LOW_LIGHT -> "low light"
+        Controls.Settings.OSD -> "timestamp overlay"
         Controls.Settings.ROTATION -> "rotation"
         Controls.Settings.PRIVACY_MODE -> "privacy mode"
         Controls.Settings.LENS -> LensControl.AUDIT_DETAIL
