@@ -27,6 +27,10 @@ message ManualRecordResult { string clip_id = 1; int64 started_at_ms = 2; uint32
 message Torch { bool on = 1; }
 message Orientation { uint32 degrees = 1; }
 message Resolution { uint32 width = 1; uint32 height = 2; uint32 fps = 3; }
+
+// Focus at a point of the upright picture the viewer shows, 0..1 on each axis. auto returns
+// the lens to continuous autofocus and ignores x and y.
+message Focus { float x = 1; float y = 2; bool auto = 3; }
 message Zoom { float ratio = 1; }
 message Lens { enum Facing { BACK = 0; FRONT = 1; } Facing facing = 1; }
 
@@ -79,12 +83,17 @@ message SettingsSnapshot {
   string alias = 2;
   bool microphone = 3;
   bool low_light = 4;
+  // A timestamp and the camera's name burned into the picture, so in the stream and the recording.
+  bool osd = 6;
   // While auto is set the camera follows the phone. degrees is the manual quarter used otherwise.
   Rotation rotation = 7;
   // Absent until chosen, which reads as back-wide (Phase 12).
   LensSelection lens = 10;
   // The camera captures nothing while this is set. Off when absent.
   bool privacy_mode = 11;
+  // Absent reads as on.
+  AutoPowerSaving auto_power_saving = 8;
+  ZoomInLock zoom_in_lock = 9;
   DetectionMode detection_mode = 16;
   DetectionSchedule detection_schedule = 17;
   reserved 18, 19;
@@ -96,6 +105,7 @@ message SettingsSnapshot {
   bool auto_spotlight = 26;
   RetentionPolicy retention = 32;
   RecordingMode recording_mode = 33;
+  QualityTier quality_tier = 34;
   HardwareProtection hardware_protection = 35;
   // Set while a timed recording mode is running; the camera enforces it (Phase 11.7).
   RecordingRevert recording_revert = 36;
@@ -154,6 +164,21 @@ message Armed { bool armed = 1; }
 message Alias { string alias = 1; }
 message Microphone { bool enabled = 1; }
 message LowLight { bool enabled = 1; }
+message Osd { bool enabled = 1; }
+message AutoPowerSaving { bool enabled = 1; }
+
+// While enabled, each lens keeps the zoom it was last left at, across disconnects, lens
+// switches and restarts. Keyed by lens id.
+message ZoomInLock { bool enabled = 1; map<string, float> zoom_by_lens = 2; }
+
+// Resolution, frame rate and recorder bitrate move together, so no combination of them can
+// be picked that records badly. HIGH is the 0 default: 1080p30.
+enum QualityTier {
+  QUALITY_HIGH = 0;
+  QUALITY_MEDIUM = 1;
+  QUALITY_LOW = 2;
+}
+message Quality { QualityTier tier = 1; }
 
 message Rotation {
   bool auto = 1;
@@ -519,6 +544,10 @@ message Capabilities {
   repeated LensInfo lenses = 14;
   // Lens pairs a trial has shown can capture at once, with the largest size that held.
   repeated LensPair concurrent_lenses = 15;
+  // The primary lens exposes exposure compensation, so the low-light setting does something.
+  bool low_light = 16;
+  // The quality tiers the primary lens can produce, best first.
+  repeated QualityTier quality_tiers = 17;
 
   enum EncoderTier {
     ENCODER_NONE = 0;  // software encode only
