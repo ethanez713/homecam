@@ -760,7 +760,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         if (!::primary.isInitialized) return
         val chosen = CaptureQuality.profile(tier)
         val format = formatOf(chosen)
-        if (capture.format != format) capture.setFormat(format)
+        // A throttled live session holds the capture down; the throttle restores this format on release.
+        if (capture.format != format && !throttle.offerFormat(format)) capture.setFormat(format)
         recorder.applyConfig(
             recorder.config.copy(
                 width = format.width,
