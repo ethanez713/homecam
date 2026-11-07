@@ -78,6 +78,8 @@ open class ContinuousCapture(
         }
 
         val videoCapturer = createCapturer()
+        videoCapturer.setZoomLock(zoomLockEnabled, zoomOnBind)
+        videoCapturer.setLowLight(lowLight)
         val (textureHelper, videoSource) = attachCapturer(videoCapturer, format)
         if (thermalThrottle) videoCapturer.setThermalThrottle(true)
         if (powerSaving) videoCapturer.setPowerSaving(true)
@@ -190,7 +192,47 @@ open class ContinuousCapture(
         capturer?.setThermalThrottle(on)
     }
 
-    fun setZoom(ratio: Float) = capturer?.setZoom(ratio)
+    fun setZoom(ratio: Float) {
+        val position = ratio.coerceIn(0f, 1f)
+        if (zoomLockEnabled) zoomOnBind = position
+        capturer?.let {
+            if (zoomLockEnabled) it.setZoomLock(true, position)
+            it.setZoom(position)
+        }
+    }
+
+    /**
+     * [ratio] is restored on every bind while [enabled]. A restart builds a new capturer,
+     * so the request is kept here and handed over before that capturer opens.
+     */
+    fun setZoomLock(enabled: Boolean, ratio: Float?) {
+        zoomLockEnabled = enabled
+        zoomOnBind = if (enabled) ratio?.coerceIn(0f, 1f) else null
+        capturer?.setZoomLock(zoomLockEnabled, zoomOnBind)
+    }
+
+    private var zoomLockEnabled = false
+    private var zoomOnBind: Float? = null
+
+    /** The primary lens only. A secondary pipeline never sets this. */
+    fun setLowLight(enabled: Boolean) {
+        lowLight = enabled
+        capturer?.setLowLight(enabled)
+    }
+
+    private var lowLight = false
+
+    fun setFocus(x: Float, y: Float, auto: Boolean) {
+        capturer?.setFocus(x, y, auto, orientationDegrees)
+    }
+
+    fun zoomPosition(): Float? = capturer?.zoomPosition() ?: zoomOnBind
+
+    fun linearZoom(): Float? = capturer?.linearZoom()
+
+    fun exposureCompensationIndex(): Int? = capturer?.exposureCompensationIndex()
+
+    fun oneStopCompensationIndex(): Int? = capturer?.oneStopCompensationIndex()
 
     /**
      * Kept across a capture restart, which builds a new capturer.

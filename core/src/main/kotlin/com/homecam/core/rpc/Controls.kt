@@ -21,6 +21,7 @@ object Controls {
         const val RESOLUTION = 8
         const val ZOOM = 9
         const val LENS = 10
+        const val FOCUS = 11
         const val SNAPSHOT = 12
         const val LIVE_LENSES = 13
     }
@@ -37,6 +38,8 @@ object Controls {
         const val LOW_LIGHT = 4
         const val OSD = 6
         const val ROTATION = 7
+        const val AUTO_POWER_SAVING = 8
+        const val ZOOM_IN_LOCK = 9
         const val LENS = 10
         const val PRIVACY_MODE = 11
         const val DETECTION_MODE = 16

@@ -14,6 +14,9 @@ import com.homecam.core.diagnostics.PowerSavingReason
  * again. A trigger that arrives while capture is already at full rate restarts
  * the idle stretch and does not change the period. Thermal throttle is a
  * separate hold on the idle rate; this class never clears it.
+ *
+ * [setEnabled] is the auto power saving switch. Off, the tick never engages, and an
+ * engagement already held is released at once.
  */
 class PowerSaving(
     private val nowMs: () -> Long = { System.currentTimeMillis() },
@@ -25,15 +28,36 @@ class PowerSaving(
     private var engaged = false
     private var engagedAtMs: Long? = null
     private var currentQuietMs = quietMs
+    private var enabled = true
 
     /** When the current idle stretch began. Null while a viewer or a clip is in progress. */
     private var idleSinceMs: Long? = nowMs()
 
     val isEngaged: Boolean get() = synchronized(lock) { engaged }
 
+    /**
+     * The auto power saving switch. Off releases an engagement at once and the tick
+     * stays at the full rate. On starts the quiet period over, so it does not engage
+     * on the next tick merely because the scene was already idle.
+     */
+    fun setEnabled(on: Boolean) {
+        val releaseNow = synchronized(lock) {
+            if (on == enabled) return
+            enabled = on
+            if (on) {
+                idleSinceMs = nowMs()
+                false
+            } else {
+                true
+            }
+        }
+        if (releaseNow) release(PowerSavingReason.SETTING)
+    }
+
     /** Drops to the idle rate once the scene has been idle for the current quiet period. Never releases. */
     fun tick(sceneIdle: Boolean) {
         synchronized(lock) {
+            if (!enabled) return
             val now = nowMs()
             if (!sceneIdle) {
                 idleSinceMs = null

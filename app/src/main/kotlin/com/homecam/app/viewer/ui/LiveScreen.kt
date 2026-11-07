@@ -123,6 +123,8 @@ fun LiveScreen(
     onBack: () -> Unit = {},
     /** Lens ids currently on screen. Hiding one stops its sender; recording continues. */
     onShownLenses: (List<String>) -> Unit = {},
+    /** Long-press on the primary picture. [x] and [y] are 0..1 on that upright frame. */
+    onFocus: ((x: Float, y: Float) -> Unit)? = null,
     /** Stands in for the video where there is no track to render, as in a preview. */
     videoPlaceholder: (@Composable () -> Unit)? = null,
 ) {
@@ -149,7 +151,7 @@ fun LiveScreen(
 
         is LiveState.Connected ->
             if (state.video != null || state.videos.isNotEmpty() || videoPlaceholder != null) {
-                LiveVideo(state, controls, videoPlaceholder, onBack, onShownLenses)
+                LiveVideo(state, controls, videoPlaceholder, onBack, onShownLenses, onFocus)
             } else {
                 Waiting(state, controls)
             }
@@ -195,6 +197,7 @@ private fun LiveVideo(
     videoPlaceholder: (@Composable () -> Unit)?,
     onBack: () -> Unit,
     onShownLenses: (List<String>) -> Unit,
+    onFocus: ((x: Float, y: Float) -> Unit)?,
 ) {
     val primaryId = controls?.lens?.takeIf { it.isNotEmpty() }.orEmpty()
     val secondaryId = controls?.secondaryLens?.takeIf { it.isNotEmpty() }
@@ -214,7 +217,8 @@ private fun LiveVideo(
     val picture: @Composable (Modifier) -> Unit = { modifier ->
         Box(modifier.background(Color.Black)) {
             val big = trackFor(state, bigId, primaryId, secondaryId)
-            if (big != null) VideoSurface(big, Modifier.fillMaxSize()) else videoPlaceholder?.invoke()
+            val focusAt = if (bigId == primaryId) onFocus else null
+            if (big != null) VideoSurface(big, Modifier.fillMaxSize(), onLongPress = focusAt) else videoPlaceholder?.invoke()
             Row(Modifier.align(Alignment.TopStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Badge("Live", Tone.ACCENT, dot = true)
                 if (state.via.isNotBlank()) Badge(state.via, Tone.NEUTRAL)

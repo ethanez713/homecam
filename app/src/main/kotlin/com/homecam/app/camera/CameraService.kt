@@ -71,6 +71,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Keeps the camera alive across days: the signaling server, the mDNS advertisement and
@@ -114,6 +116,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     @Volatile private var lastReminderMs = 0L
     private val watchdog = CaptureWatchdog()
     private val captureLock = Any()
+    /** Slider positions kept while the zoom-in lock is on. Seeded from settings, updated before the file write. */
+    private val zoomMemory = ConcurrentHashMap<String, Float>()
+    private val zoomPersistGeneration = AtomicLong()
+    private var zoomLockWasEnabled = false
     /** What onCreate already applied, so the first settings replay is not a second change. */
     private var privacyApplied = false
     private var lastResumeAtMs: Long? = null
@@ -158,6 +164,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         clips = ClipStore(this, graph.database.clips())
         detector = SharedObjectDetector(this)
         val quality = currentQuality()
+        rememberStoredZooms()
+        zoomLockWasEnabled = graph.settings.current.zoomInLock.enabled
         primary = openPipeline(
             lensId = LensSelections.primaryOf(graph.settings.current),
             lens = selectedLens(),
@@ -171,7 +179,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 captures().fold(false) { changed, each -> each.setPowerSaving(saving) || changed }
             },
             log = { engaged, reason -> graph.diagnostics.powerSaving(engaged, reason) },
-        )
+        ).also { it.setEnabled(autoPowerSavingEnabled()) }
         throttle = ThermalThrottle(
             setCaptureThrottled = { on ->
                 captureThrottled = on
@@ -232,6 +240,9 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         observeRotation()
         observeOsd()
         observePrivacy()
+        observeLowLight()
+        observeZoomLock()
+        observeAutoPowerSaving()
         mdns = MdnsAdvertiser(this).also { it.start(Signaling.DEFAULT_PORT) }
         runningInstance = this
         running.value = true
@@ -614,12 +625,18 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     }
 
     private fun applyPrimaryLens(id: String) {
-        if (primary.lensId != id) graph.diagnostics.lensSwitch(primary.lensId, id, primary.capture.running)
+        if (primary.lensId != id) {
+            graph.diagnostics.lensSwitch(primary.lensId, id, primary.capture.running)
+            if (graph.settings.current.zoomInLock.enabled) {
+                capture.zoomPosition()?.let { zoomMemory[primary.lensId] = it }
+            }
+        }
         live?.media?.onPrimaryLens(id)
         primary.lensId = id
         primary.recorder.lensId = id
         val entry = LensSource.lens(this, id) ?: return
         primary.lens = entry
+        applyZoomLock(primary.capture, id)
         primary.capture.setLens(entry) { LensRegions.maskFor(graph.settings.current, id) }
         // The front lens uses the opposite quarter of the same device turn.
         primary.capture.setOrientation(appliedDegrees(entry.front))
@@ -832,6 +849,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         val inherit = ::primary.isInitialized
         pipeCapture.setOrientation(appliedDegrees(lens?.front == true))
         pipeCapture.setOsd(graph.settings.current.osd, graph.settings.current.alias)
+        applyZoomLock(pipeCapture, lensId)
+        if (!inherit) pipeCapture.setLowLight(graph.settings.current.lowLight)
         if (inherit) {
             pipeCapture.setPowerSaving(powerSaving.isEngaged)
             pipeCapture.setThermalThrottle(captureThrottled)
@@ -1053,7 +1072,94 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
 
     override fun setTorch(on: Boolean) = capture.setTorch(on) ?: Unit
 
-    override fun setZoom(ratio: Float) = capture.setZoom(ratio) ?: Unit
+    override fun setZoom(ratio: Float) {
+        val position = ratio.coerceIn(0f, 1f)
+        if (::primary.isInitialized && graph.settings.current.zoomInLock.enabled) {
+            zoomMemory[primary.lensId] = position
+            capture.setZoomLock(true, position)
+            persistZoom(primary.lensId, position)
+        }
+        capture.setZoom(position)
+    }
+
+    override fun setFocus(x: Float, y: Float, auto: Boolean) {
+        if (::primary.isInitialized) capture.setFocus(x, y, auto)
+    }
+
+    private fun rememberStoredZooms() {
+        graph.settings.current.zoomInLock.zoomByLensMap.forEach { (id, ratio) ->
+            zoomMemory.putIfAbsent(id, ratio.coerceIn(0f, 1f))
+        }
+    }
+
+    private fun lockedZoom(lensId: String): Float? {
+        if (!graph.settings.current.zoomInLock.enabled) return null
+        return zoomMemory[lensId] ?: graph.settings.current.zoomInLock.zoomByLensMap[lensId]?.coerceIn(0f, 1f)
+    }
+
+    private fun applyZoomLock(target: ContinuousCapture, lensId: String) {
+        val enabled = graph.settings.current.zoomInLock.enabled
+        target.setZoomLock(enabled, if (enabled) lockedZoom(lensId) else null)
+    }
+
+    /** A newer zoom increments the generation, so a slow write cannot put an older one back. */
+    private fun persistZoom(lensId: String, position: Float) {
+        val generation = zoomPersistGeneration.incrementAndGet()
+        graph.scope.launch {
+            graph.settings.update {
+                if (generation != zoomPersistGeneration.get()) return@update
+                val current = zoomInLock
+                if (!current.enabled || current.zoomByLensMap[lensId] == position) return@update
+                setZoomInLock(current.toBuilder().putZoomByLens(lensId, position).build())
+            }
+        }
+    }
+
+    private fun observeZoomLock() {
+        lifecycleScope.launch {
+            graph.settings.settings
+                .map { it.zoomInLock.enabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    val turningOn = enabled && !zoomLockWasEnabled
+                    zoomLockWasEnabled = enabled
+                    rememberStoredZooms()
+                    if (turningOn && ::primary.isInitialized) {
+                        capture.zoomPosition()?.let { position ->
+                            zoomMemory[primary.lensId] = position
+                            persistZoom(primary.lensId, position)
+                        }
+                    }
+                    if (::primary.isInitialized) {
+                        applyZoomLock(capture, primary.lensId)
+                        secondary?.let { applyZoomLock(it.capture, it.lensId) }
+                    }
+                }
+        }
+    }
+
+    private fun observeLowLight() {
+        lifecycleScope.launch {
+            graph.settings.settings.map { it.lowLight }.distinctUntilChanged().collect { enabled ->
+                if (::primary.isInitialized) capture.setLowLight(enabled)
+            }
+        }
+    }
+
+    /** Absent reads as on: a camera that has never been told otherwise keeps saving power. */
+    private fun autoPowerSavingEnabled(): Boolean {
+        val settings = graph.settings.current
+        return !settings.hasAutoPowerSaving() || settings.autoPowerSaving.enabled
+    }
+
+    private fun observeAutoPowerSaving() {
+        lifecycleScope.launch {
+            graph.settings.settings
+                .map { !it.hasAutoPowerSaving() || it.autoPowerSaving.enabled }
+                .distinctUntilChanged()
+                .collect { powerSaving.setEnabled(it) }
+        }
+    }
 
     override fun setLiveLenses(shown: List<String>) {
         live?.media?.setShown(shown)

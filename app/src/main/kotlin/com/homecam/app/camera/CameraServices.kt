@@ -20,6 +20,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import com.homecam.proto.AlertRegistration
 import com.homecam.proto.Alias
+import com.homecam.proto.AutoPowerSaving
 import com.homecam.proto.AutoSpotlight
 import com.homecam.proto.Armed
 import com.homecam.proto.AuditQuery
@@ -34,6 +35,7 @@ import com.homecam.proto.DetectionMode
 import com.homecam.proto.DetectionReminder
 import com.homecam.proto.DetectionSchedule
 import com.homecam.proto.DetectionZone
+import com.homecam.proto.Focus
 import com.homecam.proto.HardwareProtection
 import com.homecam.proto.Lens
 import com.homecam.proto.LowLight
@@ -67,6 +69,7 @@ import com.homecam.proto.Torch
 import com.homecam.proto.Viewer
 import com.homecam.proto.ViewerList
 import com.homecam.proto.Zoom
+import com.homecam.proto.ZoomInLock
 
 /**
  * The camera's half of the service registry (§4.2). Registration is per authenticated
@@ -266,6 +269,11 @@ class CameraServices(
             media().setZoom(Zoom.parseFrom(request.payload).ratio)
             request.payload
         }
+        peer.register(RpcMessage.Service.SESSION, Controls.Session.FOCUS) { request ->
+            val focus = Focus.parseFrom(request.payload)
+            media().setFocus(focus.x, focus.y, focus.auto)
+            request.payload
+        }
         peer.register(RpcMessage.Service.SESSION, Controls.Session.MANUAL_RECORD) { request ->
             val ask = ManualRecord.parseFrom(request.payload)
             media().recordManually(ask.seconds.takeIf { it > 0 } ?: 30, ask.recording)
@@ -342,6 +350,15 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.MICROPHONE) { setMicrophone(Microphone.parseFrom(it).enabled) }
         settingSetter(peer, Controls.Settings.LOW_LIGHT) { setLowLight(LowLight.parseFrom(it).enabled) }
         settingSetter(peer, Controls.Settings.OSD) { setOsd(Osd.parseFrom(it).enabled) }
+        settingSetter(peer, Controls.Settings.AUTO_POWER_SAVING) {
+            setAutoPowerSaving(AutoPowerSaving.parseFrom(it))
+        }
+        settingSetter(peer, Controls.Settings.ZOOM_IN_LOCK) {
+            // The viewer's toggle carries enabled only. Copying the whole message would
+            // wipe zoom_by_lens, and an omitted map is indistinguishable from an empty one.
+            val asked = ZoomInLock.parseFrom(it)
+            setZoomInLock(zoomInLock.toBuilder().setEnabled(asked.enabled).build())
+        }
         settingSetter(peer, Controls.Settings.ROTATION) {
             val asked = Rotation.parseFrom(it)
             setRotation(
@@ -540,6 +557,8 @@ class CameraServices(
         Controls.Settings.LOW_LIGHT -> "low light"
         Controls.Settings.OSD -> "timestamp overlay"
         Controls.Settings.ROTATION -> "rotation"
+        Controls.Settings.AUTO_POWER_SAVING -> "auto power saving"
+        Controls.Settings.ZOOM_IN_LOCK -> "zoom-in lock"
         Controls.Settings.PRIVACY_MODE -> "privacy mode"
         Controls.Settings.LENS -> LensControl.AUDIT_DETAIL
         Controls.Settings.DETECTION_MODE -> "detection mode"

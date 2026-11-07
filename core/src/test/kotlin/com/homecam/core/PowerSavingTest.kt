@@ -164,6 +164,46 @@ class PowerSavingTest {
         assertEquals(listOf(true to PowerSavingReason.IDLE), log)
     }
 
+    @Test
+    fun `switching auto power saving off releases and refuses to engage until it is on again`() {
+        val harness = Harness()
+        harness.engage()
+        harness.power.setEnabled(false)
+        assertFalse(harness.saving)
+        assertEquals(false to PowerSavingReason.SETTING, harness.log.last())
+
+        harness.now += PowerSaving.QUIET_MS * 4
+        harness.power.tick(sceneIdle = true)
+        assertFalse(harness.saving)
+        assertEquals(2, harness.log.size)
+
+        harness.power.setEnabled(true)
+        harness.power.tick(sceneIdle = true)
+        assertFalse(harness.saving)
+
+        // The release was shorter than a stable engagement, so the quiet period doubled.
+        harness.now += PowerSaving.QUIET_MS
+        harness.power.tick(sceneIdle = true)
+        assertFalse(harness.saving)
+        harness.now += PowerSaving.QUIET_MS
+        harness.power.tick(sceneIdle = true)
+        assertTrue(harness.saving)
+        assertEquals(true to PowerSavingReason.IDLE, harness.log.last())
+    }
+
+    @Test
+    fun `switching auto power saving off while idle logs nothing and does not engage`() {
+        val harness = Harness()
+        harness.power.setEnabled(false)
+        assertFalse(harness.saving)
+        assertTrue(harness.log.isEmpty())
+
+        harness.now += PowerSaving.QUIET_MS * 4
+        harness.power.tick(sceneIdle = true)
+        assertFalse(harness.saving)
+        assertTrue(harness.log.isEmpty())
+    }
+
     private fun assertReason(reason: String, wire: String) {
         val harness = Harness()
         harness.engage()

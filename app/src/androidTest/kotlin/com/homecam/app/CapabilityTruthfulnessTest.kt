@@ -7,6 +7,7 @@ import android.hardware.camera2.CameraManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.homecam.app.camera.CapabilityProvider
+import com.homecam.app.camera.LensSource
 import com.homecam.core.rpc.Protocol
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -65,6 +66,17 @@ class CapabilityTruthfulnessTest {
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH),
             capabilities.spotlight,
         )
+    }
+
+    @Test
+    fun lowLightMatchesExposureCompensationOnThePrimaryLens() {
+        val primary = LensSource.lenses(context).firstOrNull { !it.front }
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val range = primary?.let {
+            manager.getCameraCharacteristics(it.cameraId).get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+        }
+        val expected = range != null && (range.lower != 0 || range.upper != 0)
+        assertEquals(expected, CapabilityProvider.capabilities(context).lowLight)
     }
 
     @Test

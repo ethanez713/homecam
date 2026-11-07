@@ -86,6 +86,10 @@ fun CameraSettingsScreen(
     fingerprint: String = "",
     qualityTiers: List<QualityTier> = CaptureQuality.profiles.map { it.tier },
     onQuality: (QualityTier) -> Unit = {},
+    lowLightSupported: Boolean = false,
+    onLowLight: (Boolean) -> Unit = {},
+    onZoomInLock: (Boolean) -> Unit = {},
+    onAutoPowerSaving: (Boolean) -> Unit = {},
 ) {
     if (settings == null) {
         EmptyState("Reading the camera's settings", busy = true)
@@ -192,6 +196,24 @@ fun CameraSettingsScreen(
                 settings.osd,
                 onOsd,
                 meta = "Burn the time and camera name into the picture",
+            )
+            if (lowLightSupported) {
+                Rule()
+                SwitchRow("Low light", settings.lowLight, onLowLight, meta = "Brighten a dark scene")
+            }
+            Rule()
+            SwitchRow(
+                "Zoom-in lock",
+                settings.zoomInLock.enabled,
+                onZoomInLock,
+                meta = "Keep each lens at the zoom it was left on",
+            )
+            Rule()
+            SwitchRow(
+                "Auto power saving",
+                !settings.hasAutoPowerSaving() || settings.autoPowerSaving.enabled,
+                onAutoPowerSaving,
+                meta = "Slow the camera when nothing is happening",
             )
             Rule()
             ListRow("Name", meta = settings.alias, onClick = { editing = Field.NAME }) { Chevron() }

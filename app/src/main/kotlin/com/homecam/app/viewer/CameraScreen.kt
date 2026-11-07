@@ -97,6 +97,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     var mic by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
     var siren by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
     var zoom by remember(camera.fingerprint, attempt, foreground) { mutableFloatStateOf(0f) }
+    var zoomByLens by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<Map<String, Float>>(emptyMap()) }
     var liveQuality by remember(camera.fingerprint) { mutableIntStateOf(0) }
     val selectedLens = settings?.let(LensSelections::primaryOf) ?: LensCatalog.DEFAULT
     val lensPairs = capabilities?.concurrentLensesList.orEmpty()
@@ -147,7 +148,12 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
             val opened = ViewerSession(context, client)
             session = opened
             val status = runCatching { client.link.runtimeStatus() }.getOrNull()
-            settings = runCatching { client.link.settings() }.getOrNull()
+            val loaded = runCatching { client.link.settings() }.getOrNull()
+            settings = loaded
+            loaded?.zoomInLock?.let { lock ->
+                zoomByLens = lock.zoomByLensMap.toMap()
+                if (lock.enabled) zoom = zoomByLens[LensSelections.primaryOf(loaded)] ?: 0f
+            }
             capabilities = client.link.capabilities()
             phrase = client.verificationPhrase.orEmpty()
             via = if (address.host == camera.remoteHost) "Remote" else "Home network"
@@ -358,7 +364,14 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         zoom = zoom,
                         onTorch = { on -> torch = on; scope.launch { it.setTorch(on) } },
                         onMic = { on -> mic = on; scope.launch { it.setPushToTalk(on) } },
-                        onZoom = { value -> zoom = value; scope.launch { it.setZoom(value) } },
+                        onZoom = { value ->
+                            zoom = value
+                            val id = settings?.let(LensSelections::primaryOf)
+                            if (id != null && settings?.zoomInLock?.enabled == true) {
+                                zoomByLens = zoomByLens + (id to value)
+                            }
+                            scope.launch { it.setZoom(value) }
+                        },
                         liveQuality = liveQuality,
                         onLiveQuality = { height ->
                             liveQuality = height
@@ -371,8 +384,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                                 settings = session.link.setLens(
                                     LensSelections.withSecondary(id, secondaryLens, lensPairs),
                                 )
-                                zoom = 0f
+                                val lock = settings?.zoomInLock
+                                val remembered = zoomByLens[id] ?: lock?.zoomByLensMap?.get(id)
+                                zoom = if (lock?.enabled == true) remembered ?: 0f else 0f
                                 torch = false
+                                if (lock?.enabled == true) session.setZoom(zoom)
                             }
                         },
                         secondaryLens = secondaryLens,
@@ -437,6 +453,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 onTurnOffPrivacy = { scope.launch { turnPrivacyOff() } },
                 onSetRemoteAddress = { editingRemote = true },
                 onBack = onExit,
+                onFocus = { x, y -> open?.let { session -> scope.launch { session.setFocus(x, y) } } },
                 onShownLenses = showing@{ shown ->
                     val session = open ?: return@showing
                     scope.launch {
@@ -543,6 +560,22 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                     }
                 },
                 onOsd = { on -> edit(scope, open, say) { settings = it.link.setOsd(on) } },
+                lowLightSupported = capabilities?.lowLight == true,
+                onLowLight = { on -> edit(scope, open, say) { settings = it.link.setLowLight(on) } },
+                onZoomInLock = { on ->
+                    edit(scope, open, say) { session ->
+                        if (on) {
+                            val id = settings?.let(LensSelections::primaryOf)
+                            if (id != null) zoomByLens = zoomByLens + (id to zoom)
+                        }
+                        val next = session.link.setZoomInLock(on)
+                        settings = next
+                        zoomByLens = next.zoomInLock.zoomByLensMap + zoomByLens
+                    }
+                },
+                onAutoPowerSaving = { on ->
+                    edit(scope, open, say) { settings = it.link.setAutoPowerSaving(on) }
+                },
                 onPrivacyMode = { on ->
                     if (!on && state is LiveState.Privacy) {
                         scope.launch { turnPrivacyOff() }

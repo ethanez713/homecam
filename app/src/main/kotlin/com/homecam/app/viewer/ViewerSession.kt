@@ -5,6 +5,7 @@ import com.homecam.app.media.ViewerMediaSession
 import com.homecam.app.net.SignalingClient
 import com.homecam.core.rpc.Controls
 import com.homecam.proto.Bye
+import com.homecam.proto.Focus
 import com.homecam.proto.Candidate
 import com.homecam.proto.LiveLenses
 import com.homecam.proto.Presence
@@ -154,6 +155,14 @@ class ViewerSession(
         client.rpc.request(
             RpcMessage.Service.SESSION, Controls.Session.ZOOM,
             com.homecam.proto.Zoom.newBuilder().setRatio(ratio).build().toByteString(),
+        )
+    }
+
+    /** [x] and [y] are 0..1 on the upright picture. [auto] returns the camera to continuous autofocus. */
+    suspend fun setFocus(x: Float, y: Float, auto: Boolean = false) {
+        client.rpc.request(
+            RpcMessage.Service.SESSION, Controls.Session.FOCUS,
+            Focus.newBuilder().setX(x).setY(y).setAuto(auto).build().toByteString(),
         )
     }
 

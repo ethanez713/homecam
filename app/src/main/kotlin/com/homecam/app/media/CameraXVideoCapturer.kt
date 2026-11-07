@@ -14,7 +14,9 @@ import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.CameraState
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
+import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.core.SurfaceRequest
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -23,8 +25,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
+import com.homecam.core.lens.FocusMap
 import com.homecam.core.lens.LensEntry
 import com.homecam.core.lens.ZoomMap
+import kotlin.math.roundToInt
 import org.webrtc.CapturerObserver
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
@@ -53,19 +57,23 @@ class CameraXVideoCapturer(
     @Volatile private var thermalThrottle = false
 
     /**
-     * A rebind caused by the other lens must put this camera back how the user left it.
-     * [startCapture] clears both, which is what a format or lens change already did: the
-     * new session opens at the lens minimum with the torch off.
+     * A rebind opens a new session, which has no torch. Zoom starts at the lens minimum
+     * unless the zoom-in lock asked this bind to keep the position the viewer left.
      */
     @Volatile private var userZoom: Float? = null
     @Volatile private var torchOn = false
+    @Volatile private var zoomLockEnabled = false
+    @Volatile private var zoomOnBind: Float? = null
+    @Volatile private var lowLight = false
+    /** Sensor orientation of the bound lens. The viewer's point is on the upright picture. */
+    @Volatile private var sensorRotationDegrees = 0
     @Volatile private var bindGeneration = 0
 
     private var helper: SurfaceTextureHelper? = null
     private var observer: CapturerObserver? = null
     private var preview: Preview? = null
     private var surface: Surface? = null
-    private var camera: Camera? = null
+    @Volatile private var camera: Camera? = null
     private var stateSource: LiveData<CameraState>? = null
 
     /** Latest [CameraState] error from the bound camera. Cleared once it is open again. */
@@ -98,7 +106,7 @@ class CameraXVideoCapturer(
         format = Triple(width, height, framerate)
         val helper = helper ?: return
         val observer = observer ?: return
-        userZoom = null
+        userZoom = if (zoomLockEnabled) zoomOnBind else null
         torchOn = false
         val generation = ++bindGeneration
 
@@ -129,6 +137,7 @@ class CameraXVideoCapturer(
             val selector = selectorFor(lens)
             val sensorRotation = selector.filter(cameraProvider.availableCameraInfos)
                 .firstOrNull()?.sensorRotationDegrees ?: 0
+            sensorRotationDegrees = sensorRotation
 
             useCase.setSurfaceProvider(main) { request: SurfaceRequest ->
                 // The camera writes sensor-oriented buffers, but the SurfaceTexture transform
@@ -230,13 +239,49 @@ class CameraXVideoCapturer(
         val supported = Camera2CameraInfo.from(bound.cameraInfo)
             .getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             .orEmpty()
-        val fixed = { fps: Int -> supported.firstOrNull { it.lower == fps && it.upper == fps } }
-        val range = fixed(targetFps) ?: fixed(format.third) ?: return
+        // The ceiling stays at the rate power saving or thermal throttle already asked for,
+        // so a longer exposure cannot pull the sensor back up to the full rate.
+        val ranges = supported.toList()
+        val range = if (lowLight && compensationSupported(bound)) {
+            lowLightRange(ranges, targetFps) ?: fixedRange(ranges, targetFps) ?: fixedRange(ranges, format.third)
+        } else {
+            fixedRange(ranges, targetFps) ?: fixedRange(ranges, format.third)
+        } ?: return
         Camera2CameraControl.from(bound.cameraControl).setCaptureRequestOptions(
             CaptureRequestOptions.Builder()
                 .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range)
                 .build()
         )
+        applyExposure(bound)
+    }
+
+    private fun fixedRange(supported: List<Range<Int>>, fps: Int): Range<Int>? =
+        supported.firstOrNull { it.lower == fps && it.upper == fps }
+
+    /** Widest exposure at [fps]: the lowest floor the sensor offers that still caps at [fps]. */
+    private fun lowLightRange(supported: List<Range<Int>>, fps: Int): Range<Int>? =
+        supported.filter { it.upper == fps && it.lower >= LOW_LIGHT_MIN_FPS }.minByOrNull { it.lower }
+
+    private fun compensationSupported(bound: Camera): Boolean {
+        val state = bound.cameraInfo.exposureState
+        return state.isExposureCompensationSupported && state.exposureCompensationStep.toFloat() > 0f
+    }
+
+    private fun applyExposure(bound: Camera) {
+        val state = bound.cameraInfo.exposureState
+        if (!state.isExposureCompensationSupported) return
+        val index = if (lowLight) oneStopIndex(bound) ?: return else 0
+        val clamped = index.coerceIn(state.exposureCompensationRange.lower, state.exposureCompensationRange.upper)
+        if (state.exposureCompensationIndex == clamped) return
+        bound.cameraControl.setExposureCompensationIndex(clamped)
+    }
+
+    private fun oneStopIndex(bound: Camera): Int? {
+        val state = bound.cameraInfo.exposureState
+        if (!compensationSupported(bound)) return null
+        val step = state.exposureCompensationStep.toFloat()
+        return (1f / step).roundToInt()
+            .coerceIn(state.exposureCompensationRange.lower, state.exposureCompensationRange.upper)
     }
 
     private fun watchCameraState(bound: Camera) {
@@ -276,6 +321,53 @@ class CameraXVideoCapturer(
     }
 
     /**
+     * [ratio] is the position to restore on the next bind, or null when this lens has
+     * none yet. Off leaves the live zoom alone; the next bind is what clears it.
+     */
+    fun setZoomLock(enabled: Boolean, ratio: Float?) {
+        zoomLockEnabled = enabled
+        zoomOnBind = if (enabled) ratio?.coerceIn(0f, 1f) else null
+    }
+
+    /**
+     * Lowers the exposure floor and adds one stop, when this lens can compensate.
+     * Off restores the fixed frame-rate range. Both ride [applyFrameRate], so an idle
+     * or throttled rate keeps its ceiling.
+     */
+    fun setLowLight(enabled: Boolean) {
+        if (enabled == lowLight) return
+        lowLight = enabled
+        reapplyFrameRate()
+    }
+
+    /**
+     * [x] and [y] are 0..1 on the upright picture the viewer shows. [auto] returns to
+     * continuous autofocus. The metering point is in the sensor buffer, so the point
+     * is mapped back through the sensor rotation plus the orientation added to the frame.
+     */
+    fun setFocus(x: Float, y: Float, auto: Boolean, orientationDegrees: Int) {
+        ContextCompat.getMainExecutor(context).execute {
+            val control = camera?.cameraControl ?: return@execute
+            if (auto) {
+                control.cancelFocusAndMetering()
+                return@execute
+            }
+            val (sx, sy) = FocusMap.toSensor(x, y, sensorRotationDegrees + orientationDegrees)
+            val activePreview = preview
+            val factory = if (activePreview != null) {
+                SurfaceOrientedMeteringPointFactory(1f, 1f, activePreview)
+            } else {
+                SurfaceOrientedMeteringPointFactory(1f, 1f)
+            }
+            val action = FocusMeteringAction.Builder(
+                factory.createPoint(sx, sy),
+                FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE or FocusMeteringAction.FLAG_AWB,
+            ).disableAutoCancel().build()
+            control.startFocusAndMetering(action)
+        }
+    }
+
+    /**
      * [ratio] is a linear 0..1 position across the device's zoom range rather than an
      * absolute factor, because the range differs per lens and a viewer slider that means
      * something different on each phone is worse than no slider.
@@ -283,12 +375,23 @@ class CameraXVideoCapturer(
     fun setZoom(ratio: Float) {
         val position = ratio.coerceIn(0f, 1f)
         userZoom = position
+        if (zoomLockEnabled) zoomOnBind = position
         val active = lens
         ContextCompat.getMainExecutor(context).execute {
             if (active == null) camera?.cameraControl?.setLinearZoom(position)
             else camera?.cameraControl?.setZoomRatio(ZoomMap.factorAt(position, active.zoomMin, active.zoomMax))
         }
     }
+
+    /** The slider position last asked for, if the viewer has set one since this bind. */
+    internal fun zoomPosition(): Float? = userZoom
+
+    internal fun linearZoom(): Float? = camera?.cameraInfo?.zoomState?.value?.linearZoom
+
+    internal fun exposureCompensationIndex(): Int? = camera?.cameraInfo?.exposureState?.exposureCompensationIndex
+
+    /** One extra stop in this lens's index, or null when compensation is not supported. */
+    internal fun oneStopCompensationIndex(): Int? = camera?.let(::oneStopIndex)
 
     private fun applyRememberedControls(bound: Camera) {
         val active = lens
@@ -328,6 +431,9 @@ class CameraXVideoCapturer(
 
     companion object {
         const val IDLE_FPS = 15
+
+        /** AE floors below this are too dark a trade for a home camera that still has to see motion. */
+        private const val LOW_LIGHT_MIN_FPS = 10
 
         fun errorName(code: Int): String = when (code) {
             CameraState.ERROR_MAX_CAMERAS_IN_USE -> "MAX_CAMERAS_IN_USE"

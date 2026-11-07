@@ -2,10 +2,13 @@ package com.homecam.app.camera
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
+import com.homecam.core.lens.LensEntry
 import com.homecam.core.media.CaptureQuality
 import com.homecam.core.rpc.Protocol
 import com.homecam.proto.Capabilities
@@ -52,7 +55,18 @@ object CapabilityProvider {
             .addAllQualityTiers(CaptureQuality.supported(resolutions))
             .setHardwareProtection(true)
             .setThermalStatusSupported(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            .setLowLight(lowLightSupported(context, lenses.firstOrNull { !it.front }))
             .build()
+    }
+
+    /** A compensation range of [0, 0] is the HAL saying the control is not implemented. */
+    private fun lowLightSupported(context: Context, lens: LensEntry?): Boolean {
+        val id = lens?.cameraId ?: return false
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return false
+        val range = runCatching { manager.getCameraCharacteristics(id) }.getOrNull()
+            ?.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+            ?: return false
+        return range.lower != 0 || range.upper != 0
     }
 
     private fun encoderTier(): Capabilities.EncoderTier = when {

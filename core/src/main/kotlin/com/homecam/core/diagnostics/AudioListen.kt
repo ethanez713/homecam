@@ -23,4 +23,5 @@ object PowerSavingReason {
     const val MOTION = "motion"
     const val SOUND = "sound"
     const val MANUAL_CLIP = "manual_clip"
+    const val SETTING = "setting"
 }

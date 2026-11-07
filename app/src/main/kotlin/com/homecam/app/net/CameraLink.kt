@@ -5,6 +5,7 @@ import com.homecam.core.rpc.RpcPeer
 import java.io.File
 import com.homecam.proto.Alias
 import com.homecam.proto.Armed
+import com.homecam.proto.AutoPowerSaving
 import com.homecam.proto.AlertRegistration
 import com.homecam.proto.Capabilities
 import com.homecam.proto.AuditQuery
@@ -14,6 +15,7 @@ import com.homecam.proto.ClipList
 import com.homecam.proto.ClipPin
 import com.homecam.proto.ManualRecord
 import com.homecam.proto.DetectionMode
+import com.homecam.proto.LowLight
 import com.homecam.proto.Microphone
 import com.homecam.proto.Osd
 import com.homecam.proto.RecordingMode
@@ -29,6 +31,7 @@ import com.homecam.proto.LensSelection
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Thumbnail
 import com.homecam.proto.ViewerList
+import com.homecam.proto.ZoomInLock
 
 /**
  * Typed calls the viewer makes against a camera. Thin on purpose — it exists so screens
@@ -134,6 +137,31 @@ class CameraLink(private val peer: RpcPeer) {
             RpcMessage.Service.SETTINGS,
             Controls.Settings.OSD,
             Osd.newBuilder().setEnabled(enabled).build().toByteString(),
+        )
+    )
+
+    suspend fun setLowLight(enabled: Boolean): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.LOW_LIGHT,
+            LowLight.newBuilder().setEnabled(enabled).build().toByteString(),
+        )
+    )
+
+    /** Enabled only. The camera keeps the per-lens zoom map that lives with the lock. */
+    suspend fun setZoomInLock(enabled: Boolean): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.ZOOM_IN_LOCK,
+            ZoomInLock.newBuilder().setEnabled(enabled).build().toByteString(),
+        )
+    )
+
+    suspend fun setAutoPowerSaving(enabled: Boolean): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.AUTO_POWER_SAVING,
+            AutoPowerSaving.newBuilder().setEnabled(enabled).build().toByteString(),
         )
     )
 

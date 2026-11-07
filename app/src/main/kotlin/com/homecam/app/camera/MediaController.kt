@@ -21,6 +21,9 @@ interface MediaController {
     suspend fun sessionStatus(viewerFingerprint: String): SessionStatus
     fun setTorch(on: Boolean)
     fun setZoom(ratio: Float)
+
+    /** [x] and [y] are 0..1 on the upright picture. [auto] returns to continuous autofocus. */
+    fun setFocus(x: Float, y: Float, auto: Boolean)
     fun setLiveLenses(shown: List<String>)
     fun setPushToTalk(active: Boolean)
     /** Applies [mask] to captures currently on [lensId]. Other lenses keep their own. */
