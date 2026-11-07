@@ -30,9 +30,11 @@ import com.homecam.app.detect.SharedObjectDetector
 import com.homecam.app.media.CameraBinder
 import com.homecam.app.media.CameraMediaSession
 import com.homecam.app.media.CameraXVideoCapturer
+import com.homecam.app.media.ClipRecorder
 import com.homecam.app.media.ContinuousCapture
 import com.homecam.app.media.WebRtc
 import com.homecam.core.diagnostics.PowerSavingReason
+import com.homecam.core.media.CaptureQuality
 import com.homecam.core.health.Axis
 import com.homecam.core.lens.LensEntry
 import com.homecam.core.lens.LensRegions
@@ -47,6 +49,7 @@ import com.homecam.core.media.CaptureWatchdog
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcException
 import com.homecam.proto.AuditEvent
+import com.homecam.proto.QualityTier
 import com.homecam.proto.RpcError
 import com.homecam.proto.Rotation
 import com.homecam.proto.Bye
@@ -131,6 +134,8 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
      * the displaced viewer gets SESSION_REPLACED, which says what happened.
      */
     private var live: LiveSession? = null
+    private var liveRequestWidth = 0
+    private var liveRequestHeight = 0
 
     private class LiveSession(
         val peer: SignalingServer.PeerSession,
@@ -152,10 +157,13 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         binder = CameraBinder(this, this).also { it.onConcurrentBindFailed = ::onConcurrentBindFailed }
         clips = ClipStore(this, graph.database.clips())
         detector = SharedObjectDetector(this)
+        val quality = currentQuality()
         primary = openPipeline(
             lensId = LensSelections.primaryOf(graph.settings.current),
             lens = selectedLens(),
             reportManual = true,
+            format = formatOf(quality),
+            recorderConfig = configOf(quality),
             startCapture = !privacyApplied,
         )
         powerSaving = PowerSaving(
@@ -176,7 +184,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             live = LiveSessionThrottle(
                 session = { live?.media },
                 format = { capture.format },
-                applyFormat = { capture.setFormat(it) },
+                applyFormat = { next ->
+                    capture.setFormat(next)
+                    applyLiveScale()
+                },
             ),
             screen = screen,
         ).also { created ->
@@ -215,6 +226,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         observeArming()
         observeLens()
         observeRecordingMode()
+        observeQuality()
         observeHardwareProtection()
         observeSoundSettings()
         observeRotation()
@@ -672,7 +684,13 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             // The proven pair names the largest size both lenses held. The second lens also
             // stays at or below whatever the primary is running right now.
             val format = cappedFormat(entry.id, capture.format)
-            val pipeline = openPipeline(entry.id, entry, reportManual = false, format = format)
+            val pipeline = openPipeline(
+                entry.id,
+                entry,
+                reportManual = false,
+                format = format,
+                recorderConfig = configOf(currentQuality(), format),
+            )
             if (privacyOn()) {
                 pipeline.stop()
                 return
@@ -709,11 +727,66 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         )
     }
 
-    private fun applyCaptureFormat(next: ContinuousCapture.Format) {
-        capture.setFormat(next)
-        val second = secondary ?: return
-        val capped = cappedFormat(second.lensId, capture.format)
-        if (second.capture.format != capped) second.capture.setFormat(capped)
+    private fun currentQuality(): CaptureQuality.Profile =
+        CaptureQuality.profile(CaptureQuality.clamp(graph.settings.current.qualityTier, CapabilityProvider.resolutions(this)))
+
+    private fun formatOf(profile: CaptureQuality.Profile) =
+        ContinuousCapture.Format(profile.width, profile.height, profile.fps)
+
+    private fun configOf(
+        profile: CaptureQuality.Profile,
+        format: ContinuousCapture.Format = formatOf(profile),
+    ) = ClipRecorder.Config(
+        width = format.width,
+        height = format.height,
+        framerate = format.framerate,
+        bitrate = profile.bitrateBps,
+    )
+
+    private fun observeQuality() {
+        lifecycleScope.launch {
+            graph.settings.settings.map { it.qualityTier }.distinctUntilChanged().collect { tier ->
+                val clamped = CaptureQuality.clamp(tier, CapabilityProvider.resolutions(this@CameraService))
+                if (clamped != tier) {
+                    graph.settings.update { setQualityTier(clamped) }
+                } else {
+                    applyQuality(clamped)
+                }
+            }
+        }
+    }
+
+    private fun applyQuality(tier: QualityTier) {
+        if (!::primary.isInitialized) return
+        val chosen = CaptureQuality.profile(tier)
+        val format = formatOf(chosen)
+        if (capture.format != format) capture.setFormat(format)
+        recorder.applyConfig(
+            recorder.config.copy(
+                width = format.width,
+                height = format.height,
+                framerate = format.framerate,
+                bitrate = chosen.bitrateBps,
+            ),
+        )
+        val second = secondary
+        if (second != null) {
+            val capped = cappedFormat(second.lensId, capture.format)
+            if (second.capture.format != capped) second.capture.setFormat(capped)
+            second.recorder.applyConfig(
+                second.recorder.config.copy(
+                    width = capped.width,
+                    height = capped.height,
+                    framerate = capped.framerate,
+                    bitrate = chosen.bitrateBps,
+                ),
+            )
+        }
+        applyLiveScale()
+    }
+
+    private fun applyLiveScale() {
+        live?.media?.setLiveResolution(liveRequestWidth, liveRequestHeight)
     }
 
     private fun announceSecondary(on: Boolean, reason: String) {
@@ -739,6 +812,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         lens: LensEntry?,
         reportManual: Boolean,
         format: ContinuousCapture.Format? = null,
+        recorderConfig: ClipRecorder.Config? = null,
         startCapture: Boolean = true,
     ): LensPipeline {
         val pipeCapture = ContinuousCapture(this, this, binder, bindFirst = !::primary.isInitialized)
@@ -757,7 +831,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         } else if (format != null) {
             pipeCapture.setFormat(format)
         }
-        val pipeRecorder = Recorder(graph, pipeCapture, clips, lensId).also { created ->
+        val pipeRecorder = Recorder(graph, pipeCapture, clips, lensId, config = recorderConfig ?: ClipRecorder.Config()).also { created ->
             if (startCapture) created.start() else created.setSuppressed(true)
             created.setArmed(graph.settings.current.armed)
             created.setMode(graph.settings.current.recordingMode)
@@ -915,6 +989,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         graph.diagnostics.liveStart(media.id, listOfNotNull(primaryId, secondaryId))
         logLiveStats(session)
         throttle.onSessionOpen()
+        applyLiveScale()
         powerSaving.release(PowerSavingReason.VIEWER)
         audioDetection.setLive(true)
         showLive(peer.label)
@@ -973,13 +1048,11 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     override fun setPushToTalk(active: Boolean) = Unit
 
     override suspend fun setResolution(resolution: com.homecam.proto.Resolution): SessionStatus {
-        val next = ContinuousCapture.Format(
-            width = resolution.width.coerceIn(320, 1920),
-            height = resolution.height.coerceIn(240, 1080),
-            framerate = resolution.fps.coerceIn(5, 30),
-        )
-        // A throttled live session stays at the lower tier; the request is what release restores.
-        if (!throttle.offerFormat(next)) applyCaptureFormat(next)
+        // The viewer's resolution scales the live sender only. The recording keeps the
+        // capture's encoder and bitrate (D6); height 0 asks for that capture size.
+        liveRequestWidth = resolution.width
+        liveRequestHeight = resolution.height
+        applyLiveScale()
         return sessionStatus(live?.peer?.viewer?.shortFingerprint.orEmpty())
     }
 

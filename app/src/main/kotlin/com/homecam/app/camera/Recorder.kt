@@ -30,8 +30,13 @@ class Recorder(
     private val capture: ContinuousCapture,
     val clips: ClipStore,
     var lensId: String = "",
+    config: ClipRecorder.Config = ClipRecorder.Config(),
 ) {
-    private val recorder = ClipRecorder(clips.directory)
+    private val recorder = ClipRecorder(clips.directory, config)
+
+    val config: ClipRecorder.Config get() = recorder.config
+
+    fun applyConfig(config: ClipRecorder.Config) = recorder.applyConfig(config)
 
     @Volatile private var armed = false
     @Volatile private var mode = RecordingMode.DETECTION

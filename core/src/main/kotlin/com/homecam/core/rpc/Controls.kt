@@ -49,6 +49,7 @@ object Controls {
         const val AUTO_SPOTLIGHT = 26
         const val RETENTION = 32
         const val RECORDING_MODE = 33
+        const val QUALITY_TIER = 34
         const val HARDWARE_PROTECTION = 35
     }
 

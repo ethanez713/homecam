@@ -10,6 +10,7 @@ import com.homecam.core.health.RecordingTimer
 import com.homecam.core.lens.LensRegions
 import com.homecam.core.lens.LensSelections
 import com.homecam.core.media.AutoRotation
+import com.homecam.core.media.CaptureQuality
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcException
 import com.homecam.core.rpc.RpcPeer
@@ -42,6 +43,7 @@ import com.homecam.proto.Orientation
 import com.homecam.proto.PrivacyMask
 import com.homecam.proto.PrivacyMode
 import com.homecam.proto.PushToTalk
+import com.homecam.proto.Quality
 import com.homecam.proto.Resolution
 import com.homecam.proto.RecordingModeSetting
 import com.homecam.proto.RetentionPolicy
@@ -371,6 +373,11 @@ class CameraServices(
             setBoundingBoxOverlay(BoundingBoxOverlay.parseFrom(it).enabled)
         }
         settingSetter(peer, Controls.Settings.RETENTION) { setRetention(RetentionPolicy.parseFrom(it)) }
+        settingSetter(peer, Controls.Settings.QUALITY_TIER) {
+            setQualityTier(
+                CaptureQuality.clamp(Quality.parseFrom(it).tier, CapabilityProvider.resolutions(graph.app)),
+            )
+        }
         settingSetter(peer, Controls.Settings.RECORDING_MODE) {
             val (mode, revert) = RecordingTimer.applyRequest(RecordingModeSetting.parseFrom(it), System.currentTimeMillis())
             setRecordingMode(mode)
@@ -539,6 +546,7 @@ class CameraServices(
         Controls.Settings.BOUNDING_BOX_OVERLAY -> "bounding boxes"
         Controls.Settings.RETENTION -> "retention"
         Controls.Settings.RECORDING_MODE -> "recording mode"
+        Controls.Settings.QUALITY_TIER -> "quality"
         Controls.Settings.HARDWARE_PROTECTION -> "hardware protection"
         Controls.Settings.AUTO_SPOTLIGHT -> "auto spotlight"
         Controls.Settings.DETECTION_REMINDER -> "detection reminder"

@@ -50,7 +50,7 @@ import java.util.ArrayDeque
 @UnstableApi
 class ClipRecorder(
     private val clipsDir: File,
-    private val config: Config = Config(),
+    config: Config = Config(),
 ) : VideoSink {
 
     data class Config(
@@ -68,9 +68,11 @@ class ClipRecorder(
 
     private val lock = Any()
 
-    private val mime = if (hasHardwareEncoder(HEVC, config.width, config.height)) HEVC else AVC
-    private val bitrate =
-        if (mime == HEVC) config.bitrate * HEVC_BITRATE_RATIO / 100 else config.bitrate
+    var config: Config = config
+        private set
+
+    private var mime = codecFor(config)
+    private var bitrate = rateFor(config, mime)
 
     private var encoder: MediaCodec? = null
     private var renderer: EglRenderer? = null
@@ -120,6 +122,23 @@ class ClipRecorder(
             if (encoder != null) return
             this.eglContext = eglContext
             startEncoderLocked(portrait = false)
+        }
+    }
+
+    fun applyConfig(next: Config) {
+        synchronized(lock) {
+            if (next == config) return
+            val restart = encoder != null
+            if (restart) {
+                endClipLocked()
+                releaseEncoderLocked()
+                preRoll.clear()
+                formatForMuxer = null
+            }
+            config = next
+            mime = codecFor(config)
+            bitrate = rateFor(config, mime)
+            if (restart) startEncoderLocked(encodingPortrait)
         }
     }
 
@@ -401,6 +420,12 @@ class ClipRecorder(
         const val HEVC_BITRATE_RATIO = 60
         const val METADATA_MIME = "application/x-homecam-detections"
         const val DRAIN_TIMEOUT_US = 100_000L
+
+        private fun codecFor(config: Config): String =
+            if (hasHardwareEncoder(HEVC, config.width, config.height)) HEVC else AVC
+
+        private fun rateFor(config: Config, mime: String): Int =
+            if (mime == HEVC) config.bitrate * HEVC_BITRATE_RATIO / 100 else config.bitrate
 
         /**
          * A software HEVC encoder would cost more battery and heat than the bitrate saves,

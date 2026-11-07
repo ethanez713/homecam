@@ -18,6 +18,8 @@ import com.homecam.proto.Microphone
 import com.homecam.proto.RecordingMode
 import com.homecam.proto.RecordingModeSetting
 import com.homecam.proto.PrivacyMode
+import com.homecam.proto.Quality
+import com.homecam.proto.QualityTier
 import com.homecam.proto.Rotation
 import com.homecam.proto.RevokeViewer
 import com.homecam.proto.RpcMessage
@@ -82,6 +84,14 @@ class CameraLink(private val peer: RpcPeer) {
             RecordingModeSetting.newBuilder()
                 .setMode(mode).setRevertAfterMinutes(forMinutes).setRevertTo(revertTo)
                 .build().toByteString(),
+        )
+    )
+
+    suspend fun setQuality(tier: QualityTier): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.QUALITY_TIER,
+            Quality.newBuilder().setTier(tier).build().toByteString(),
         )
     )
 

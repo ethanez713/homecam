@@ -97,6 +97,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     var mic by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
     var siren by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
     var zoom by remember(camera.fingerprint, attempt, foreground) { mutableFloatStateOf(0f) }
+    var liveQuality by remember(camera.fingerprint) { mutableIntStateOf(0) }
     val selectedLens = settings?.let(LensSelections::primaryOf) ?: LensCatalog.DEFAULT
     val lensPairs = capabilities?.concurrentLensesList.orEmpty()
     val secondaryLens = settings?.lens?.secondaryList?.firstOrNull()
@@ -166,6 +167,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
             mediaStarted = true
             val startingLenses = settings?.lens?.secondaryList?.toList()
             opened.start()
+            if (liveQuality != 0) opened.setLiveResolution(liveQuality)
             negotiatedLenses = startingLenses ?: emptyList()
         }.onFailure {
             Log.w(TAG, "live session to ${camera.alias} failed at ${state::class.simpleName}", it)
@@ -204,7 +206,10 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
         val current = settings?.lens?.secondaryList?.toList() ?: return@LaunchedEffect
         if (baseline == current) return@LaunchedEffect
         negotiatedLenses = current
-        runCatching { session.restart() }.onFailure { Log.w(TAG, "live session restart failed", it) }
+        runCatching {
+            session.restart()
+            if (liveQuality != 0) session.setLiveResolution(liveQuality)
+        }.onFailure { Log.w(TAG, "live session restart failed", it) }
     }
 
     // The picture of the camera's health is only as good as its last reading, and a pause or a
@@ -354,6 +359,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         onTorch = { on -> torch = on; scope.launch { it.setTorch(on) } },
                         onMic = { on -> mic = on; scope.launch { it.setPushToTalk(on) } },
                         onZoom = { value -> zoom = value; scope.launch { it.setZoom(value) } },
+                        liveQuality = liveQuality,
+                        onLiveQuality = { height ->
+                            liveQuality = height
+                            scope.launch { it.setLiveResolution(height) }
+                        },
                         lenses = if (gates?.lensSwitch == false) emptyList() else capabilities?.lensesList.orEmpty(),
                         lens = selectedLens,
                         onLens = { id ->
@@ -541,6 +551,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 },
                 onRecordingMode = { mode ->
                     edit(scope, open, say) { settings = it.link.setRecordingMode(mode) }
+                },
+                qualityTiers = capabilities?.qualityTiersList
+                    ?: com.homecam.core.media.CaptureQuality.profiles.map { it.tier },
+                onQuality = { tier ->
+                    edit(scope, open, say) { settings = it.link.setQuality(tier) }
                 },
                 projectedDays = projectedDays,
                 protection = settings?.takeIf { capabilities?.hardwareProtection == true }

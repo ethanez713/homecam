@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.homecam.core.media.CaptureQuality
 import com.homecam.core.signaling.DtlsCommitment
 import com.homecam.core.signaling.DtlsFingerprint
 import com.homecam.proto.Bye
@@ -64,6 +65,12 @@ class CameraMediaSession(
     private var lastBytesSent = 0L
     private var lastStatsAtMs = 0L
     private var bitrateCapBps = MAX_BITRATE_BPS
+    private var requestedWidth = 0
+    private var requestedHeight = 0
+
+    /** Downscale on the primary sender. 1.0 leaves the capture size alone. */
+    var scaleResolutionDownBy: Double = 1.0
+        private set
 
     fun start(lenses: List<LensVideo>, maxBitrateBps: Int = MAX_BITRATE_BPS) {
         val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
@@ -159,14 +166,14 @@ class CameraMediaSession(
         val existing = tracks[lensId]
         if (existing != null) {
             sender.setTrack(existing, false)
-            capSender(sender)
+            capSender(sender, lensId)
             return
         }
         val capture = captures[lensId]?.takeIf { it.running } ?: return
         val track = capture.newTrack(nextTrackId(lensId)) ?: return
         tracks[lensId] = track
         sender.setTrack(track, false)
-        capSender(sender)
+        capSender(sender, lensId)
     }
 
     private fun nextTrackId(lensId: String) = "homecam-video-$lensId-${trackSerial.incrementAndGet()}"
@@ -174,11 +181,25 @@ class CameraMediaSession(
     /** Lowers or restores the live cap without rebuilding the session. Each video sender gets the same cap. */
     fun setBitrateCap(maxBitrateBps: Int) = applyBitrateCap(maxBitrateBps)
 
+    /**
+     * Scales each sender down from its own capture. Height 0 keeps that capture's size.
+     * The recording is not a sender and is not touched.
+     */
+    fun setLiveResolution(width: Int, height: Int) {
+        requestedWidth = width
+        requestedHeight = height
+        if (senders.isEmpty()) {
+            scaleResolutionDownBy = factorFor(primaryLensId)
+            return
+        }
+        senders.forEach { (id, sender) -> capSender(sender, id) }
+    }
+
     private fun applyBitrateCap(maxBitrateBps: Int) {
         bitrateCapBps = maxBitrateBps
         val connection = connection ?: return
         if (senders.isEmpty()) return
-        senders.values.forEach { capSender(it) }
+        senders.forEach { (id, sender) -> capSender(sender, id) }
         val count = senders.size
         val max = maxBitrateBps * count
         val start = (START_BITRATE_BPS * count).coerceAtMost(max)
@@ -188,14 +209,24 @@ class CameraMediaSession(
         connection.setBitrate(min, start, max)
     }
 
-    private fun capSender(sender: RtpSender) {
+    private fun factorFor(lensId: String): Double {
+        val format = captures[lensId]?.format ?: return 1.0
+        return CaptureQuality.scaleDownBy(format.width, format.height, requestedWidth, requestedHeight)
+    }
+
+    private fun capSender(sender: RtpSender, lensId: String) {
+        val factor = factorFor(lensId)
+        if (lensId == primaryLensId) scaleResolutionDownBy = factor
         sender.parameters = sender.parameters.apply {
             // Detail is what a camera feed is for; a jerkier picture you can read beats a
             // smooth one you cannot.
             degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
             // Without a per-encoding cap libwebrtc holds anything above 540p to 2.5 Mbps,
             // whatever setBitrate allows — thin for 1080p.
-            encodings.forEach { it.maxBitrateBps = bitrateCapBps }
+            encodings.forEach {
+                it.maxBitrateBps = bitrateCapBps
+                it.scaleResolutionDownBy = factor
+            }
         }
     }
 

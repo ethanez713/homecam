@@ -6,8 +6,10 @@ import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
+import com.homecam.core.media.CaptureQuality
 import com.homecam.core.rpc.Protocol
 import com.homecam.proto.Capabilities
+import com.homecam.proto.Resolution
 
 /**
  * The camera's honest answer to "what can you do" (Phase 2). Every field is read from the
@@ -20,10 +22,17 @@ import com.homecam.proto.Capabilities
  */
 object CapabilityProvider {
 
+    fun resolutions(context: Context): List<Resolution> {
+        val lenses = LensSource.lenses(context)
+        return lenses.firstOrNull { !it.front }?.let { LensSource.resolutions(context, it) }
+            ?: LensSource.defaultResolutions()
+    }
+
     fun capabilities(context: Context): Capabilities {
         val pm = context.packageManager
         val lenses = LensSource.lenses(context)
         val hasFlash = pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH)
+        val resolutions = resolutions(context)
         return Capabilities.newBuilder()
             .setProtocolVersion(Protocol.VERSION)
             .setTorch(hasFlash)
@@ -39,7 +48,8 @@ object CapabilityProvider {
             .setSoundDetection(false)
             .setContinuousRecording(true)
             .setHardwareEncoderTier(encoderTier())
-            .addAllResolutions(lenses.firstOrNull { !it.front }?.let { LensSource.resolutions(context, it) } ?: LensSource.defaultResolutions())
+            .addAllResolutions(resolutions)
+            .addAllQualityTiers(CaptureQuality.supported(resolutions))
             .setHardwareProtection(true)
             .setThermalStatusSupported(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
             .build()

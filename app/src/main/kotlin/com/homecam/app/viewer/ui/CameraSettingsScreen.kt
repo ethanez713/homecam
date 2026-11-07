@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.homecam.app.ui.HardwareProtectionControl
 import com.homecam.app.ui.RecordingModeControl
 import com.homecam.app.ui.kit.Badge
+import com.homecam.app.ui.kit.Segmented
 import com.homecam.app.ui.kit.Chevron
 import com.homecam.app.ui.kit.ConfirmSheet
 import com.homecam.app.ui.kit.DangerButton
@@ -42,7 +43,9 @@ import com.homecam.app.ui.kit.Tag
 import com.homecam.app.ui.kit.Tone
 import com.homecam.app.ui.theme.Ethan
 import com.homecam.core.health.HealthConfig
+import com.homecam.core.media.CaptureQuality
 import com.homecam.proto.HardwareProtection
+import com.homecam.proto.QualityTier
 import com.homecam.proto.RecordingMode
 import com.homecam.proto.SettingsSnapshot
 
@@ -80,6 +83,8 @@ fun CameraSettingsScreen(
     onForget: () -> Unit = {},
     verificationPhrase: String = "",
     fingerprint: String = "",
+    qualityTiers: List<QualityTier> = CaptureQuality.profiles.map { it.tier },
+    onQuality: (QualityTier) -> Unit = {},
 ) {
     if (settings == null) {
         EmptyState("Reading the camera's settings", busy = true)
@@ -114,6 +119,17 @@ fun CameraSettingsScreen(
             )
             Rule()
             RecordingModeControl(settings.recordingMode, projectedDays, onRecordingMode)
+            if (qualityTiers.isNotEmpty()) {
+                val selected = settings.qualityTier.takeIf { it in qualityTiers } ?: qualityTiers.first()
+                Rule()
+                Column(Modifier.padding(12.dp)) {
+                    Text("Quality", style = Ethan.type.bodyStrong, color = Ethan.colors.textHeading)
+                    Spacer(Modifier.height(8.dp))
+                    Segmented(qualityTiers.map { it to qualityLabel(it) }, selected, onQuality)
+                    Spacer(Modifier.height(8.dp))
+                    Text(qualityMeta(selected), style = Ethan.type.bodySmall, color = Ethan.colors.textMuted)
+                }
+            }
         }
 
         if (protection != null) {
@@ -220,6 +236,19 @@ fun CameraSettingsScreen(
         Field.REMOTE -> RemoteAddressSheet(remoteAddress, onRemoteAddress) { editing = null }
         null -> Unit
     }
+}
+
+private fun qualityLabel(tier: QualityTier) = when (tier) {
+    QualityTier.QUALITY_MEDIUM -> "Medium"
+    QualityTier.QUALITY_LOW -> "Low"
+    else -> "High"
+}
+
+private fun qualityMeta(tier: QualityTier): String {
+    val profile = CaptureQuality.profile(tier)
+    val mbps = profile.bitrateBps / 1_000_000.0
+    val text = if (profile.bitrateBps % 1_000_000 == 0) "%.0f".format(mbps) else "%.1f".format(mbps)
+    return "${profile.height}p · ${profile.fps} fps · $text Mbps"
 }
 
 private enum class Field { NAME, REMOTE }

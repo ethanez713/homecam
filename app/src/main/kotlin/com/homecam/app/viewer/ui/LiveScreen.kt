@@ -55,6 +55,7 @@ import com.homecam.app.ui.kit.PaperCard
 import com.homecam.app.ui.kit.PrimaryButton
 import com.homecam.app.ui.kit.QuietButton
 import com.homecam.app.ui.kit.Rule
+import com.homecam.app.ui.kit.Segmented
 import com.homecam.app.ui.kit.Stat
 import com.homecam.app.ui.kit.Tag
 import com.homecam.app.ui.kit.Tone
@@ -88,6 +89,9 @@ data class LiveControls(
     val onTorch: (Boolean) -> Unit,
     val onMic: (Boolean) -> Unit,
     val onZoom: (Float) -> Unit,
+    /** 0 keeps the capture size. 720 and 540 scale the live picture down to that height. */
+    val liveQuality: Int = 0,
+    val onLiveQuality: (Int) -> Unit = {},
     val onRotate: () -> Unit = {},
     val onSnapshot: () -> Unit = {},
     val lenses: List<LensInfo> = emptyList(),
@@ -355,6 +359,13 @@ private fun Controls(controls: LiveControls) {
             color = Ethan.colors.textMuted,
         )
     }
+    Text("LIVE", style = Ethan.type.micro, color = Ethan.colors.textFaint, modifier = Modifier.padding(top = 8.dp, bottom = 6.dp))
+    Segmented(
+        listOf(0 to "Auto", 720 to "720p", 540 to "540p"),
+        controls.liveQuality,
+        controls.onLiveQuality,
+    )
+    Spacer(Modifier.height(8.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Keys(controls, Modifier.weight(1f))
     }

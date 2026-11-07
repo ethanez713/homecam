@@ -157,6 +157,14 @@ class ViewerSession(
         )
     }
 
+    suspend fun setLiveResolution(height: Int) {
+        val width = if (height == 0) 0 else height * 16 / 9
+        client.rpc.request(
+            RpcMessage.Service.SESSION, Controls.Session.RESOLUTION,
+            com.homecam.proto.Resolution.newBuilder().setWidth(width).setHeight(height).build().toByteString(),
+        )
+    }
+
     suspend fun setPushToTalk(active: Boolean) {
         media.setMicrophoneEnabled(active)
         client.rpc.request(
