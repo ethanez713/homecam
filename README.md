@@ -1,5 +1,7 @@
 # homecam
 
+[![CI](https://github.com/ethanez713/homecam/actions/workflows/ci.yml/badge.svg)](https://github.com/ethanez713/homecam/actions/workflows/ci.yml)
+
 An old Android phone is the camera and the signaling server. Your daily phone is the viewer.
 
 Two phones, and no cloud account between them. Pairing pins each viewer's key, the camera shows how many devices have access, and every access is written to a tamper-evident log on the camera.
@@ -105,7 +107,7 @@ Tailscale is how the viewer reaches the camera from outside the house. It is a n
 
 ## Build
 
-JDK 17, and an Android SDK with the platform this project compiles against (`compileSdk` 37). On the maintainer's machine, `source ~/android-tooling/env.sh` exports that JDK and SDK. The script is one setup, and any JDK 17 and SDK layout works.
+JDK 17, and an Android SDK with the platform this project compiles against (`compileSdk` 37).
 
 ```sh
 ./gradlew assembleDebug
