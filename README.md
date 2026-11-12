@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/ethanez713/homecam/actions/workflows/ci.yml/badge.svg)](https://github.com/ethanez713/homecam/actions/workflows/ci.yml)
 
-An old Android phone is the camera and the signaling server. Your daily phone is the viewer.
-
-Two phones, and no cloud account between them. Pairing pins each viewer's key, the camera shows how many devices have access, and every access is written to a tamper-evident log on the camera.
+**Turn an old Android phone into a home camera, with no cloud in between.** The old phone
+is the camera and the server; the phone in your pocket is the viewer. No account, no
+subscription, and no company holding your footage.
 
 ## Screenshots
 
@@ -32,6 +32,26 @@ Sample data from the debug build's screen gallery (`GalleryActivity`), captured 
     <td valign="top"><b>Camera side.</b> The old phone shows who is watching right now. It pauses continuous recording when it runs hot or the battery runs low.</td>
   </tr>
 </table>
+
+## What it does
+
+- **Live view** over WebRTC, with lens and zoom control, torch, two-way talk and a siren.
+- **Recording** continuously or on detection. Clips are tagged on the device (person,
+  pet, vehicle, sound) and kept for a number of days you choose.
+- **Alerts** as encrypted pushes: the push service sees ciphertext, never a thumbnail.
+- **Access you can check.** Pairing pins each viewer's key, the camera shows who is
+  watching right now, and every session lands in a tamper-evident log.
+- **Away from home** through Tailscale, with the same pinned keys as on the LAN.
+- **A privacy mask** applied before anything is streamed or recorded.
+
+## Using it
+
+1. Install on both phones. On the old one pick **The camera**. On the daily phone pick **The viewer**.
+2. Camera, **Pair a device**. The code lasts 120 seconds and works once.
+3. Viewer, **Add a camera**, and scan it.
+4. Both phones show a short verification phrase. The two have to match. A mismatch means something relayed the connection: revoke that device and pair again.
+
+The camera's home screen shows how many devices have access. Revoking one drops its key and tears down a live session from it.
 
 ## Architecture
 
@@ -143,15 +163,6 @@ Do not run that against a phone that is already paired. Gradle uninstalls the ap
 ```sh
 python tools/test_observe.py
 ```
-
-## Using it
-
-1. Install on both phones. On the old one pick **The camera**. On the daily phone pick **The viewer**.
-2. Camera, **Pair a device**. The code lasts 120 seconds and works once.
-3. Viewer, **Add a camera**, and scan it.
-4. Both phones show a short verification phrase. The two have to match. A mismatch means something relayed the connection: revoke that device and pair again.
-
-The camera's home screen shows how many devices have access. Revoking one drops its key and tears down a live session from it.
 
 ## License
 

@@ -213,11 +213,11 @@ private fun Screen(name: String) {
         "viewer_home" -> ViewerHomeScreen(cameras, {}, {}, {}, {}, {}, starred = "Y1TM-4JVY-9K8F")
         "viewer_home_empty" -> ViewerHomeScreen(emptyList(), {}, {}, {}, {}, {})
         "live" -> Shell(CameraTab.LIVE) {
-            LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Home network"), controls(), {}) { Scene() }
+            LiveScreen(LiveState.Connected("7K3M-9QXT", null, status, null, "Home network"), controls(), {}) { Scene() }
         }
         "live_two_lens" -> Shell(CameraTab.LIVE) {
             LiveScreen(
-                LiveState.Connected("amber-otter-seven", null, status, null, "Home network"),
+                LiveState.Connected("7K3M-9QXT", null, status, null, "Home network"),
                 controls().copy(
                     secondaryLens = "front",
                     secondLens = SecondLens("front", on = true, onChange = {}),
@@ -226,13 +226,13 @@ private fun Screen(name: String) {
             ) { Scene() }
         }
         "live_paused" -> Shell(CameraTab.LIVE) {
-            LiveScreen(LiveState.Connected("amber-otter-seven", null, pausedStatus, null, "Home network"), controls(from = pausedStatus), {}) { Scene() }
+            LiveScreen(LiveState.Connected("7K3M-9QXT", null, pausedStatus, null, "Home network"), controls(from = pausedStatus), {}) { Scene() }
         }
         "live_siren" -> Shell(CameraTab.LIVE) {
-            LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null, "Remote"), controls(siren = true), {}) { Scene() }
+            LiveScreen(LiveState.Connected("7K3M-9QXT", null, status, null, "Remote"), controls(siren = true), {}) { Scene() }
         }
         "live_waiting" -> Shell(CameraTab.LIVE) {
-            LiveScreen(LiveState.Connected("amber-otter-seven", null, status, null), null, {})
+            LiveScreen(LiveState.Connected("7K3M-9QXT", null, status, null), null, {})
         }
         "live_finding" -> Shell(CameraTab.LIVE, armed = false) { LiveScreen(LiveState.Locating("Front door"), null, {}) }
         "live_privacy" -> Shell(CameraTab.LIVE) {
@@ -260,12 +260,12 @@ private fun Screen(name: String) {
         }
         "devices" -> RemoteRosterScreen(viewers, "KQSP-NHPF-2NNZ", {}, {})
         "network" -> NetworkActivityScreen(viewerEgress(true, "https://ntfy.sh"), {})
-        "pair_confirm" -> PairConfirmScreen(PairState.Confirm("amber-otter-seven"), {}, {}, {})
+        "pair_confirm" -> PairConfirmScreen(PairState.Confirm("7K3M-9QXT"), {}, {}, {})
         "pair_failed" -> PairConfirmScreen(PairState.Failed("That code has expired or was already used. Start pairing again on the camera."), {}, {}, {})
         "cam_home" -> CameraHome(null)
         "cam_home_live" -> CameraHome("Samsung SM-S938U")
         "cam_pair" -> PairingScreen(null, null, {}, {}, {})
-        "cam_pair_phrase" -> PairingScreen(null, "amber-otter-seven", {}, {}, {})
+        "cam_pair_phrase" -> PairingScreen(null, "7K3M-9QXT", {}, {}, {})
         "cam_roster" -> RosterScreen(
             viewers.map { ViewerEntity(it.fingerprint, ByteArray(0), it.label, it.pairedAtMs, it.lastSeenMs) },
             { 12 }, {}, {}, {},
@@ -284,7 +284,7 @@ private fun Settings(snapshot: SettingsSnapshot, remote: String) {
         soundClasses = com.homecam.core.sound.SoundClasses.pushSelection(snapshot.soundRecognition.classesList).toSet(), onSoundClass = { _, _ -> },
         alertsEnabled = true, onAlerts = {}, remoteAddress = remote, onRemoteAddress = {}, onDevices = {},
         protection = com.homecam.core.health.HealthConfig(),
-        verificationPhrase = "amber-otter-seven", fingerprint = "Y1TM-4JVY-9K8F",
+        verificationPhrase = "7K3M-9QXT", fingerprint = "Y1TM-4JVY-9K8F",
     )
 }
 
