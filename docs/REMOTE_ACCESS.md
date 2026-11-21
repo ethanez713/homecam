@@ -20,13 +20,22 @@ too, and routing local traffic over it is a needlessly slow way to be right.
 ## Setting it up
 
 1. Install Tailscale on both phones and sign both into the same tailnet.
-2. On the camera phone, turn on **Run Tailscale in the background** and exempt it from
-   battery optimisation, or it will not survive a reboot unattended (`PLAN.md` §9.5).
+2. On the camera phone, open Android's VPN settings, tap the gear beside Tailscale, and turn
+   on **Always-on VPN**; then exempt Tailscale from battery optimisation. Without both it
+   will not survive a reboot unattended (`PLAN.md` §9.5). Leave *Block connections without
+   VPN* off: with it on, a signed-out Tailscale takes the phone's whole network down, alerts
+   included. The same Always-on setting on the viewer saves finding Tailscale off once out.
 3. Read the camera's tailnet name from the Tailscale app.
 4. In the viewer: open the camera → **Settings** → *Remote access* → enter that name → Save.
 
 Pair on the LAN first. Pairing is time-boxed to 120 seconds and involves reading a QR code
 off the camera's screen, so you are standing next to it anyway.
+
+## When Tailscale drops
+
+Once the camera has been on a tailnet, losing it for a few minutes sends a health alert to
+every viewer with health alerts on, and its return sends another. Only the camera watches
+its own Tailscale: the viewer is in your hand when it matters, so you can fix it there.
 
 ## Tailscale ACLs
 
