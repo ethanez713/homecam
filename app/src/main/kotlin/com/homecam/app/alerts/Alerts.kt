@@ -8,6 +8,7 @@ import com.homecam.core.crypto.AlertReserve
 import com.homecam.core.detect.DetectionAlertBatch
 import com.homecam.core.health.HealthAlertPolicy
 import com.homecam.core.health.HealthState
+import com.homecam.core.health.TailnetAlert
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -76,6 +77,11 @@ class Alerts(private val graph: AppGraph) {
         healthPolicy.onChange(previous, transition, System.currentTimeMillis()).forEach { alert ->
             send(Kind.HEALTH) { base().addLabels(alert.label).build() }
         }
+    }
+
+    /** This phone's Tailscale went down, or came back. Same opt-in as the other health alerts. */
+    fun onTailnet(alert: TailnetAlert) {
+        send(Kind.HEALTH) { base().addLabels(alert.label).build() }
     }
 
     private fun base(): AlertPayload.Builder = AlertPayload.newBuilder()

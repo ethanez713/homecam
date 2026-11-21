@@ -130,6 +130,10 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
             put("charge_counter_uah", reading.chargeCounterUah)
         }
 
+    fun tailnet(present: Boolean) = event("tailnet") {
+        put("present", present)
+    }
+
     fun recordingReverted(from: RecordingMode, to: RecordingMode, dueAtMs: Long) = event("recording_revert") {
         put("from", from.name)
         put("to", to.name)

@@ -43,6 +43,7 @@ import com.homecam.core.media.PowerSaving
 import com.homecam.core.health.HealthProtocol
 import com.homecam.core.health.HealthSample
 import com.homecam.core.health.HealthState
+import com.homecam.core.health.TailnetAlert
 import com.homecam.core.health.RecordingTimer
 import com.homecam.core.media.AutoRotation
 import com.homecam.core.media.CaptureWatchdog
@@ -96,6 +97,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
     @Volatile private var secondary: LensPipeline? = null
     private lateinit var powerSaving: PowerSaving
     private lateinit var hardware: HardwareMonitor
+    private lateinit var tailnet: TailnetMonitor
     private lateinit var audioDetection: AudioDetectionPipeline
     private val screen = ScreenDimmer().also { ScreenDimmer.attach(it) }
     private lateinit var throttle: ThermalThrottle
@@ -204,6 +206,7 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             }
         }
         hardware = HardwareMonitor(graph, clips, ::onHealthChange).also { it.start() }
+        tailnet = TailnetMonitor(graph, ::onTailnet)
         startClipRollover()
 
         server = SignalingServer(graph, node).also {
@@ -376,7 +379,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
                 recorders().forEach { it.tick() }
                 powerSaving.tick(sceneIdle = live == null && recorders().none { it.eventInProgress })
                 statusFromPipeline()
-                if (ticks % HARDWARE_SAMPLE_EVERY_TICKS == 0) sampleHardware()
+                if (ticks % HARDWARE_SAMPLE_EVERY_TICKS == 0) {
+                    sampleHardware()
+                    sampleTailnet()
+                }
                 revertTimedRecording()
                 maintainResponses()
                 // Blindness is fifteen seconds without a frame, so the rollover tick
@@ -424,6 +430,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         }
     }
 
+    private fun onTailnet(alert: TailnetAlert) {
+        if (::alerts.isInitialized) alerts.onTailnet(alert)
+    }
+
     private suspend fun revertTimedRecording() {
         val current = graph.settings.current
         val target = RecordingTimer.dueMode(current.recordingRevert, System.currentTimeMillis()) ?: return
@@ -438,6 +448,14 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         runCatching { hardware.sample() }.onFailure {
             Log.w(TAG, "hardware sample failed", it)
             graph.diagnostics.error("hardware_sample", it.message)
+        }
+    }
+
+    private fun sampleTailnet() {
+        if (!::alerts.isInitialized) return
+        runCatching { tailnet.sample() }.onFailure {
+            Log.w(TAG, "tailnet sample failed", it)
+            graph.diagnostics.error("tailnet_sample", it.message)
         }
     }
 

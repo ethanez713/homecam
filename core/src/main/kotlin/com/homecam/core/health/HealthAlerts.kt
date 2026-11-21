@@ -6,6 +6,8 @@ object HealthAlertLabels {
     const val PREFIX = "health:"
     const val RESUMED = "health:resumed"
     const val STORAGE_CRITICAL = "health:storage-critical"
+    const val TAILNET_DOWN = "health:tailnet-down"
+    const val TAILNET_BACK = "health:tailnet-back"
     private const val PAUSED = "health:paused:"
 
     fun paused(axis: Axis) = PAUSED + axis.name.lowercase()
@@ -16,6 +18,8 @@ object HealthAlertLabels {
     fun describe(label: String): String? = when {
         label == RESUMED -> "Continuous recording is back."
         label == STORAGE_CRITICAL -> "Storage is critically low. Recording has stopped."
+        label == TAILNET_DOWN -> "Tailscale is off. This camera can't be watched away from home."
+        label == TAILNET_BACK -> "Tailscale is back. This camera can be watched away from home again."
         label.startsWith(PAUSED) -> Axis.entries.firstOrNull { it.name.lowercase() == label.removePrefix(PAUSED) }
             ?.let { "Recording is paused: ${HealthProtocol.describeCause(it)}." }
         else -> null

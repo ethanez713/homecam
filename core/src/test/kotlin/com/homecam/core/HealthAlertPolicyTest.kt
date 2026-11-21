@@ -94,6 +94,14 @@ class HealthAlertPolicyTest {
     fun `labels read as sentences and unknown labels read as nothing`() {
         assertEquals("Recording is paused: the phone is too hot.", HealthAlertLabels.describe("health:paused:thermal"))
         assertEquals("Continuous recording is back.", HealthAlertLabels.describe(HealthAlertLabels.RESUMED))
+        assertEquals(
+            "Tailscale is off. This camera can't be watched away from home.",
+            HealthAlertLabels.describe("health:tailnet-down"),
+        )
+        assertEquals(
+            "Tailscale is back. This camera can be watched away from home again.",
+            HealthAlertLabels.describe("health:tailnet-back"),
+        )
         assertNull(HealthAlertLabels.describe("person"))
         assertNull(HealthAlertLabels.describe("health:paused:sunspots"))
     }

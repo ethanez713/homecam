@@ -52,6 +52,8 @@ class DiagnosticsLineTest {
         assertEquals(AlertKind.HEALTH, DiagnosticsLines.alertKind(opened = true, firstLabel = "health:paused:thermal"))
         assertEquals(AlertKind.HEALTH, DiagnosticsLines.alertKind(opened = true, firstLabel = "health:resumed"))
         assertEquals(AlertKind.HEALTH, DiagnosticsLines.alertKind(opened = true, firstLabel = "health:storage-critical"))
+        assertEquals(AlertKind.HEALTH, DiagnosticsLines.alertKind(opened = true, firstLabel = "health:tailnet-down"))
+        assertEquals(AlertKind.HEALTH, DiagnosticsLines.alertKind(opened = true, firstLabel = "health:tailnet-back"))
         assertEquals(AlertKind.SESSION, DiagnosticsLines.alertKind(opened = true, firstLabel = "session"))
         assertEquals(AlertKind.DETECTION, DiagnosticsLines.alertKind(opened = true, firstLabel = "person"))
         assertEquals(AlertKind.DETECTION, DiagnosticsLines.alertKind(opened = true, firstLabel = null))
