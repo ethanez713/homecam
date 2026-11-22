@@ -145,6 +145,14 @@ object DiagnosticsLines {
         "via" to via.wire,
     ))
 
+    /** A person episode that ended without spanning a second. One line, not one per frame. */
+    fun detectionDiscounted(ts: Long, run: String, label: String, sightings: Int, spanMs: Long): String =
+        line(ts, run, "detection_discounted", listOf(
+            "label" to label,
+            "sightings" to sightings,
+            "span_ms" to spanMs,
+        ))
+
     /** [durationMs] is how long the light was on, and is written only on the off. */
     fun spotlight(
         ts: Long,

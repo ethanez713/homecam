@@ -38,11 +38,11 @@ class PowerSavingReleaseTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
-    fun aDetectionReleasesTheIdleRateWithinTwoFrames() = runFixture { fixture ->
+    fun aPersonBlipIsMovementAndALastingPersonCountsAsADetection() = runFixture { fixture ->
         var events = 0
         val pipeline = fixture.vision(
             onMotion = { fixture.saving.release(PowerSavingReason.MOTION) },
-            onEvent = { _, _ ->
+            onEvent = { _, _, _ ->
                 events++
                 fixture.saving.release(PowerSavingReason.DETECTION)
             },
@@ -52,7 +52,9 @@ class PowerSavingReleaseTest {
         assertEquals(CameraXVideoCapturer.IDLE_FPS, fixture.capturer.targetFps)
         val before = fixture.frames
         fixture.push(pipeline, luma = 255)
-        fixture.assertFullWithinTwoFrames(before, PowerSavingReason.DETECTION)
+        fixture.assertFullWithinTwoFrames(before, PowerSavingReason.MOTION)
+        assertEquals(0, events)
+        fixture.push(pipeline, luma = 255)
         assertEquals(1, events)
         fixture.assertIdleReturnsAfterQuietPeriod()
     }
@@ -62,7 +64,7 @@ class PowerSavingReleaseTest {
         var events = 0
         val pipeline = fixture.vision(
             onMotion = { fixture.saving.release(PowerSavingReason.MOTION) },
-            onEvent = { _, _ -> events++ },
+            onEvent = { _, _, _ -> events++ },
             detect = { emptyList() },
         )
         fixture.push(pipeline, luma = 0)
@@ -179,7 +181,7 @@ class PowerSavingReleaseTest {
 
         fun vision(
             onMotion: () -> Unit,
-            onEvent: (List<DetectionPipeline.LabelledDetection>, ByteArray?) -> Unit,
+            onEvent: (List<DetectionPipeline.LabelledDetection>, ByteArray?, Long) -> Unit,
             detect: (android.graphics.Bitmap) -> List<Detection>,
         ): DetectionPipeline = DetectionPipeline(
             context = capturerContext,

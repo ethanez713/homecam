@@ -41,7 +41,7 @@ class ThermalThrottleTest {
             Intent(context, ThrottleProbeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         ) as ThrottleProbeActivity
         val capturer = CameraXVideoCapturer(context, UnusedLifecycle())
-        val pipeline = DetectionPipeline(context, { SettingsSnapshot.getDefaultInstance() }) { _, _ -> }
+        val pipeline = DetectionPipeline(context, { SettingsSnapshot.getDefaultInstance() }) { _, _, _ -> }
         val screen = ScreenDimmer()
         val steps = mutableListOf<Pair<String, Boolean>>()
         val throttle = ThermalThrottle(

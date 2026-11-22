@@ -896,9 +896,16 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
             lensId = { pipeline?.lensId ?: lensId },
             onMotion = { powerSaving.release(PowerSavingReason.MOTION) },
             detect = detector.attach(),
-            onEvent = event@{ detections, thumbnailJpeg ->
+            onReplay = replay@{ detections, atMs ->
+                val current = pipeline ?: return@replay
+                current.recorder.onDetection(detections, atMs)
+            },
+            onDiscounted = { label, sightings, spanMs ->
+                graph.diagnostics.detectionDiscounted(label, sightings, spanMs)
+            },
+            onEvent = event@{ detections, thumbnailJpeg, atMs ->
                 val current = pipeline ?: return@event
-                onLensDetection(current, detections, thumbnailJpeg)
+                onLensDetection(current, detections, thumbnailJpeg, atMs)
             },
         )
         if (inherit && detectorThrottled) pipeDetection.setThrottled(true)
@@ -911,9 +918,10 @@ class CameraService : LifecycleService(), MediaController, SignalingServer.Liste
         pipeline: LensPipeline,
         detections: List<DetectionPipeline.LabelledDetection>,
         thumbnailJpeg: ByteArray?,
+        atMs: Long,
     ) {
         if (detections.isNotEmpty()) powerSaving.release(PowerSavingReason.DETECTION)
-        pipeline.recorder.onDetection(detections, System.currentTimeMillis())
+        pipeline.recorder.onDetection(detections, atMs)
         if (detections.isEmpty()) return
         val lens = if (secondary == null) null else LensSelections.labelOf(pipeline.lensId)
         alerts.onDetection(

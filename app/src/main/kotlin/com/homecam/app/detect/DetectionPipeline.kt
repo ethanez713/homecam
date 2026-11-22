@@ -7,6 +7,7 @@ import com.homecam.core.crypto.AlertLimits
 import com.homecam.core.detect.Detection
 import com.homecam.core.detect.DetectionPolicy
 import com.homecam.core.detect.MotionGate
+import com.homecam.core.detect.PresenceConfirmation
 import com.homecam.core.lens.LensCatalog
 import com.homecam.core.lens.LensRegions
 import com.homecam.proto.SettingsSnapshot
@@ -31,27 +32,41 @@ class DetectionPipeline(
     /** Read per frame. A primary switch changes the lens without rebuilding this pipeline. */
     private val lensId: () -> String = { LensCatalog.DEFAULT },
     /**
-     * The motion gate accepted this frame and no object class did. Movement releases
-     * power saving on its own, including when the detector does not run or accepts nothing.
+     * Movement, rather than an accepted event. The gate opened and no class was forwarded:
+     * the detector did not run, accepted nothing, or the only hit was a person sighting
+     * still short of a second. Releases power saving on its own.
      */
     private val onMotion: () -> Unit = {},
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     detect: ((Bitmap) -> List<Detection>)? = null,
     /**
+     * Person frames kept until the sightings spanned a second, oldest first, at the time
+     * each was seen. The recorder only: the confirming frame follows through [onEvent].
+     */
+    private val onReplay: (detections: List<LabelledDetection>, atMs: Long) -> Unit = { _, _ -> },
+    /** A person episode ended without spanning a second. */
+    private val onDiscounted: (label: String, sightings: Int, spanMs: Long) -> Unit = { _, _, _ -> },
+    /**
      * [thumbnailJpeg] is a small still of the frame that fired, bounded for the alert path
      * and null for a motion-only event that carries no labels. It comes off the masked
      * capture, so it can never show a region the owner masked out.
+     * [atMs] is that frame's clock, so a box lines up with the moment it was seen.
      */
-    private val onEvent: (detections: List<LabelledDetection>, thumbnailJpeg: ByteArray?) -> Unit,
+    private val onEvent: (detections: List<LabelledDetection>, thumbnailJpeg: ByteArray?, atMs: Long) -> Unit,
 ) : VideoSink {
 
     data class LabelledDetection(val category: String, val detection: Detection)
+
+    private data class HeldFrame(val atMs: Long, val detections: List<LabelledDetection>)
 
     private val detector = if (detect == null) ObjectDetector.create(context) else null
     private val detectFrame: (Bitmap) -> List<Detection> = detect ?: { bitmap ->
         detector?.detect(bitmap).orEmpty()
     }
     private val gate = MotionGate()
+    /** One per pipeline, and only touched from the capture thread that runs [onFrame]. */
+    private val presence = PresenceConfirmation(heldCategories = setOf("person"))
+    private val heldPersons = mutableListOf<HeldFrame>()
     private val busy = AtomicBoolean(false)
     private val inference = Any()
     @Volatile private var closed = false
@@ -144,12 +159,7 @@ class DetectionPipeline(
                 measuredAtMs = now
             }
             classifying = false
-            if (accepted.isNotEmpty()) {
-                onEvent(accepted, boundedJpeg(bitmap, AlertLimits.MAX_THUMBNAIL_BYTES))
-            } else {
-                onMotion()
-                if (snapshot.detectionMode.motionOnly) onEvent(accepted, null)
-            }
+            publish(accepted, bitmap, now, snapshot.detectionMode.motionOnly)
             bitmap.recycle()
         } catch (e: Exception) {
             if (classifying) onMotion()
@@ -157,6 +167,44 @@ class DetectionPipeline(
         } finally {
             busy.set(false)
             i420.release()
+        }
+    }
+
+    /**
+     * Person sightings count only once they span a second. Until then they are held and
+     * the frame is movement. On confirmation the held frames go to the recorder, oldest
+     * first, and this frame follows as the event so the alert carries a current picture.
+     */
+    private fun publish(
+        accepted: List<LabelledDetection>,
+        bitmap: Bitmap,
+        atMs: Long,
+        motionOnly: Boolean,
+    ) {
+        val outcome = presence.observe(atMs, accepted.map { it.category }.toSet())
+        if (outcome.discounted.isNotEmpty()) {
+            heldPersons.clear()
+            outcome.discounted.forEach { onDiscounted(it.label, it.sightings, it.spanMs) }
+        }
+
+        val holding = accepted.filter { outcome.actions[it.category] == PresenceConfirmation.Action.Hold }
+        val confirming = accepted.any { outcome.actions[it.category] is PresenceConfirmation.Action.Confirm }
+        if (holding.isNotEmpty()) heldPersons += HeldFrame(atMs, holding)
+        if (confirming) {
+            val replay = heldPersons.sortedBy { it.atMs }
+            heldPersons.clear()
+            replay.forEach { onReplay(it.detections, it.atMs) }
+        }
+
+        val forward = accepted.filter { outcome.actions[it.category] != PresenceConfirmation.Action.Hold }
+        when {
+            forward.isNotEmpty() ->
+                onEvent(forward, boundedJpeg(bitmap, AlertLimits.MAX_THUMBNAIL_BYTES), atMs)
+            accepted.isNotEmpty() -> onMotion()
+            else -> {
+                onMotion()
+                if (motionOnly) onEvent(emptyList(), null, atMs)
+            }
         }
     }
 

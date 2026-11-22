@@ -44,7 +44,7 @@ class DetectionShutdownTest {
         val eventsAfterClose = AtomicInteger()
         repeat(ROUNDS) { round ->
             val closed = AtomicBoolean(false)
-            val pipeline = DetectionPipeline(context, { armed }) { _, _ ->
+            val pipeline = DetectionPipeline(context, { armed }) { _, _, _ ->
                 if (closed.get()) eventsAfterClose.incrementAndGet()
             }
             val feeding = AtomicBoolean(true)

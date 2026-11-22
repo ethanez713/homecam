@@ -243,6 +243,17 @@ class CameraDiagnostics(context: Context, directory: File = File(context.filesDi
         ))
     }
 
+    /** One line per person episode that ended without spanning a second. */
+    fun detectionDiscounted(label: String, sightings: Int, spanMs: Long) {
+        log.append(DiagnosticsLines.detectionDiscounted(
+            ts = System.currentTimeMillis(),
+            run = run,
+            label = label,
+            sightings = sightings,
+            spanMs = spanMs,
+        ))
+    }
+
     /** [durationMs] is how long the light was on. It is recorded on the off only. */
     fun spotlight(on: Boolean, auto: Boolean, luma: Float, durationMs: Long?) {
         log.append(DiagnosticsLines.spotlight(

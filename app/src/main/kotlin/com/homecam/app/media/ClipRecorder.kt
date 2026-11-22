@@ -86,6 +86,8 @@ class ClipRecorder(
     private var clipStartedAtMs = 0L
     private var firstSampleUs = -1L
     private var lastSampleUs = 0L
+    /** Last metadata sample written, so a replay that lands earlier is dropped. */
+    private var lastMetadataUs = Long.MIN_VALUE
 
     /**
      * Samples encoded before a clip was requested. Bounded by wall time rather than count,
@@ -244,6 +246,7 @@ class ClipRecorder(
         currentClip = file
         currentId = id
         firstSampleUs = -1
+        lastMetadataUs = Long.MIN_VALUE
         return output
     }
 
@@ -274,6 +277,12 @@ class ClipRecorder(
             val output = muxer ?: return
             if (metadataTrackIndex < 0) return
             val offsetUs = ((atMs - clipStartedAtMs) * 1000).coerceAtLeast(0)
+            // A time that goes backwards is rejected, and that rejection can spoil the
+            // next sample too. Drop this one and leave the track where it is.
+            if (offsetUs < lastMetadataUs) {
+                Log.w(TAG, "metadata sample dropped")
+                return
+            }
             val info = MediaCodec.BufferInfo().apply { set(0, payload.size, offsetUs, 0) }
             runCatching {
                 output.writeSampleData(
@@ -281,7 +290,8 @@ class ClipRecorder(
                     ByteBuffer.wrap(payload),
                     MuxerUtil.getMuxerBufferInfoFromMediaCodecBufferInfo(info),
                 )
-            }.onFailure { Log.w(TAG, "metadata sample dropped", it) }
+            }.onSuccess { lastMetadataUs = offsetUs }
+                .onFailure { Log.w(TAG, "metadata sample dropped", it) }
         }
     }
 

@@ -218,6 +218,14 @@ class DiagnosticsLineTest {
     }
 
     @Test
+    fun `a discounted detection names the label the sightings and the span`() {
+        assertEquals(
+            """{"ts":15,"run":"ab12cd34","event":"detection_discounted","label":"person","sightings":3,"span_ms":800}""",
+            DiagnosticsLines.detectionDiscounted(15, "ab12cd34", label = "person", sightings = 3, spanMs = 800),
+        )
+    }
+
+    @Test
     fun `a shaped line stays one line when a field needs escaping`() {
         assertEquals(
             """{"ts":14,"run":"ab12cd34","event":"throttle","step":"a\"b","state":"engaged","battery_temp_c":1,"thermal_status":"none"}""",
