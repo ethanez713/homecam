@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -248,6 +249,7 @@ private fun Screen(name: String) {
             )
         }
         "clips" -> Shell(CameraTab.CLIPS) { Clips(null) }
+        "clips_speed" -> Shell(CameraTab.CLIPS) { Clips(null, speed = 4f) }
         "player" -> Shell(CameraTab.CLIPS) {
             Clips(java.io.File(androidx.compose.ui.platform.LocalContext.current.cacheDir, "sample.mp4"))
         }
@@ -302,11 +304,13 @@ private fun CameraHome(watcher: String?) {
 }
 
 @Composable
-private fun Clips(file: java.io.File?) {
+private fun Clips(file: java.io.File?, speed: Float = 1f) {
     var playingId by remember { mutableStateOf(if (file != null) "run-a-0" else null) }
+    var playbackSpeed by remember { mutableFloatStateOf(speed) }
     ClipsScreen(
         clips = clips, playing = file.takeIf { playingId != null }, playingId = playingId, downloadingId = null,
         projectedDays = 14.0, onPlay = { if (file != null) playingId = it.id }, onPin = {}, onDelete = {}, onExport = {},
         showBoxes = true, loadThumbnail = { thumbnail(it) },
+        speed = playbackSpeed, onSpeed = { playbackSpeed = it },
     )
 }

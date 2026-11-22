@@ -113,6 +113,8 @@ fun ClipsScreen(
     downloadProgress: DownloadProgress? = null,
     onClipUnplayable: (id: String, fileBytes: Long, expectedBytes: Long, what: Int, extra: Int) -> Unit =
         { _, _, _, _, _ -> },
+    speed: Float = 1f,
+    onSpeed: (Float) -> Unit = {},
 ) {
     if (clips == null) {
         EmptyState("Loading clips", busy = true)
@@ -171,6 +173,8 @@ fun ClipsScreen(
         loading = downloadingId != null && downloadingId == underPlayhead?.id,
         downloadProgress = downloadProgress,
         playing = wantPlaying,
+        speed = speed,
+        onSpeed = onSpeed,
         seek = seek,
         unplayable = failedId != null && failedId == underPlayhead?.id,
         showBoxes = showBoxes,
@@ -254,6 +258,8 @@ private class PlaybackState(
     val loading: Boolean,
     val downloadProgress: DownloadProgress?,
     val playing: Boolean,
+    val speed: Float,
+    val onSpeed: (Float) -> Unit,
     val seek: Seek?,
     val unplayable: Boolean,
     val showBoxes: Boolean,
@@ -327,6 +333,7 @@ private fun Picture(state: PlaybackState, modifier: Modifier) {
                 file = state.file,
                 clipStartedAtMs = clip.startedAtMs,
                 playing = state.playing,
+                speed = state.speed,
                 seek = state.seek,
                 showBoxes = state.showBoxes,
                 onPosition = state.onPosition,
@@ -425,7 +432,20 @@ private fun Transport(state: PlaybackState, modifier: Modifier = Modifier) {
         )
         IconAction(R.drawable.lucide_fast_forward, "Forward 10 seconds") { state.onJump(JUMP_MS) }
         IconAction(R.drawable.lucide_chevrons_right, "Next event", onClick = state.onNextEvent)
+        Tag(speedLabel(state.speed), selected = state.speed != 1f, onClick = { state.onSpeed(nextSpeed(state.speed)) })
     }
+}
+
+private fun speedLabel(speed: Float): String = when (speed) {
+    4f -> "4×"
+    8f -> "8×"
+    else -> "1×"
+}
+
+private fun nextSpeed(speed: Float): Float = when (speed) {
+    1f -> 4f
+    4f -> 8f
+    else -> 1f
 }
 
 @OptIn(ExperimentalFoundationApi::class)

@@ -525,6 +525,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 var playingId by remember(open) { mutableStateOf<String?>(null) }
                 var downloading by remember(open) { mutableStateOf<String?>(null) }
                 var downloadProgress by remember(open) { mutableStateOf<com.homecam.core.media.DownloadProgress?>(null) }
+                var speed by remember { mutableFloatStateOf(1f) }
 
                 val nearCeiling = clipHistory?.let { list ->
                     settings?.let { s ->
@@ -566,6 +567,8 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                     eventSpans = eventSpans,
                     playing = playing,
                     playingId = playingId,
+                    speed = speed,
+                    onSpeed = { speed = it },
                     downloadingId = downloading,
                     downloadProgress = downloadProgress,
                     projectedDays = projectedDays,

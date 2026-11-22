@@ -2,6 +2,7 @@ package com.homecam.app.viewer.ui
 
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
+import android.media.PlaybackParams
 import android.view.Surface
 import android.view.TextureView
 import androidx.compose.foundation.Canvas
@@ -51,6 +52,7 @@ fun ClipVideo(
     file: File,
     clipStartedAtMs: Long,
     playing: Boolean,
+    speed: Float,
     seek: Seek?,
     showBoxes: Boolean,
     onPosition: (Long) -> Unit,
@@ -74,6 +76,7 @@ fun ClipVideo(
 
     DisposableEffect(Unit) { onDispose { holder.release() } }
     LaunchedEffect(file) { holder.open(file) }
+    LaunchedEffect(speed) { holder.setSpeed(speed) }
     LaunchedEffect(playing, file) { holder.setPlaying(playing) }
     LaunchedEffect(seek) { seek?.let { holder.seekTo(it.positionMs) } }
     LaunchedEffect(file) {
@@ -120,6 +123,7 @@ private class PlayerHolder {
     private var prepared = false
     private var wantPlaying = false
     private var pendingSeekMs = 0L
+    private var speed = 1f
 
     var onCompleted: () -> Unit = {}
     var onUnplayable: (Int, Int) -> Unit = { _, _ -> }
@@ -153,7 +157,7 @@ private class PlayerHolder {
                     // A seek draws a frame; a prepared player that has not started draws nothing.
                     ready.seekTo(pendingSeekMs.coerceAtLeast(1), MediaPlayer.SEEK_CLOSEST)
                     pendingSeekMs = 0
-                    if (wantPlaying) ready.start()
+                    if (wantPlaying) runCatching { ready.startWithSpeed() }
                 }
                 setOnCompletionListener { onCompleted() }
                 setOnErrorListener { _, what, extra -> fail(what, extra); true }
@@ -171,7 +175,27 @@ private class PlayerHolder {
     fun setPlaying(playing: Boolean) {
         wantPlaying = playing
         val current = player?.takeIf { prepared } ?: return
-        runCatching { if (playing && !current.isPlaying) current.start() else if (!playing && current.isPlaying) current.pause() }
+        runCatching {
+            if (playing && !current.isPlaying) current.startWithSpeed()
+            else if (!playing && current.isPlaying) current.pause()
+        }
+    }
+
+    fun setSpeed(value: Float) {
+        speed = value
+        val current = player?.takeIf { prepared } ?: return
+        // A non-zero PlaybackParams speed starts a prepared or paused player, so a change
+        // while paused is only stored and applied with the next start.
+        runCatching { if (current.isPlaying) current.applySpeed() }
+    }
+
+    private fun MediaPlayer.startWithSpeed() {
+        applySpeed()
+        start()
+    }
+
+    private fun MediaPlayer.applySpeed() {
+        playbackParams = PlaybackParams().setSpeed(speed)
     }
 
     fun seekTo(positionMs: Long) {
