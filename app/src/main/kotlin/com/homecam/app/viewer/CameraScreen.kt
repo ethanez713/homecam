@@ -415,20 +415,20 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         torchOn = torch,
                         micOn = mic,
                         zoom = zoom,
-                        onTorch = { on -> torch = on; scope.launch { it.setTorch(on) } },
-                        onMic = { on -> mic = on; scope.launch { it.setPushToTalk(on) } },
+                        onTorch = { on -> torch = on; scope.request("torch") { it.setTorch(on) } },
+                        onMic = { on -> mic = on; scope.request("push to talk") { it.setPushToTalk(on) } },
                         onZoom = { value ->
                             zoom = value
                             val id = settings?.let(LensSelections::primaryOf)
                             if (id != null && settings?.zoomInLock?.enabled == true) {
                                 zoomByLens = zoomByLens + (id to value)
                             }
-                            scope.launch { it.setZoom(value) }
+                            scope.request("zoom") { it.setZoom(value) }
                         },
                         liveQuality = liveQuality,
                         onLiveQuality = { height ->
                             liveQuality = height
-                            scope.launch { it.setLiveResolution(height) }
+                            scope.request("live quality") { it.setLiveResolution(height) }
                         },
                         lenses = if (gates?.lensSwitch == false) emptyList() else capabilities?.lensesList.orEmpty(),
                         lens = selectedLens,
@@ -483,10 +483,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         sirenOn = siren,
                         onSiren = { on ->
                             siren = on
-                            scope.launch {
-                                runCatching { it.link.setSiren(on) }
-                                    .onFailure { error -> Log.w(TAG, "siren", error) }
-                            }
+                            scope.request("siren") { it.link.setSiren(on) }
                         },
                         recording = (state as? LiveState.Connected)?.status?.let { status ->
                             RecordingPanelState(
@@ -514,18 +511,12 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 onBack = onExit,
                 onFocus = { x, y ->
                     open?.let { session ->
-                        scope.launch {
-                            runCatching { session.setFocus(x, y) }
-                                .onFailure { error -> Log.w(TAG, "focus", error) }
-                        }
+                        scope.request("focus") { session.setFocus(x, y) }
                     }
                 },
                 onShownLenses = showing@{ shown ->
                     val session = open ?: return@showing
-                    scope.launch {
-                        runCatching { session.setShownLenses(shown) }
-                            .onFailure { error -> Log.w(TAG, "live lenses", error) }
-                    }
+                    scope.request("live lenses") { session.setShownLenses(shown) }
                 },
             )
 
@@ -754,6 +745,11 @@ private fun mergeClipHistory(existing: List<Clip>, page: List<Clip>): List<Clip>
     val incoming = page.associateBy { it.id }
     val known = existing.map { it.id }.toSet()
     return existing.map { clip -> incoming[clip.id] ?: clip } + page.filter { it.id !in known }
+}
+
+/** A camera call whose failure the screen has nothing to say about; an uncaught one would crash the app. */
+private fun kotlinx.coroutines.CoroutineScope.request(what: String, call: suspend () -> Unit) {
+    launch { runCatching { call() }.onFailure { Log.w(TAG, what, it) } }
 }
 
 private fun edit(
