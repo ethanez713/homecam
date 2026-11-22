@@ -111,6 +111,8 @@ fun ClipsScreen(
     openAtMs: Long? = null,
     eventSpans: List<EventSpan> = emptyList(),
     downloadProgress: DownloadProgress? = null,
+    onClipUnplayable: (id: String, fileBytes: Long, expectedBytes: Long, what: Int, extra: Int) -> Unit =
+        { _, _, _, _, _ -> },
 ) {
     if (clips == null) {
         EmptyState("Loading clips", busy = true)
@@ -130,7 +132,9 @@ fun ClipsScreen(
     var scrubbing by remember { mutableStateOf(false) }
     var seekToken by remember { mutableIntStateOf(0) }
     var seek by remember { mutableStateOf<Seek?>(null) }
-    var unplayable by remember(playing) { mutableStateOf(false) }
+    // Keyed by id, not the file: a re-download of the same clip replaces a path File.equals
+    // already considers the same, which would leave the failure stuck on screen.
+    var failedId by remember { mutableStateOf<String?>(null) }
     // Which clip is on screen when several lenses cover one instant. Cleared by leaving its span.
     var chosenClipId by remember(openAtMs) { mutableStateOf<String?>(null) }
 
@@ -150,7 +154,9 @@ fun ClipsScreen(
         }
         wantPlaying = play
         seek = Seek(++seekToken, playheadMs - clip.startedAtMs)
-        if (clip.id != playingId || playing == null) onPlay(clip)
+        val retry = failedId == clip.id
+        if (retry) failedId = null
+        if (clip.id != playingId || playing == null || retry) onPlay(clip)
     }
 
     val underPlayhead = timeline.clips.find { it.id == chosenClipId }?.takeIf { it.covers(playheadMs) }
@@ -166,7 +172,7 @@ fun ClipsScreen(
         downloadProgress = downloadProgress,
         playing = wantPlaying,
         seek = seek,
-        unplayable = unplayable,
+        unplayable = failedId != null && failedId == underPlayhead?.id,
         showBoxes = showBoxes,
         loadThumbnail = loadThumbnail,
         onScrub = { scrubbing = true; wantPlaying = false; playheadMs = it },
@@ -179,7 +185,17 @@ fun ClipsScreen(
             val next = playingClip?.let(timeline::continuationOf)
             if (next != null) goTo(next.startedAtMs, preferred = next) else wantPlaying = false
         },
-        onUnplayable = { unplayable = true; wantPlaying = false },
+        onUnplayable = { what, extra ->
+            wantPlaying = false
+            val id = playingId
+            val file = playing
+            failedId = id
+            if (file != null && id != null) {
+                val bytes = if (file.isFile) file.length() else 0L
+                file.delete()
+                onClipUnplayable(id, bytes, playingClip?.sizeBytes ?: 0L, what, extra)
+            }
+        },
         // From a gap, play picks up at the next thing that was recorded.
         onPlayPause = {
             if (wantPlaying) wantPlaying = false
@@ -247,7 +263,7 @@ private class PlaybackState(
     val onScrubEnd: () -> Unit,
     val onPosition: (Long) -> Unit,
     val onCompleted: () -> Unit,
-    val onUnplayable: () -> Unit,
+    val onUnplayable: (Int, Int) -> Unit,
     val onPlayPause: () -> Unit,
     val onJump: (Long) -> Unit,
     val onPreviousEvent: () -> Unit,

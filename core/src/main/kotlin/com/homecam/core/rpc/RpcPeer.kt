@@ -4,6 +4,9 @@ import com.google.protobuf.ByteString
 import com.homecam.proto.RpcError
 import com.homecam.proto.RpcMessage
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
@@ -35,7 +38,7 @@ class RpcPeer(private val send: suspend (RpcMessage) -> Unit) {
 
     private val handlers = HashMap<Long, RpcHandler>()
     private val pending = HashMap<Int, CompletableDeferred<RpcMessage>>()
-    private val streams = HashMap<Int, suspend (RpcMessage) -> Unit>()
+    private val streams = HashMap<Int, Channel<ByteString>>()
     private val lock = Mutex()
     private val nextId = AtomicInteger(1)
 
@@ -46,7 +49,7 @@ class RpcPeer(private val send: suspend (RpcMessage) -> Unit) {
     suspend fun onMessage(message: RpcMessage) {
         when (message.type) {
             RpcMessage.Type.RESPONSE, RpcMessage.Type.ERROR -> complete(message)
-            RpcMessage.Type.STREAM -> lock.withLock { streams[message.id] }?.invoke(message)
+            RpcMessage.Type.STREAM -> enqueue(message)
             RpcMessage.Type.REQUEST, RpcMessage.Type.NOTIFICATION -> serve(message)
             else -> Unit
         }
@@ -80,8 +83,10 @@ class RpcPeer(private val send: suspend (RpcMessage) -> Unit) {
     }
 
     /**
-     * A request whose reply arrives as a series of STREAM messages (clip download).
-     * [onChunk] runs for each; the call returns when the terminating RESPONSE lands.
+     * A request whose reply arrives as STREAM messages (clip download). [onChunk] runs in
+     * this coroutine, as each chunk arrives, and the call returns only after every chunk
+     * that preceded the terminating RESPONSE or ERROR has been handled. Cancelling, timing
+     * out, or [failAllPending] closes that queue; a chunk handler's failure stays here.
      */
     suspend fun requestStream(
         service: RpcMessage.Service,
@@ -92,18 +97,32 @@ class RpcPeer(private val send: suspend (RpcMessage) -> Unit) {
     ) {
         val id = nextId.getAndIncrement()
         val reply = CompletableDeferred<RpcMessage>()
+        val chunks = Channel<ByteString>(Channel.UNLIMITED)
         lock.withLock {
             pending[id] = reply
-            streams[id] = { onChunk(it.payload) }
+            streams[id] = chunks
         }
         try {
-            send(envelope(RpcMessage.Type.REQUEST, service.number, control, id, payload))
-            val response = withTimeout(timeoutMs) { reply.await() }
-            if (response.type == RpcMessage.Type.ERROR) {
-                val error = RpcError.parseFrom(response.payload)
-                throw RpcRemoteException(error.code, error.message)
+            coroutineScope {
+                val reading = launch {
+                    for (chunk in chunks) onChunk(chunk)
+                }
+                try {
+                    send(envelope(RpcMessage.Type.REQUEST, service.number, control, id, payload))
+                    val response = withTimeout(timeoutMs) { reply.await() }
+                    chunks.close()
+                    reading.join()
+                    if (response.type == RpcMessage.Type.ERROR) {
+                        val error = RpcError.parseFrom(response.payload)
+                        throw RpcRemoteException(error.code, error.message)
+                    }
+                } finally {
+                    chunks.close()
+                    reading.cancel()
+                }
             }
         } finally {
+            chunks.close()
             lock.withLock { pending.remove(id); streams.remove(id) }
         }
     }
@@ -112,22 +131,38 @@ class RpcPeer(private val send: suspend (RpcMessage) -> Unit) {
         send(envelope(RpcMessage.Type.STREAM, request.serviceValue, request.control, request.id, chunk))
     }
 
-    suspend fun failAllPending(reason: String) = lock.withLock {
-        pending.values.forEach {
-            it.complete(
-                envelope(
-                    RpcMessage.Type.ERROR, 0, 0, 0,
-                    RpcError.newBuilder().setCode(RpcError.Code.UNAVAILABLE).setMessage(reason)
-                        .build().toByteString()
-                )
-            )
+    suspend fun failAllPending(reason: String) {
+        val error = envelope(
+            RpcMessage.Type.ERROR, 0, 0, 0,
+            RpcError.newBuilder().setCode(RpcError.Code.UNAVAILABLE).setMessage(reason)
+                .build().toByteString(),
+        )
+        val (waiting, open) = lock.withLock {
+            val waiting = pending.values.toList()
+            val open = streams.values.toList()
+            pending.clear()
+            streams.clear()
+            waiting to open
         }
-        pending.clear()
-        streams.clear()
+        open.forEach { it.close() }
+        waiting.forEach { it.complete(error) }
+    }
+
+    private suspend fun enqueue(message: RpcMessage) {
+        val channel = lock.withLock { streams[message.id] } ?: return
+        channel.trySend(message.payload)
     }
 
     private suspend fun complete(message: RpcMessage) {
-        lock.withLock { pending.remove(message.id) }?.complete(message)
+        val channel: Channel<ByteString>?
+        val waiting: CompletableDeferred<RpcMessage>?
+        lock.withLock {
+            channel = streams.remove(message.id)
+            waiting = pending.remove(message.id)
+        }
+        // Closed before the waiter resumes, so it cannot block on a chunk that will never arrive.
+        channel?.close()
+        waiting?.complete(message)
     }
 
     private suspend fun serve(request: RpcMessage) {

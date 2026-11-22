@@ -66,6 +66,22 @@ class DiagnosticsLineTest {
     }
 
     @Test
+    fun `an unplayable clip records the file, the expected length, and the player error`() {
+        assertEquals(
+            """{"ts":5,"run":"ab12cd34","event":"clip_unplayable","clip_id":"clip-a","file_bytes":12,"expected_bytes":99,"what":1,"extra":-1007}""",
+            DiagnosticsLines.clipUnplayable(
+                ts = 5,
+                run = "ab12cd34",
+                clipId = "clip-a",
+                fileBytes = 12,
+                expectedBytes = 99,
+                what = 1,
+                extra = -1007,
+            ),
+        )
+    }
+
+    @Test
     fun `stream drop and reconnect carry only the backoff`() {
         assertEquals(
             """{"ts":5,"run":"ab12cd34","event":"stream_drop","backoff_ms":4000}""",

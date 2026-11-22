@@ -12,10 +12,12 @@ import com.homecam.proto.Presence
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.Sdp
 import com.homecam.proto.SignalMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
@@ -66,6 +68,23 @@ class SignalingClient(
     private val rpcScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
+     * One consumer, so a download's STREAM chunks and its terminating RESPONSE reach
+     * [rpc] in arrival order. A REQUEST is handed off: its handler must not stall the
+     * replies queued behind it.
+     */
+    private val rpcInbound = Channel<RpcMessage>(Channel.UNLIMITED)
+
+    init {
+        rpcScope.launch {
+            try {
+                for (message in rpcInbound) dispatchRpc(message)
+            } finally {
+                rpc.failAllPending("signaling channel closed")
+            }
+        }
+    }
+
+    /**
      * Built in `onOpen` rather than up front, because the transcript binds the hash of the
      * certificate this connection actually received — which does not exist until TLS has
      * completed.
@@ -109,7 +128,7 @@ class SignalingClient(
                     SignalingRefused(closeReason.takeIf { it != Bye.Reason.UNSPECIFIED } ?: Bye.Reason.HANGUP)
                 )
             }
-            rpcScope.launch { rpc.failAllPending("signaling channel closed") }
+            rpcInbound.close()
             listener?.onClosed(closeReason, closeDetail.ifBlank { reason.orEmpty() })
         }
 
@@ -149,13 +168,30 @@ class SignalingClient(
             SignalMessage.BodyCase.OFFER -> listener?.onOffer(message.offer)
             SignalMessage.BodyCase.ANSWER -> listener?.onAnswer(message.answer)
             SignalMessage.BodyCase.CANDIDATE -> listener?.onCandidate(message.candidate)
-            SignalMessage.BodyCase.RPC -> rpcScope.launch { rpc.onMessage(message.rpc) }
+            SignalMessage.BodyCase.RPC -> rpcInbound.trySend(message.rpc)
             SignalMessage.BodyCase.BYE -> {
                 closeReason = message.bye.reason
                 closeDetail = message.bye.detail
                 socket.close()
             }
             else -> Unit
+        }
+    }
+
+    private suspend fun dispatchRpc(message: RpcMessage) {
+        when (message.type) {
+            RpcMessage.Type.REQUEST, RpcMessage.Type.NOTIFICATION -> rpcScope.launch { receiveRpc(message) }
+            else -> receiveRpc(message)
+        }
+    }
+
+    private suspend fun receiveRpc(message: RpcMessage) {
+        try {
+            rpc.onMessage(message)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "rpc", e)
         }
     }
 

@@ -428,7 +428,13 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         pushToTalkAvailable = gates?.pushToTalk ?: true,
                         sirenAvailable = gates?.siren ?: false,
                         sirenOn = siren,
-                        onSiren = { on -> siren = on; scope.launch { it.link.setSiren(on) } },
+                        onSiren = { on ->
+                            siren = on
+                            scope.launch {
+                                runCatching { it.link.setSiren(on) }
+                                    .onFailure { error -> Log.w(TAG, "siren", error) }
+                            }
+                        },
                         recording = (state as? LiveState.Connected)?.status?.let { status ->
                             RecordingPanelState(
                                 mode = status.requestedRecordingMode,
@@ -453,7 +459,14 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 onTurnOffPrivacy = { scope.launch { turnPrivacyOff() } },
                 onSetRemoteAddress = { editingRemote = true },
                 onBack = onExit,
-                onFocus = { x, y -> open?.let { session -> scope.launch { session.setFocus(x, y) } } },
+                onFocus = { x, y ->
+                    open?.let { session ->
+                        scope.launch {
+                            runCatching { session.setFocus(x, y) }
+                                .onFailure { error -> Log.w(TAG, "focus", error) }
+                        }
+                    }
+                },
                 onShownLenses = showing@{ shown ->
                     val session = open ?: return@showing
                     scope.launch {
@@ -489,16 +502,28 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
 
                 suspend fun fetch(session: ViewerSession, clip: com.homecam.proto.Clip): java.io.File {
                     val file = java.io.File(context.cacheDir, "clips/${clip.id}.mp4")
-                    if (!file.exists()) {
-                        try {
-                            session.link.downloadClip(clip.id, file) { received ->
-                                downloadProgress = com.homecam.core.media.DownloadProgress(received, clip.sizeBytes)
-                            }
-                        } finally {
-                            downloadProgress = null
+                    val cached = file.isFile && file.length() > 0L &&
+                        (clip.sizeBytes <= 0L || file.length() == clip.sizeBytes)
+                    if (cached) return file
+                    file.delete()
+                    val part = java.io.File(file.parentFile, "${file.name}.part")
+                    try {
+                        session.link.downloadClip(clip.id, part) { received ->
+                            downloadProgress = com.homecam.core.media.DownloadProgress(received, clip.sizeBytes)
                         }
+                        if (clip.sizeBytes > 0L && part.length() != clip.sizeBytes) {
+                            throw java.io.IOException(
+                                "clip ${clip.id} is ${part.length()} bytes, expected ${clip.sizeBytes}",
+                            )
+                        }
+                        if (!part.renameTo(file)) throw java.io.IOException("could not store clip ${clip.id}")
+                        return file
+                    } catch (e: Throwable) {
+                        part.delete()
+                        throw e
+                    } finally {
+                        downloadProgress = null
                     }
-                    return file
                 }
 
                 ClipsScreen(
@@ -513,11 +538,15 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                     loadThumbnail = open?.let { s -> { id -> s.link.thumbnail(id) } },
                     pinnedNearCeiling = nearCeiling,
                     onPlay = { clip ->
+                        if (playingId == clip.id) playing = null
                         edit(scope, open, say) {
                             downloading = clip.id
                             runCatching { fetch(it, clip) }.onSuccess { file -> playing = file; playingId = clip.id }
                             downloading = null
                         }
+                    },
+                    onClipUnplayable = { id, fileBytes, expectedBytes, what, extra ->
+                        graph.viewerDiagnostics.clipUnplayable(id, fileBytes, expectedBytes, what, extra)
                     },
                     onExport = { chosen ->
                         edit(scope, open, say) {

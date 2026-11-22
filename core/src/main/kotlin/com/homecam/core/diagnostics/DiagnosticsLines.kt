@@ -52,6 +52,22 @@ object DiagnosticsLines {
     fun streamDrop(ts: Long, run: String, backoffMs: Long): String =
         line(ts, run, "stream_drop", listOf("backoff_ms" to backoffMs))
 
+    fun clipUnplayable(
+        ts: Long,
+        run: String,
+        clipId: String,
+        fileBytes: Long,
+        expectedBytes: Long,
+        what: Int,
+        extra: Int,
+    ): String = line(ts, run, "clip_unplayable", listOf(
+        "clip_id" to clipId,
+        "file_bytes" to fileBytes,
+        "expected_bytes" to expectedBytes,
+        "what" to what,
+        "extra" to extra,
+    ))
+
     fun liveStats(ts: Long, run: String, fields: List<Pair<String, Any>>): String =
         line(ts, run, "live_stats", fields)
 

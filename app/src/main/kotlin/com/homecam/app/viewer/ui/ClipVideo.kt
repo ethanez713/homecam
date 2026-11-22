@@ -55,7 +55,7 @@ fun ClipVideo(
     showBoxes: Boolean,
     onPosition: (Long) -> Unit,
     onCompleted: () -> Unit,
-    onUnplayable: () -> Unit,
+    onUnplayable: (what: Int, extra: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val holder = remember { PlayerHolder() }
@@ -122,8 +122,9 @@ private class PlayerHolder {
     private var pendingSeekMs = 0L
 
     var onCompleted: () -> Unit = {}
-    var onUnplayable: () -> Unit = {}
+    var onUnplayable: (Int, Int) -> Unit = { _, _ -> }
     var onSize: (Int, Int) -> Unit = { _, _ -> }
+    private var playbackFailed = false
 
     fun attach(target: Surface) {
         surface = target
@@ -139,6 +140,7 @@ private class PlayerHolder {
     fun open(clip: File) {
         file = clip
         val target = surface ?: return
+        playbackFailed = false
         releasePlayer()
         player = runCatching {
             MediaPlayer().apply {
@@ -154,10 +156,16 @@ private class PlayerHolder {
                     if (wantPlaying) ready.start()
                 }
                 setOnCompletionListener { onCompleted() }
-                setOnErrorListener { _, _, _ -> onUnplayable(); true }
+                setOnErrorListener { _, what, extra -> fail(what, extra); true }
                 prepareAsync()
             }
-        }.getOrElse { onUnplayable(); null }
+        }.getOrElse { fail(0, 0); null }
+    }
+
+    private fun fail(what: Int, extra: Int) {
+        if (playbackFailed) return
+        playbackFailed = true
+        onUnplayable(what, extra)
     }
 
     fun setPlaying(playing: Boolean) {

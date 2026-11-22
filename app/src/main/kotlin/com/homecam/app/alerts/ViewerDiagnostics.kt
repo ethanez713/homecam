@@ -29,6 +29,14 @@ class ViewerDiagnostics(
         log.append(DiagnosticsLines.streamDrop(System.currentTimeMillis(), run, backoffMs))
     }
 
+    fun clipUnplayable(clipId: String, fileBytes: Long, expectedBytes: Long, what: Int, extra: Int) {
+        log.append(
+            DiagnosticsLines.clipUnplayable(
+                System.currentTimeMillis(), run, clipId, fileBytes, expectedBytes, what, extra,
+            ),
+        )
+    }
+
     fun liveStats(fields: List<Pair<String, Any>>) {
         log.append(DiagnosticsLines.liveStats(System.currentTimeMillis(), run, fields))
     }

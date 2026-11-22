@@ -2,6 +2,8 @@ package com.homecam.app.net
 
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcPeer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import com.homecam.proto.Alias
 import com.homecam.proto.Armed
@@ -294,16 +296,18 @@ class CameraLink(private val peer: RpcPeer) {
 
     /** Streams a clip into [destination]. Chunked because a clip does not fit one frame. */
     suspend fun downloadClip(id: String, destination: File, onReceived: (Long) -> Unit = {}) {
-        destination.parentFile?.mkdirs()
-        destination.outputStream().use { out ->
-            peer.requestStream(
-                RpcMessage.Service.MEDIA,
-                Controls.Media.CLIP_DATA,
-                ClipData.newBuilder().setClipId(id).build().toByteString(),
-                timeoutMs = CLIP_DOWNLOAD_TIMEOUT_MS,
-            ) { chunk ->
-                out.write(ClipData.parseFrom(chunk).chunk.toByteArray())
-                onReceived(destination.length())
+        withContext(Dispatchers.IO) {
+            destination.parentFile?.mkdirs()
+            destination.outputStream().use { out ->
+                peer.requestStream(
+                    RpcMessage.Service.MEDIA,
+                    Controls.Media.CLIP_DATA,
+                    ClipData.newBuilder().setClipId(id).build().toByteString(),
+                    timeoutMs = CLIP_DOWNLOAD_TIMEOUT_MS,
+                ) { chunk ->
+                    out.write(ClipData.parseFrom(chunk).chunk.toByteArray())
+                    onReceived(destination.length())
+                }
             }
         }
     }

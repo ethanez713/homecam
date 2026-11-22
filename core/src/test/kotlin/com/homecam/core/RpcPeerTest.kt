@@ -9,10 +9,13 @@ import com.homecam.proto.Armed
 import com.homecam.proto.RpcError
 import com.homecam.proto.RpcMessage
 import com.homecam.proto.RuntimeStatus
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -147,6 +150,121 @@ class RpcPeerTest {
     }
 
     @Test
+    fun `chunks are handled in order and all before requestStream returns`() = runTest {
+        lateinit var sent: RpcMessage
+        val peer = RpcPeer { sent = it }
+        val seen = mutableListOf<Int>()
+        var returned = false
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val call = async {
+            peer.requestStream(
+                RpcMessage.Service.MEDIA,
+                Controls.Media.CLIP_DATA,
+                ByteString.EMPTY,
+                timeoutMs = 60_000,
+            ) { chunk ->
+                seen += chunk.byteAt(0).toInt()
+                if (seen.size == 1) {
+                    started.complete(Unit)
+                    release.await()
+                }
+            }
+            returned = true
+        }
+        yield()
+        val id = sent.id
+        peer.onMessage(chunk(id, 0))
+        peer.onMessage(chunk(id, 1))
+        peer.onMessage(chunk(id, 2))
+        peer.onMessage(response(id))
+        started.await()
+        assertFalse(call.isCompleted)
+        assertEquals(listOf(0), seen)
+        release.complete(Unit)
+        call.await()
+        assertEquals(listOf(0, 1, 2), seen)
+        assertTrue(returned)
+    }
+
+    @Test
+    fun `cancelling the requester mid-stream does not throw from onMessage`() = runTest {
+        lateinit var sent: RpcMessage
+        val peer = RpcPeer { sent = it }
+        val started = CompletableDeferred<Unit>()
+        val call = async {
+            peer.requestStream(
+                RpcMessage.Service.MEDIA,
+                Controls.Media.CLIP_DATA,
+                ByteString.EMPTY,
+                timeoutMs = 60_000,
+            ) {
+                started.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        yield()
+        val id = sent.id
+        peer.onMessage(chunk(id, 1))
+        peer.onMessage(response(id))
+        started.await()
+        call.cancel()
+        call.join()
+        peer.onMessage(chunk(id, 2))
+        peer.onMessage(response(id))
+        assertTrue(call.isCancelled)
+    }
+
+    @Test
+    fun `an onChunk failure stays in the requester`() = runTest {
+        lateinit var sent: RpcMessage
+        val peer = RpcPeer { sent = it }
+        val call = async {
+            runCatching {
+                peer.requestStream(
+                    RpcMessage.Service.MEDIA,
+                    Controls.Media.CLIP_DATA,
+                    ByteString.EMPTY,
+                    timeoutMs = 60_000,
+                ) { error("disk full") }
+            }
+        }
+        yield()
+        val id = sent.id
+        peer.onMessage(chunk(id, 1))
+        peer.onMessage(response(id))
+        val error = call.await().exceptionOrNull()
+        assertTrue("expected the write failure, got $error", error is IllegalStateException)
+        assertEquals("disk full", error?.message)
+        peer.onMessage(chunk(id, 2))
+        peer.onMessage(response(id))
+    }
+
+    @Test
+    fun `failAllPending closes an in-flight stream`() = runTest {
+        lateinit var sent: RpcMessage
+        val peer = RpcPeer { sent = it }
+        val call = async {
+            runCatching {
+                peer.requestStream(
+                    RpcMessage.Service.MEDIA,
+                    Controls.Media.CLIP_DATA,
+                    ByteString.EMPTY,
+                    timeoutMs = 60_000,
+                ) { }
+            }
+        }
+        yield()
+        peer.onMessage(chunk(sent.id, 4))
+        peer.failAllPending("data channel closed")
+        val error = call.await().exceptionOrNull()
+        assertTrue("expected UNAVAILABLE, got $error", error is RpcRemoteException)
+        assertEquals(RpcError.Code.UNAVAILABLE, (error as RpcRemoteException).code)
+        peer.onMessage(chunk(sent.id, 5))
+        peer.onMessage(response(sent.id))
+    }
+
+    @Test
     fun `a dropped link fails everything in flight instead of hanging`() = runTest {
         val peer = RpcPeer { /* the far end is gone; nothing is delivered */ }
         val call = async {
@@ -162,3 +280,18 @@ class RpcPeerTest {
         assertEquals(RpcError.Code.UNAVAILABLE, (error as RpcRemoteException).code)
     }
 }
+
+private fun chunk(id: Int, byte: Int): RpcMessage = RpcMessage.newBuilder()
+    .setType(RpcMessage.Type.STREAM)
+    .setService(RpcMessage.Service.MEDIA)
+    .setControl(Controls.Media.CLIP_DATA)
+    .setId(id)
+    .setPayload(ByteString.copyFrom(byteArrayOf(byte.toByte())))
+    .build()
+
+private fun response(id: Int): RpcMessage = RpcMessage.newBuilder()
+    .setType(RpcMessage.Type.RESPONSE)
+    .setService(RpcMessage.Service.MEDIA)
+    .setControl(Controls.Media.CLIP_DATA)
+    .setId(id)
+    .build()
