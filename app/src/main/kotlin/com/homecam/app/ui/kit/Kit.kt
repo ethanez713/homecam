@@ -201,26 +201,33 @@ fun ListRow(
 fun Chevron() = LucideIcon(R.drawable.lucide_chevron_right, null, size = 18.dp, tint = Ethan.colors.textFaint)
 
 @Composable
-fun SwitchRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit, meta: String? = null) {
-    ListRow(title, meta = meta, onClick = { onChange(!checked) }) {
-        EthanSwitch(checked, onChange)
+fun SwitchRow(
+    title: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    meta: String? = null,
+    enabled: Boolean = true,
+) {
+    ListRow(title, meta = meta, onClick = if (enabled) {{ onChange(!checked) }} else null) {
+        EthanSwitch(checked, onChange, enabled)
     }
 }
 
 /** The system's switch: a short pill whose knob slides in 140 ms. The row around it is the touch target. */
 @Composable
-fun EthanSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+fun EthanSwitch(checked: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
     val offset by androidx.compose.animation.core.animateDpAsState(
         if (checked) 18.dp else 2.dp,
         androidx.compose.animation.core.tween(140),
         label = "knob",
     )
+    val track = if (checked) Ethan.colors.accent else Ethan.colors.borderStrong
     Box(
         Modifier
             .size(width = 40.dp, height = 24.dp)
             .clip(CircleShape)
-            .background(if (checked) Ethan.colors.accent else Ethan.colors.borderStrong)
-            .toggleable(checked, role = Role.Switch, onValueChange = onChange),
+            .background(if (enabled) track else track.copy(alpha = 0.45f))
+            .toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onChange),
         contentAlignment = Alignment.CenterStart,
     ) {
         Box(Modifier.padding(start = offset).size(20.dp).clip(CircleShape).background(Ethan.colors.knob))

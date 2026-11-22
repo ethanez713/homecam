@@ -640,6 +640,13 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         zoomByLens = next.zoomInLock.zoomByLensMap + zoomByLens
                     }
                 },
+                gestureUnlockSupported = capabilities?.gestureUnlock == true,
+                onGestureUnlock = { enabled, clearLockout ->
+                    edit(scope, open, say) { settings = it.link.setGestureUnlock(enabled, clearLockout) }
+                },
+                onUnlockCode = { signs ->
+                    edit(scope, open, say) { settings = it.link.setUnlockCode(signs) }
+                },
                 onAutoPowerSaving = { on ->
                     edit(scope, open, say) { settings = it.link.setAutoPowerSaving(on) }
                 },

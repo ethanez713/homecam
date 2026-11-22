@@ -21,8 +21,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.homecam.app.ui.HardwareProtectionControl
+import com.homecam.app.ui.formatStamp
 import com.homecam.app.ui.RecordingModeControl
 import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.Segmented
@@ -35,6 +39,7 @@ import com.homecam.app.ui.kit.Gutter
 import com.homecam.app.ui.kit.ListRow
 import com.homecam.app.ui.kit.PaperCard
 import com.homecam.app.ui.kit.PrimaryButton
+import com.homecam.app.ui.kit.QuietButton
 import com.homecam.app.ui.kit.Rule
 import com.homecam.app.ui.kit.SecondaryButton
 import com.homecam.app.ui.kit.Sheet
@@ -44,6 +49,8 @@ import com.homecam.app.ui.kit.Tone
 import com.homecam.app.ui.theme.Ethan
 import com.homecam.core.health.HealthConfig
 import com.homecam.core.media.CaptureQuality
+import com.homecam.core.unlock.UnlockPolicy
+import com.homecam.proto.GestureUnlockStatus
 import com.homecam.proto.HardwareProtection
 import com.homecam.proto.QualityTier
 import com.homecam.proto.RecordingMode
@@ -89,6 +96,9 @@ fun CameraSettingsScreen(
     lowLightSupported: Boolean = false,
     onLowLight: (Boolean) -> Unit = {},
     onZoomInLock: (Boolean) -> Unit = {},
+    gestureUnlockSupported: Boolean = false,
+    onGestureUnlock: (Boolean, Boolean) -> Unit = { _, _ -> },
+    onUnlockCode: (String) -> Unit = { _ -> },
     onAutoPowerSaving: (Boolean) -> Unit = {},
 ) {
     if (settings == null) {
@@ -182,6 +192,33 @@ fun CameraSettingsScreen(
             SwitchRow("Armed reminder", reminderEnabled, onDetectionReminder, meta = "A notice on the camera every hour while it is armed")
         }
 
+        if (gestureUnlockSupported) {
+            val unlock = settings.gestureUnlock
+            val lockout = lockoutDetail(unlock, System.currentTimeMillis())
+            Eyebrow("Door unlock")
+            PaperCard(padding = 0.dp) {
+                SwitchRow(
+                    "Gesture unlock",
+                    unlock.enabled,
+                    { onGestureUnlock(it, false) },
+                    meta = gestureUnlockMeta(unlock),
+                    enabled = unlock.codeSet,
+                )
+                Rule()
+                ListRow(
+                    "Set code",
+                    meta = if (unlock.codeSet) "Replace the six-sign code" else "Six signs, each from 1 to 5",
+                    onClick = { editing = Field.CODE },
+                ) { Chevron() }
+                if (lockout != null) {
+                    Rule()
+                    ListRow("Lockout", meta = lockout) {
+                        QuietButton("Clear", { onGestureUnlock(unlock.enabled, true) })
+                    }
+                }
+            }
+        }
+
         Eyebrow("Camera")
         PaperCard(padding = 0.dp) {
             SwitchRow(
@@ -264,6 +301,7 @@ fun CameraSettingsScreen(
             onDismiss = { editing = null },
         )
         Field.REMOTE -> RemoteAddressSheet(remoteAddress, onRemoteAddress) { editing = null }
+        Field.CODE -> UnlockCodeSheet(onUnlockCode) { editing = null }
         null -> Unit
     }
 }
@@ -281,7 +319,35 @@ private fun qualityMeta(tier: QualityTier): String {
     return "${profile.height}p · ${profile.fps} fps · $text Mbps"
 }
 
-private enum class Field { NAME, REMOTE }
+private enum class Field { NAME, REMOTE, CODE }
+
+private fun gestureUnlockMeta(status: GestureUnlockStatus): String = when {
+    !status.codeSet -> "Set a code before this can turn on"
+    status.enabled -> "A gesture code at the door can unlock it"
+    else -> "Off. The code stays set"
+}
+
+private fun lockoutDetail(status: GestureUnlockStatus, nowMs: Long): String? {
+    val locked = status.lockedOutUntilMs > nowMs
+    val failures = status.failures
+    if (!locked && failures <= 0) return null
+    val until = if (locked) "Locked out until ${formatStamp(status.lockedOutUntilMs)}" else null
+    val wrong = when {
+        failures <= 0 -> null
+        failures == 1 -> "1 wrong code"
+        else -> "$failures wrong codes"
+    }
+    return listOfNotNull(until, wrong).joinToString(" · ")
+}
+
+/** Six marks. The count is all this knows, so the code itself cannot land on screen. */
+private fun signDots(filled: Int): String = buildString {
+    val n = filled.coerceIn(0, UnlockPolicy.CODE_LENGTH)
+    repeat(UnlockPolicy.CODE_LENGTH) { index ->
+        if (index > 0) append(' ')
+        append(if (index < n) '●' else '○')
+    }
+}
 
 /** One line of text, asked for from the bottom edge. */
 @Composable
@@ -319,6 +385,112 @@ fun EditSheet(
                 "Save", { onSave(value.trim()); onDismiss() }, Modifier.weight(1f),
                 enabled = value.trim() != initial && (allowBlank || value.isNotBlank()),
             )
+        }
+    }
+}
+
+/**
+ * Two matching entries of six signs. The entry lives in [remember] only: a door code
+ * must not be restored from saved state, and both strings are wiped when the sheet closes.
+ */
+@Composable
+private fun UnlockCodeSheet(onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    var confirming by remember { mutableStateOf(false) }
+    var mismatch by remember { mutableStateOf(false) }
+
+    fun wipe() {
+        first = ""
+        second = ""
+        confirming = false
+        mismatch = false
+    }
+
+    fun close() {
+        wipe()
+        onDismiss()
+    }
+
+    fun finish() {
+        val code = first
+        val ok = second == code && UnlockPolicy.codeOf(code) != null
+        wipe()
+        if (!ok) {
+            mismatch = true
+            return
+        }
+        onSave(code)
+        onDismiss()
+    }
+
+    fun enter(sign: Char) {
+        if (sign !in '1'..'5') return
+        mismatch = false
+        if (confirming) {
+            if (second.length >= UnlockPolicy.CODE_LENGTH) return
+            second += sign
+            if (second.length == UnlockPolicy.CODE_LENGTH) finish()
+        } else {
+            if (first.length >= UnlockPolicy.CODE_LENGTH) return
+            first += sign
+            if (first.length == UnlockPolicy.CODE_LENGTH) confirming = true
+        }
+    }
+
+    fun backspace() {
+        mismatch = false
+        if (confirming) {
+            if (second.isNotEmpty()) {
+                second = second.dropLast(1)
+            } else {
+                confirming = false
+                if (first.isNotEmpty()) first = first.dropLast(1)
+            }
+        } else if (first.isNotEmpty()) {
+            first = first.dropLast(1)
+        }
+    }
+
+    val filled = if (confirming) second.length else first.length
+    Sheet(::close) {
+        Text("Set a code", style = Ethan.type.title2, color = Ethan.colors.textHeading)
+        Text(
+            if (confirming) "Enter the same six signs again."
+            else "Enter six signs, then the same six again. Each sign is from 1 to 5.",
+            style = Ethan.type.bodySmall,
+            color = Ethan.colors.textMuted,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            signDots(filled),
+            style = Ethan.type.monoLarge,
+            color = Ethan.colors.textHeading,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().semantics {
+                contentDescription = "$filled of ${UnlockPolicy.CODE_LENGTH} signs"
+            },
+        )
+        if (mismatch) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Those didn't match. Start again.",
+                style = Ethan.type.bodySmall,
+                color = Ethan.colors.textDanger,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (sign in 1..5) {
+                SecondaryButton(sign.toString(), { enter(sign.digitToChar()) }, Modifier.weight(1f))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryButton("Delete", ::backspace, Modifier.weight(1f), enabled = filled > 0 || confirming)
+            SecondaryButton("Cancel", ::close, Modifier.weight(1f))
         }
     }
 }

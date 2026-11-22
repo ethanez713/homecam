@@ -21,6 +21,7 @@ import com.homecam.proto.ClipList
 import com.homecam.proto.ClipPin
 import com.homecam.proto.ManualRecord
 import com.homecam.proto.DetectionMode
+import com.homecam.proto.GestureUnlock
 import com.homecam.proto.LowLight
 import com.homecam.proto.Microphone
 import com.homecam.proto.Osd
@@ -36,6 +37,7 @@ import com.homecam.proto.RuntimeStatus
 import com.homecam.proto.LensSelection
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Thumbnail
+import com.homecam.proto.UnlockCode
 import com.homecam.proto.ViewerList
 import com.homecam.proto.ZoomInLock
 
@@ -162,6 +164,27 @@ class CameraLink(private val peer: RpcPeer) {
             RpcMessage.Service.SETTINGS,
             Controls.Settings.LOW_LIGHT,
             LowLight.newBuilder().setEnabled(enabled).build().toByteString(),
+        )
+    )
+
+    /**
+     * [enabled] is always applied: an omitted bool is false on the wire.
+     * [clearLockout] drops the failure streak and the lockout timer.
+     */
+    suspend fun setGestureUnlock(enabled: Boolean, clearLockout: Boolean): SettingsSnapshot =
+        SettingsSnapshot.parseFrom(
+            peer.request(
+                RpcMessage.Service.SETTINGS,
+                Controls.Settings.GESTURE_UNLOCK,
+                GestureUnlock.newBuilder().setEnabled(enabled).setClearLockout(clearLockout).build().toByteString(),
+            )
+        )
+
+    suspend fun setUnlockCode(signs: String): SettingsSnapshot = SettingsSnapshot.parseFrom(
+        peer.request(
+            RpcMessage.Service.SETTINGS,
+            Controls.Settings.UNLOCK_CODE,
+            UnlockCode.newBuilder().setSigns(signs).build().toByteString(),
         )
     )
 

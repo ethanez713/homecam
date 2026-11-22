@@ -21,6 +21,7 @@ import com.homecam.core.crypto.AlertEndpoint
 import com.homecam.core.diagnostics.AlertKind
 import com.homecam.core.diagnostics.DiagnosticsLines
 import com.homecam.core.health.HealthAlertLabels
+import com.homecam.core.unlock.UnlockAlerts
 import com.homecam.proto.AlertPayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -157,8 +158,9 @@ class AlertSubscriber : LifecycleService() {
         labels.isEmpty() -> "Something happened"
         HealthAlertLabels.isHealth(labels.first()) -> HealthAlertLabels.describe(labels.first()) ?: "The camera's health changed"
         labels.first() == SESSION_LABEL -> labels.getOrNull(1)?.let { "$it started watching" } ?: "Someone started watching"
-        else -> "Detected: " + labels.groupingBy { it }.eachCount().entries
-            .joinToString(", ") { (label, count) -> if (count > 1) "$label ×$count" else label }
+        else -> UnlockAlerts.describe(labels.first())
+            ?: ("Detected: " + labels.groupingBy { it }.eachCount().entries
+                .joinToString(", ") { (label, count) -> if (count > 1) "$label ×$count" else label })
     }
 
     /**

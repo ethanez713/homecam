@@ -50,6 +50,7 @@ import com.homecam.core.audit.AuditChain
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.Clip
 import com.homecam.proto.DetectionMode
+import com.homecam.proto.GestureUnlockStatus
 import com.homecam.proto.RecordingMode
 import com.homecam.proto.Rotation
 import com.homecam.proto.RuntimeStatus
@@ -260,6 +261,20 @@ private fun Screen(name: String) {
         "settings_disarmed" -> Shell(CameraTab.SETTINGS, armed = false) {
             Settings(settings.toBuilder().setArmed(false).setSoundDetection(SoundDetection.getDefaultInstance()).build(), "")
         }
+        "settings_unlock" -> Shell(CameraTab.SETTINGS) {
+            Settings(
+                settings.toBuilder().setGestureUnlock(
+                    GestureUnlockStatus.newBuilder()
+                        .setEnabled(true)
+                        .setCodeSet(true)
+                        .setLockedOutUntilMs(System.currentTimeMillis() + 15 * MINUTE)
+                        .setFailures(3)
+                        .build(),
+                ).build(),
+                "100.64.0.9",
+                gestureUnlock = true,
+            )
+        }
         "devices" -> RemoteRosterScreen(viewers, "KQSP-NHPF-2NNZ", {}, {})
         "network" -> NetworkActivityScreen(viewerEgress(true, "https://ntfy.sh"), {})
         "pair_confirm" -> PairConfirmScreen(PairState.Confirm("7K3M-9QXT"), {}, {}, {})
@@ -277,7 +292,7 @@ private fun Screen(name: String) {
 }
 
 @Composable
-private fun Settings(snapshot: SettingsSnapshot, remote: String) {
+private fun Settings(snapshot: SettingsSnapshot, remote: String, gestureUnlock: Boolean = false) {
     CameraSettingsScreen(
         settings = snapshot, onArmed = {}, onAlias = {}, onMicrophone = {}, onAutoRotate = {}, onOsd = {}, onRecordingMode = {},
         projectedDays = 14.0, onDetectionMode = { _, _, _, _ -> }, autoSpotlightSupported = true,
@@ -287,6 +302,7 @@ private fun Settings(snapshot: SettingsSnapshot, remote: String) {
         alertsEnabled = true, onAlerts = {}, remoteAddress = remote, onRemoteAddress = {}, onDevices = {},
         protection = com.homecam.core.health.HealthConfig(),
         verificationPhrase = "7K3M-9QXT", fingerprint = "Y1TM-4JVY-9K8F",
+        gestureUnlockSupported = gestureUnlock,
     )
 }
 
