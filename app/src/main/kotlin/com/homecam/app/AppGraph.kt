@@ -4,6 +4,7 @@ import android.content.Context
 import com.homecam.app.alerts.ViewerDiagnostics
 import com.homecam.app.camera.CameraDiagnostics
 import com.homecam.app.camera.CameraNode
+import com.homecam.app.camera.UnlockStore
 import com.homecam.app.crypto.DeviceIdentity
 import com.homecam.app.data.AuditLog
 import com.homecam.app.data.HomecamDatabase
@@ -24,6 +25,7 @@ class AppGraph private constructor(context: Context) {
     val database: HomecamDatabase = HomecamDatabase.get(app)
     val audit: AuditLog = AuditLog(database.audit(), java.io.File(app.filesDir, "audit-head.bin"))
     val settings: SettingsStore = SettingsStore(app)
+    val unlock: UnlockStore = UnlockStore(app.filesDir)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Persistent camera diagnostics for the device gates; one run id per process. */

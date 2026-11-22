@@ -55,6 +55,8 @@ object Controls {
         const val RECORDING_MODE = 33
         const val QUALITY_TIER = 34
         const val HARDWARE_PROTECTION = 35
+        const val GESTURE_UNLOCK = 64
+        const val UNLOCK_CODE = 65
     }
 
     object Status {

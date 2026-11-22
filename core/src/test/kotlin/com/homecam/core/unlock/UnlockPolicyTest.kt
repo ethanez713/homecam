@@ -2,6 +2,8 @@ package com.homecam.core.unlock
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -79,6 +81,50 @@ class UnlockPolicyTest {
     fun `clear drops failures, lockouts, and a live lockout`() {
         val state = UnlockState(failures = 2, lockouts = 5, lockedUntilMs = 50_000)
         assertEquals(UnlockState(), UnlockPolicy.clear(state))
+    }
+
+    @Test
+    fun `codeOf accepts six signs and nothing else`() {
+        assertEquals(code, UnlockPolicy.codeOf("123451"))
+        val parsed = UnlockPolicy.codeOf("123451")!!
+        assertEquals(UnlockOutcome.UNLOCKED, UnlockPolicy.attempt(parsed, code, UnlockState(), nowMs = 0).outcome)
+        assertNull(UnlockPolicy.codeOf("12345"))
+        assertNull(UnlockPolicy.codeOf("1234551"))
+        assertNull(UnlockPolicy.codeOf(""))
+        assertNull(UnlockPolicy.codeOf("123450"))
+        assertNull(UnlockPolicy.codeOf("123456"))
+        assertNull(UnlockPolicy.codeOf("12345 "))
+        assertNull(UnlockPolicy.codeOf(" 123451"))
+        assertNull(UnlockPolicy.codeOf("123451\n"))
+        assertNull(UnlockPolicy.codeOf("１２３４５１"))
+    }
+
+    @Test
+    fun `enabling with no code is refused and does not clear`() {
+        val state = UnlockState(failures = 2, lockouts = 1, lockedUntilMs = 9)
+        assertNull(UnlockPolicy.applySettings(enabled = true, clearLockout = true, codeSet = false, state))
+        assertNull(UnlockPolicy.applySettings(enabled = true, clearLockout = false, codeSet = false, state))
+    }
+
+    @Test
+    fun `a stored code lets the setting change and a clear drops the lockout`() {
+        val state = UnlockState(failures = 2, lockouts = 1, lockedUntilMs = 9)
+        assertSame(state, UnlockPolicy.applySettings(enabled = true, clearLockout = false, codeSet = true, state))
+        assertSame(state, UnlockPolicy.applySettings(enabled = false, clearLockout = false, codeSet = false, state))
+        assertEquals(UnlockState(), UnlockPolicy.applySettings(enabled = true, clearLockout = true, codeSet = true, state))
+        assertEquals(UnlockState(), UnlockPolicy.applySettings(enabled = false, clearLockout = true, codeSet = false, state))
+    }
+
+    @Test
+    fun `a lockout record round-trips and a damaged one reads as none`() {
+        val state = UnlockState(failures = 2, lockouts = 4, lockedUntilMs = 1_700_000_000_000)
+        assertEquals(state, UnlockPolicy.decodeState(UnlockPolicy.encodeState(state)))
+        assertEquals(UnlockState(), UnlockPolicy.decodeState(ByteArray(0)))
+        assertEquals(UnlockState(), UnlockPolicy.decodeState("nope".encodeToByteArray()))
+        assertEquals(UnlockState(), UnlockPolicy.decodeState("1\n2\n".encodeToByteArray()))
+        assertEquals(UnlockState(), UnlockPolicy.decodeState("-1\n0\n0\n".encodeToByteArray()))
+        assertEquals(UnlockState(), UnlockPolicy.decodeState("1\n-2\n3\n".encodeToByteArray()))
+        assertEquals(UnlockState(), UnlockPolicy.decodeState("1\n2\n-3\n".encodeToByteArray()))
     }
 
     @Test

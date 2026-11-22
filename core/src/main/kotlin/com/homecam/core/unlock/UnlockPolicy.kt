@@ -53,9 +53,42 @@ object UnlockPolicy {
 
     fun clear(state: UnlockState): UnlockState = UnlockState()
 
+    /**
+     * Enabling with no code stored is refused. A refusal returns null so the
+     * caller writes nothing, including a clear that arrived in the same call.
+     */
+    fun applySettings(enabled: Boolean, clearLockout: Boolean, codeSet: Boolean, state: UnlockState): UnlockState? {
+        if (enabled && !codeSet) return null
+        return if (clearLockout) clear(state) else state
+    }
+
     fun lockedOut(state: UnlockState, nowMs: Long): Boolean = nowMs < state.lockedUntilMs
 
     fun validCode(signs: List<Int>): Boolean = signs.size == CODE_LENGTH && signs.all { it in 1..5 }
+
+    /** Wire form of a code. Null unless [validCode] accepts it. */
+    fun codeOf(signs: String): List<Int>? {
+        if (signs.length != CODE_LENGTH) return null
+        val values = ArrayList<Int>(CODE_LENGTH)
+        for (ch in signs) {
+            if (ch !in '1'..'5') return null
+            values += ch - '0'
+        }
+        return values.takeIf { validCode(it) }
+    }
+
+    fun encodeState(state: UnlockState): ByteArray =
+        "${state.failures}\n${state.lockouts}\n${state.lockedUntilMs}\n".encodeToByteArray()
+
+    fun decodeState(bytes: ByteArray): UnlockState {
+        val lines = bytes.decodeToString().split('\n')
+        if (lines.size < 3) return UnlockState()
+        val failures = lines[0].toIntOrNull() ?: return UnlockState()
+        val lockouts = lines[1].toIntOrNull() ?: return UnlockState()
+        val until = lines[2].toLongOrNull() ?: return UnlockState()
+        if (failures < 0 || lockouts < 0 || until < 0) return UnlockState()
+        return UnlockState(failures, lockouts, until)
+    }
 
     /** Four bytes per sign, so 257 cannot pass for 1 the way a single toByte() would. */
     private fun bytes(values: List<Int>): ByteArray {

@@ -56,6 +56,8 @@ object CapabilityProvider {
             .setHardwareProtection(true)
             .setThermalStatusSupported(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
             .setLowLight(lowLightSupported(context, lenses.firstOrNull { !it.front }))
+            // The settings calls exist in this build. Older cameras omit the field.
+            .setGestureUnlock(true)
             .build()
     }
 

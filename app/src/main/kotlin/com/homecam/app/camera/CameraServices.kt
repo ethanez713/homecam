@@ -14,6 +14,7 @@ import com.homecam.core.media.CaptureQuality
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcException
 import com.homecam.core.rpc.RpcPeer
+import com.homecam.core.unlock.UnlockPolicy
 import com.homecam.core.media.TimelineBuckets
 import java.time.Instant
 import java.time.LocalDate
@@ -36,6 +37,8 @@ import com.homecam.proto.DetectionReminder
 import com.homecam.proto.DetectionSchedule
 import com.homecam.proto.DetectionZone
 import com.homecam.proto.Focus
+import com.homecam.proto.GestureUnlock
+import com.homecam.proto.GestureUnlockStatus
 import com.homecam.proto.HardwareProtection
 import com.homecam.proto.Lens
 import com.homecam.proto.LowLight
@@ -66,6 +69,7 @@ import com.homecam.proto.LiveLenses
 import com.homecam.proto.TimelineCount
 import com.homecam.proto.TimelineQuery
 import com.homecam.proto.Torch
+import com.homecam.proto.UnlockCode
 import com.homecam.proto.Viewer
 import com.homecam.proto.ViewerList
 import com.homecam.proto.Zoom
@@ -343,7 +347,7 @@ class CameraServices(
 
     private fun registerSettings(peer: RpcPeer) {
         peer.register(RpcMessage.Service.SETTINGS, Controls.Settings.SNAPSHOT) {
-            graph.settings.current.toByteString()
+            settingsSnapshot().toByteString()
         }
         settingSetter(peer, Controls.Settings.ARMED) { setArmed(Armed.parseFrom(it).armed) }
         settingSetter(peer, Controls.Settings.ALIAS) { setAlias(Alias.parseFrom(it).alias) }
@@ -424,6 +428,25 @@ class CameraServices(
         settingSetter(peer, Controls.Settings.SOUND_RECOGNITION) {
             setSoundRecognition(SoundRecognition.parseFrom(it))
         }
+        peer.register(RpcMessage.Service.SETTINGS, Controls.Settings.GESTURE_UNLOCK) { request ->
+            val asked = GestureUnlock.parseFrom(request.payload)
+            // A refusal writes nothing, so a clear in the same call does not land either.
+            if (!graph.unlock.accept(asked.enabled, asked.clearLockout)) {
+                throw RpcException(RpcError.Code.FAILED_PRECONDITION, "gesture unlock needs a code")
+            }
+            val updated = graph.settings.update {
+                setGestureUnlock(GestureUnlockStatus.newBuilder().setEnabled(asked.enabled).build())
+            }
+            auditSetting(nameOfSetting(Controls.Settings.GESTURE_UNLOCK))
+            settingsSnapshot(updated).toByteString()
+        }
+        peer.register(RpcMessage.Service.SETTINGS, Controls.Settings.UNLOCK_CODE) { request ->
+            val code = UnlockPolicy.codeOf(UnlockCode.parseFrom(request.payload).signs)
+                ?: throw RpcException(RpcError.Code.INVALID_ARGUMENT, "unlock code must be six signs from 1 to 5")
+            graph.unlock.writeCode(code)
+            auditSetting(nameOfSetting(Controls.Settings.UNLOCK_CODE))
+            settingsSnapshot().toByteString()
+        }
     }
 
     /**
@@ -448,8 +471,32 @@ class CameraServices(
                 viewerLabel = viewerLabel,
                 detail = auditDetail(control, request.payload, updated),
             )
-            updated.toByteString()
+            settingsSnapshot(updated).toByteString()
         }
+    }
+
+    private suspend fun auditSetting(detail: String) {
+        graph.audit.record(
+            AuditEvent.Kind.SETTINGS_CHANGED,
+            viewerFingerprint = viewerFingerprint,
+            viewerLabel = viewerLabel,
+            detail = detail,
+        )
+    }
+
+    /** The stored snapshot has the enabled flag. Lockout and code_set are read from the store. */
+    private fun settingsSnapshot(base: SettingsSnapshot = graph.settings.current): SettingsSnapshot {
+        val reading = graph.unlock.read()
+        return base.toBuilder()
+            .setGestureUnlock(
+                GestureUnlockStatus.newBuilder()
+                    .setEnabled(base.gestureUnlock.enabled)
+                    .setCodeSet(reading.codeSet)
+                    .setLockedOutUntilMs(reading.state.lockedUntilMs)
+                    .setFailures(reading.state.failures)
+                    .build(),
+            )
+            .build()
     }
 
     private fun lensIds(): Collection<String> = LensSource.lenses(graph.app).map { it.id }
@@ -574,6 +621,8 @@ class CameraServices(
         Controls.Settings.DETECTION_REMINDER -> "detection reminder"
         Controls.Settings.SOUND_DETECTION -> "sound detection"
         Controls.Settings.SOUND_RECOGNITION -> "sound recognition"
+        Controls.Settings.GESTURE_UNLOCK -> "gesture unlock"
+        Controls.Settings.UNLOCK_CODE -> "unlock code"
         else -> throw RpcException(RpcError.Code.UNIMPLEMENTED, "unknown setting $control")
     }
 

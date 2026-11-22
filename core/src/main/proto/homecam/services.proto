@@ -112,6 +112,8 @@ message SettingsSnapshot {
   // Keyed by lens id. A lens with no entry has no zone, or no mask.
   map<string, DetectionZone> detection_zones = 37;
   map<string, PrivacyMask> privacy_masks = 38;
+  // Enabled, whether a code is stored, and the current lockout. Never the code.
+  GestureUnlockStatus gesture_unlock = 39;
 }
 
 // The decibel half of sound detection (Phase 6): a loud noise above [threshold_db] fires,
@@ -186,6 +188,23 @@ message Rotation {
 }
 
 message PrivacyMode { bool enabled = 1; }
+
+// enabled is always applied: proto3 cannot tell an omitted bool from false.
+// clear_lockout drops the failure streak and the lockout timer.
+message GestureUnlock {
+  bool enabled = 1;
+  bool clear_lockout = 2;
+}
+
+// Six characters, each a sign from 1 to 5. Stored privately and never echoed.
+message UnlockCode { string signs = 1; }
+
+message GestureUnlockStatus {
+  bool enabled = 1;
+  bool code_set = 2;
+  int64 locked_out_until_ms = 3;
+  uint32 failures = 4;
+}
 
 message DetectionMode {
   bool person = 1;
@@ -400,6 +419,7 @@ message AuditEvent {
     CAMERA_STOPPED = 14;
     DETECTION = 15;
     RESPONSE_ACTION = 16;
+    GESTURE_UNLOCK = 17;
   }
   uint64 seq = 1;
   int64 at_ms = 2;
@@ -548,6 +568,8 @@ message Capabilities {
   bool low_light = 16;
   // The quality tiers the primary lens can produce, best first.
   repeated QualityTier quality_tiers = 17;
+  // Gesture-code settings. Older cameras leave this unset, and the viewer hides the section.
+  bool gesture_unlock = 18;
 
   enum EncoderTier {
     ENCODER_NONE = 0;  // software encode only
