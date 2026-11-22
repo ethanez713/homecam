@@ -1,8 +1,11 @@
 package com.homecam.app.net
 
+import com.homecam.core.media.ClipPages
 import com.homecam.core.rpc.Controls
 import com.homecam.core.rpc.RpcPeer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import com.homecam.proto.Alias
@@ -11,6 +14,7 @@ import com.homecam.proto.AutoPowerSaving
 import com.homecam.proto.AlertRegistration
 import com.homecam.proto.Capabilities
 import com.homecam.proto.AuditQuery
+import com.homecam.proto.Clip
 import com.homecam.proto.ClipData
 import com.homecam.proto.ClipDelete
 import com.homecam.proto.ClipList
@@ -34,6 +38,17 @@ import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Thumbnail
 import com.homecam.proto.ViewerList
 import com.homecam.proto.ZoomInLock
+
+/**
+ * Clips from one page that earlier pages of this walk had not already returned, plus the
+ * start range of the reply itself. The range includes a boundary row the previous page
+ * also carried, which is the window event spans are read over.
+ */
+data class ClipHistoryPage(
+    val clips: List<Clip>,
+    val oldestStartedAtMs: Long,
+    val newestStartedAtMs: Long,
+)
 
 /**
  * Typed calls the viewer makes against a camera. Thin on purpose — it exists so screens
@@ -235,13 +250,42 @@ class CameraLink(private val peer: RpcPeer) {
         )
     ).revoked
 
-    suspend fun clips(sinceMs: Long = 0, limit: Int = 100): ClipList = ClipList.parseFrom(
+    suspend fun clips(sinceMs: Long = 0, untilMs: Long = 0, limit: Int = 100): ClipList = ClipList.parseFrom(
         peer.request(
             RpcMessage.Service.MEDIA,
             Controls.Media.CLIP_LIST,
-            ClipList.newBuilder().setSinceMs(sinceMs).setLimit(limit).build().toByteString(),
+            ClipList.newBuilder().setSinceMs(sinceMs).setUntilMs(untilMs).setLimit(limit).build().toByteString(),
         )
     )
+
+    /**
+     * The whole clip list, newest first. A reply has to fit in one WebSocket frame, so this
+     * walks [ClipPages.PAGE_SIZE] rows at a time and hands each page to [onPage] before
+     * asking for the next. A short page or a page with no new id ends the walk; a failed
+     * request throws after the pages already delivered.
+     */
+    suspend fun forEachClipPage(onPage: suspend (ClipHistoryPage) -> Unit) {
+        var seen = emptySet<String>()
+        var untilMs = 0L
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val listed = clips(untilMs = untilMs, limit = ClipPages.PAGE_SIZE).clipsList
+            val step = ClipPages.absorb(seen, listed.map { ClipPages.Row(it.id, it.startedAtMs) })
+            if (step.added.isNotEmpty()) {
+                val fresh = step.added.map { it.id }.toSet()
+                onPage(
+                    ClipHistoryPage(
+                        clips = listed.filter { it.id in fresh },
+                        oldestStartedAtMs = listed.minOf { it.startedAtMs },
+                        newestStartedAtMs = listed.maxOf { it.startedAtMs },
+                    ),
+                )
+            }
+            val nextUntil = step.nextUntilMs ?: return
+            seen = step.seen
+            untilMs = nextUntil
+        }
+    }
 
     /** The clip's pre-generated thumbnail, or null if the camera has none for it. */
     suspend fun thumbnail(id: String): ByteArray? = runCatching {
@@ -254,12 +298,13 @@ class CameraLink(private val peer: RpcPeer) {
         ).jpeg.toByteArray().takeIf { it.isNotEmpty() }
     }.getOrNull()
 
-    suspend fun eventSpans(sinceMs: Long): List<com.homecam.core.media.EventSpan> =
+    suspend fun eventSpans(sinceMs: Long, untilMs: Long = 0): List<com.homecam.core.media.EventSpan> =
         com.homecam.proto.TimelineQuery.parseFrom(
             peer.request(
                 RpcMessage.Service.MEDIA,
                 Controls.Media.TIMELINE,
-                com.homecam.proto.TimelineQuery.newBuilder().setSinceMs(sinceMs).build().toByteString(),
+                com.homecam.proto.TimelineQuery.newBuilder()
+                    .setSinceMs(sinceMs).setUntilMs(untilMs).build().toByteString(),
             )
         ).entriesList.map { com.homecam.core.media.EventSpan(it.clipId, it.label, it.atMs, it.endMs) }
 

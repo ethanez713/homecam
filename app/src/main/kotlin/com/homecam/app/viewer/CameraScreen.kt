@@ -52,14 +52,23 @@ import com.homecam.app.ui.formatStamp
 import com.homecam.core.lens.LensCatalog
 import com.homecam.core.lens.LensSelections
 import com.homecam.core.rpc.ControlGating
+import com.homecam.core.media.EventSpan
 import com.homecam.core.retention.ClipRef
 import com.homecam.core.retention.RetentionPlanner
 import com.homecam.core.sound.SoundClasses
+import com.homecam.app.net.CameraLink
+import com.homecam.app.net.ClipHistoryPage
 import com.homecam.proto.Capabilities
+import com.homecam.proto.Clip
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Viewer
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private const val TAG = "CameraScreen"
 
@@ -91,7 +100,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
     var session by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<ViewerSession?>(null) }
     var settings by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<SettingsSnapshot?>(null) }
     var capabilities by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<Capabilities?>(null) }
-    var projectedDays by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<Double?>(null) }
+
     var viewers by remember(camera.fingerprint, attempt, foreground) { mutableStateOf<List<Viewer>?>(null) }
     var torch by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
     var mic by remember(camera.fingerprint, attempt, foreground) { mutableStateOf(false) }
@@ -260,16 +269,60 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
         settings?.let { node.rememberState(camera.fingerprint, it.armed, it.recordingMode.name.lowercase().replaceFirstChar { c -> c.uppercase() }) }
     }
 
-    // Recomputed when the mode changes, since that is what alters the recording rate and so
-    // how far back the camera can remember (§5); a stale estimate is worse than none.
-    LaunchedEffect(open, settings?.recordingMode, settings?.retention) {
+    // One walk per open session, shared with the Clips tab. The estimate has to see pinned
+    // bytes older than a single page, and a second walk would repeat every page (§5).
+    var clipHistory by remember(open) { mutableStateOf<List<Clip>?>(null) }
+    var eventSpans by remember(open) { mutableStateOf<List<EventSpan>>(emptyList()) }
+    var projectedDays by remember(open) { mutableStateOf<Double?>(null) }
+    val historyGate = remember(open) { Mutex() }
+    fun projectRetention(history: List<Clip>?) {
         val current = settings
-        projectedDays = if (open == null || current == null) null else runCatching {
-            val refs = open.link.clips(limit = 1000).clipsList.map {
-                ClipRef(it.id, it.startedAtMs, it.sizeBytes, it.pinned)
+        projectedDays = if (open == null || current == null || history == null) {
+            null
+        } else {
+            RetentionPlanner.projectedRetentionDays(
+                history.map { ClipRef(it.id, it.startedAtMs, it.sizeBytes, it.pinned) },
+                current.retention.toRetentionLimits(),
+                System.currentTimeMillis(),
+            )
+        }
+    }
+    suspend fun reloadClipHistory() {
+        val link = open?.link ?: return
+        historyGate.withLock {
+            val seen = mutableSetOf<String>()
+            var received = false
+            try {
+                link.forEachClipPage { page ->
+                    currentCoroutineContext().ensureActive()
+                    received = true
+                    seen += page.clips.map { it.id }
+                    clipHistory = mergeClipHistory(clipHistory.orEmpty(), page.clips)
+                    eventSpans = (eventSpans + spansFor(link, page)).distinct()
+                    projectRetention(clipHistory)
+                }
+                if (!received) {
+                    clipHistory = emptyList()
+                    eventSpans = emptyList()
+                } else {
+                    clipHistory = clipHistory.orEmpty().filter { it.id in seen }
+                    eventSpans = eventSpans.filter { it.clipId in seen }.distinct()
+                }
+                projectRetention(clipHistory)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // Leave the pages already shown. Clearing the list would also drop the
+                // playhead, which lives as long as that list stays on screen.
+                Log.w(TAG, "clip history", error)
             }
-            RetentionPlanner.projectedRetentionDays(refs, current.retention.toRetentionLimits(), System.currentTimeMillis())
-        }.getOrNull()
+        }
+    }
+    LaunchedEffect(open) {
+        if (open != null) reloadClipHistory()
+    }
+    LaunchedEffect(settings?.recordingMode, settings?.retention) {
+        projectRetention(clipHistory)
     }
 
     // The paired-devices list is a screen of its own, reached from Settings.
@@ -477,21 +530,12 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
             )
 
             CameraTab.CLIPS -> {
-                var clips by remember(open) { mutableStateOf<List<com.homecam.proto.Clip>?>(null) }
-                var eventSpans by remember(open) { mutableStateOf<List<com.homecam.core.media.EventSpan>>(emptyList()) }
                 var playing by remember(open) { mutableStateOf<java.io.File?>(null) }
                 var playingId by remember(open) { mutableStateOf<String?>(null) }
                 var downloading by remember(open) { mutableStateOf<String?>(null) }
                 var downloadProgress by remember(open) { mutableStateOf<com.homecam.core.media.DownloadProgress?>(null) }
-                suspend fun refresh() {
-                    clips = open?.let { runCatching { it.link.clips().clipsList }.getOrNull() }
-                    eventSpans = open?.let { s ->
-                        clips?.minOfOrNull { it.startedAtMs }?.let { since -> runCatching { s.link.eventSpans(since) }.getOrNull() }
-                    }.orEmpty()
-                }
-                LaunchedEffect(open) { refresh() }
 
-                val nearCeiling = clips?.let { list ->
+                val nearCeiling = clipHistory?.let { list ->
                     settings?.let { s ->
                         RetentionPlanner.pinnedNearCeiling(
                             list.map { ClipRef(it.id, it.startedAtMs, it.sizeBytes, it.pinned) },
@@ -527,7 +571,7 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 }
 
                 ClipsScreen(
-                    clips = clips,
+                    clips = clipHistory,
                     eventSpans = eventSpans,
                     playing = playing,
                     playingId = playingId,
@@ -561,13 +605,13 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                         }
                     },
                     onPin = { clip ->
-                        edit(scope, open, say) { it.link.pinClip(clip.id, !clip.pinned); refresh() }
+                        edit(scope, open, say) { it.link.pinClip(clip.id, !clip.pinned); reloadClipHistory() }
                     },
                     onDelete = { doomed ->
                         edit(scope, open, say) {
                             doomed.forEach { clip -> it.link.deleteClip(clip.id) }
                             if (doomed.any { clip -> clip.id == playingId }) { playing = null; playingId = null }
-                            refresh()
+                            reloadClipHistory()
                             say(if (doomed.size == 1) "Clip deleted." else "${doomed.size} clips deleted.")
                         }
                     },
@@ -694,6 +738,22 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
             )
         }
     }
+}
+
+private suspend fun spansFor(link: CameraLink, page: ClipHistoryPage): List<EventSpan> =
+    try {
+        link.eventSpans(page.oldestStartedAtMs, page.newestStartedAtMs)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Log.w(TAG, "event spans", error)
+        emptyList()
+    }
+
+private fun mergeClipHistory(existing: List<Clip>, page: List<Clip>): List<Clip> {
+    val incoming = page.associateBy { it.id }
+    val known = existing.map { it.id }.toSet()
+    return existing.map { clip -> incoming[clip.id] ?: clip } + page.filter { it.id !in known }
 }
 
 private fun edit(
