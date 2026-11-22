@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
+import com.homecam.app.alerts.AlertPreferences
+import com.homecam.app.alerts.AlertSubscriber
 import com.homecam.app.camera.CameraRoot
 import com.homecam.app.camera.CameraService
 import com.homecam.app.camera.ScreenDimmer
@@ -76,11 +78,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        val role = RoleStore(this).role
         // Opening the app is a visible window, which is what the camera needs after a
         // background start. Restarting when frames are already flowing would drop them.
-        if (RoleStore(this).role == Role.CAMERA && CameraService.isBlind.value) {
+        if (role == Role.CAMERA && CameraService.isBlind.value) {
             CameraService.resume(this)
         }
+        // A force-stop, or a package-replaced broadcast the system skipped (Samsung does),
+        // otherwise leaves alerts off until the next boot. A second start is a no-op.
+        if (role == Role.VIEWER && AlertPreferences.enabled(this)) AlertSubscriber.start(this)
     }
 
     companion object {
