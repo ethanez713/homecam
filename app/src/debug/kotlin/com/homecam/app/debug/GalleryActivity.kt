@@ -47,6 +47,7 @@ import com.homecam.app.viewer.ui.PairState
 import com.homecam.app.viewer.ui.RemoteRosterScreen
 import com.homecam.app.viewer.ui.ViewerHomeScreen
 import com.homecam.core.audit.AuditChain
+import com.homecam.core.media.Viewport
 import com.homecam.proto.AuditEvent
 import com.homecam.proto.Clip
 import com.homecam.proto.DetectionMode
@@ -254,6 +255,14 @@ private fun Screen(name: String) {
         "player" -> Shell(CameraTab.CLIPS) {
             Clips(java.io.File(androidx.compose.ui.platform.LocalContext.current.cacheDir, "sample.mp4"))
         }
+        "player_zoomed" -> Shell(CameraTab.CLIPS) {
+            val playing = clips.first { it.id == "run-a-0" }
+            Clips(
+                java.io.File(androidx.compose.ui.platform.LocalContext.current.cacheDir, "sample.mp4"),
+                viewport = Viewport(2f),
+                openAtMs = playing.startedAtMs,
+            )
+        }
         "clips_empty" -> Shell(CameraTab.CLIPS) { ClipsScreen(emptyList(), null, null, null, null, {}, {}, {}, {}, true) }
         "log" -> AuditScreen(events, AuditChain.Verification(true, 0), onBack = {})
         "log_broken" -> AuditScreen(events, AuditChain.Verification(false, 37), onBack = {})
@@ -320,7 +329,12 @@ private fun CameraHome(watcher: String?) {
 }
 
 @Composable
-private fun Clips(file: java.io.File?, speed: Float = 1f) {
+private fun Clips(
+    file: java.io.File?,
+    speed: Float = 1f,
+    openAtMs: Long? = null,
+    viewport: Viewport = Viewport.IDENTITY,
+) {
     var playingId by remember { mutableStateOf(if (file != null) "run-a-0" else null) }
     var playbackSpeed by remember { mutableFloatStateOf(speed) }
     ClipsScreen(
@@ -328,5 +342,6 @@ private fun Clips(file: java.io.File?, speed: Float = 1f) {
         projectedDays = 14.0, onPlay = { if (file != null) playingId = it.id }, onPin = {}, onDelete = {}, onExport = {},
         showBoxes = true, loadThumbnail = { thumbnail(it) },
         speed = playbackSpeed, onSpeed = { playbackSpeed = it },
+        openAtMs = openAtMs, initialViewport = viewport,
     )
 }

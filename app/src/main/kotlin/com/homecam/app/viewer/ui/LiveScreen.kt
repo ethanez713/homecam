@@ -44,6 +44,7 @@ import com.homecam.app.ui.RecordingPanelState
 import com.homecam.app.ui.formatBytes
 import com.homecam.core.health.HealthItem
 import com.homecam.core.lens.ZoomMap
+import com.homecam.core.media.Viewport
 import com.homecam.proto.LensInfo
 import com.homecam.app.ui.kit.Badge
 import com.homecam.app.ui.kit.ConfirmSheet
@@ -205,6 +206,8 @@ private fun LiveVideo(
     var userClosed by remember(primaryId, secondaryId) { mutableStateOf(false) }
     val bigId = if (swapped && secondaryId != null) secondaryId else primaryId
     val smallId = if (swapped && secondaryId != null) primaryId else secondaryId
+    // A swap or a lens change is a different picture, so the zoom does not travel with it.
+    var viewport by remember(bigId) { mutableStateOf(Viewport.IDENTITY) }
     val paused = state.status?.secondaryPaused == true
     val shown = when {
         secondaryId == null -> listOf(primaryId)
@@ -218,7 +221,17 @@ private fun LiveVideo(
         Box(modifier.background(Color.Black)) {
             val big = trackFor(state, bigId, primaryId, secondaryId)
             val focusAt = if (bigId == primaryId) onFocus else null
-            if (big != null) VideoSurface(big, Modifier.fillMaxSize(), onLongPress = focusAt) else videoPlaceholder?.invoke()
+            if (big != null) {
+                VideoSurface(
+                    big,
+                    Modifier.fillMaxSize(),
+                    onLongPress = focusAt,
+                    viewport = viewport,
+                    onViewport = { viewport = it },
+                )
+            } else {
+                videoPlaceholder?.invoke()
+            }
             Row(Modifier.align(Alignment.TopStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Badge("Live", Tone.ACCENT, dot = true)
                 if (state.via.isNotBlank()) Badge(state.via, Tone.NEUTRAL)

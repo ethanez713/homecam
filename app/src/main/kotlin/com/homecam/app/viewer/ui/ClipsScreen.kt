@@ -70,6 +70,7 @@ import com.homecam.app.ui.theme.EthanRadius
 import com.homecam.app.ui.theme.HomecamTheme
 import com.homecam.core.lens.LensSelections
 import com.homecam.core.media.ClipFilter
+import com.homecam.core.media.Viewport
 import com.homecam.core.media.ClipGroup
 import com.homecam.core.media.ClipGrouping
 import com.homecam.core.media.ClipRun
@@ -118,6 +119,8 @@ fun ClipsScreen(
     onPrefetch: (Clip) -> Unit = {},
     speed: Float = 1f,
     onSpeed: (Float) -> Unit = {},
+    /** Where the picture starts. A change of lens returns to one times; leaving the tab does too. */
+    initialViewport: Viewport = Viewport.IDENTITY,
 ) {
     if (clips == null) {
         EmptyState("Loading clips", busy = true)
@@ -174,6 +177,15 @@ fun ClipsScreen(
     val underPlayhead = timeline.clips.find { it.id == chosenClipId }?.takeIf { it.covers(playheadMs) }
         ?: timeline.clipAt(playheadMs)
 
+    // Kept across seeks and the next clip. A different lens, or leaving this tab, starts over.
+    var viewport by remember { mutableStateOf(initialViewport) }
+    var lensKey by remember { mutableStateOf<String?>(null) }
+    val shownLens = underPlayhead?.lensId
+    if (shownLens != null && shownLens != lensKey) {
+        if (lensKey != null) viewport = Viewport.IDENTITY
+        lensKey = shownLens
+    }
+
     val panel = PlaybackState(
         timeline = timeline,
         playheadMs = playheadMs,
@@ -188,6 +200,8 @@ fun ClipsScreen(
         seek = seek,
         unplayable = failedId != null && failedId == underPlayhead?.id,
         showBoxes = showBoxes,
+        viewport = viewport,
+        onViewport = { viewport = it },
         loadThumbnail = loadThumbnail,
         onScrub = { scrubbing = true; wantPlaying = false; playheadMs = it },
         onScale = { msPerDp = it },
@@ -273,6 +287,8 @@ private class PlaybackState(
     val seek: Seek?,
     val unplayable: Boolean,
     val showBoxes: Boolean,
+    val viewport: Viewport,
+    val onViewport: (Viewport) -> Unit,
     val loadThumbnail: (suspend (String) -> ByteArray?)?,
     val onScrub: (Long) -> Unit,
     val onScale: (Float) -> Unit,
@@ -349,6 +365,8 @@ private fun Picture(state: PlaybackState, modifier: Modifier) {
                 onPosition = state.onPosition,
                 onCompleted = state.onCompleted,
                 onUnplayable = state.onUnplayable,
+                viewport = state.viewport,
+                onViewport = state.onViewport,
                 modifier = Modifier.fillMaxSize(),
             )
             else -> state.loadThumbnail?.let { Still(clip.id, it) }

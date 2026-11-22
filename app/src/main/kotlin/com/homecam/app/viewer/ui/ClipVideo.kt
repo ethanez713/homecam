@@ -1,5 +1,6 @@
 package com.homecam.app.viewer.ui
 
+import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.media.PlaybackParams
@@ -24,6 +25,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -33,6 +35,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.viewinterop.AndroidView
 import com.homecam.app.detect.DetectionTrackReader
 import com.homecam.app.ui.theme.Ethan
+import com.homecam.core.media.Viewport
 import com.homecam.proto.DetectionFrame
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -58,12 +61,15 @@ fun ClipVideo(
     onPosition: (Long) -> Unit,
     onCompleted: () -> Unit,
     onUnplayable: (what: Int, extra: Int) -> Unit,
+    viewport: Viewport,
+    onViewport: (Viewport) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val holder = remember { PlayerHolder() }
     var aspect by remember { mutableFloatStateOf(16f / 9f) }
     var position by remember(file) { mutableLongStateOf(0L) }
     val latestOnPosition by rememberUpdatedState(onPosition)
+    val zoom by rememberUpdatedState(viewport)
     holder.onCompleted = rememberUpdatedState(onCompleted).value
     holder.onUnplayable = rememberUpdatedState(onUnplayable).value
     holder.onSize = { width, height -> if (width > 0 && height > 0) aspect = width.toFloat() / height }
@@ -96,6 +102,9 @@ fun ClipVideo(
                 modifier = Modifier.fillMaxSize(),
                 factory = { context ->
                     TextureView(context).apply {
+                        addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                            (v as TextureView).show(zoom)
+                        }
                         surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                             override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
                                 holder.attach(Surface(texture))
@@ -109,10 +118,24 @@ fun ClipVideo(
                         }
                     }
                 },
+                update = { view -> view.show(zoom) },
             )
-            if (showBoxes) DetectionTrackReader.at(frames, position)?.let { BoxOverlay(it) }
+            if (showBoxes) DetectionTrackReader.at(frames, position)?.let { BoxOverlay(it, viewport) }
+            PictureGestures(viewport, onViewport, Modifier.fillMaxSize())
         }
     }
+}
+
+/** Scale, then move [viewport]'s window so its top-left sits on the view's origin. */
+private fun TextureView.show(viewport: Viewport) {
+    val w = width
+    val h = height
+    if (w == 0 || h == 0) return
+    val window = viewport.visible()
+    setTransform(Matrix().apply {
+        setScale(viewport.scale, viewport.scale)
+        postTranslate(-window.left * viewport.scale * w, -window.top * viewport.scale * h)
+    })
 }
 
 /** MediaPlayer's states, kept in one place so a file, a surface and a seek can arrive in any order. */
@@ -221,17 +244,23 @@ private class PlayerHolder {
 private const val POSITION_POLL_MS = 100L
 
 @Composable
-private fun BoxOverlay(frame: DetectionFrame) {
+private fun BoxOverlay(frame: DetectionFrame, viewport: Viewport) {
     val labelStyle = Ethan.type.monoSmall
     val measurer = rememberTextMeasurer()
-    Canvas(Modifier.fillMaxSize()) {
+    Canvas(Modifier.fillMaxSize().clipToBounds()) {
+        val window = viewport.visible()
+        val spanX = window.right - window.left
+        val spanY = window.bottom - window.top
         frame.boxesList.forEach { box ->
-            val left = box.left * size.width
-            val top = box.top * size.height
+            val left = (box.left - window.left) / spanX * size.width
+            val top = (box.top - window.top) / spanY * size.height
+            val right = (box.right - window.left) / spanX * size.width
+            val bottom = (box.bottom - window.top) / spanY * size.height
+            if (right <= 0f || bottom <= 0f || left >= size.width || top >= size.height) return@forEach
             drawRect(
                 color = BoxColor,
                 topLeft = Offset(left, top),
-                size = Size((box.right - box.left) * size.width, (box.bottom - box.top) * size.height),
+                size = Size(right - left, bottom - top),
                 style = Stroke(width = 3f),
             )
             drawText(
