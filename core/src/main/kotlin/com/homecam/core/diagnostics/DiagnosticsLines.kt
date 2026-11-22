@@ -68,6 +68,15 @@ object DiagnosticsLines {
         "extra" to extra,
     ))
 
+    /** [prefetch] is true when the download was started ahead of playback, even if playback later joined it. */
+    fun clipFetch(ts: Long, run: String, clipId: String, bytes: Long, ms: Long, prefetch: Boolean): String =
+        line(ts, run, "clip_fetch", listOf(
+            "clip_id" to clipId,
+            "bytes" to bytes,
+            "ms" to ms,
+            "prefetch" to prefetch,
+        ))
+
     fun liveStats(ts: Long, run: String, fields: List<Pair<String, Any>>): String =
         line(ts, run, "live_stats", fields)
 

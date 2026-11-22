@@ -37,6 +37,10 @@ class ViewerDiagnostics(
         )
     }
 
+    fun clipFetch(clipId: String, bytes: Long, ms: Long, prefetch: Boolean) {
+        log.append(DiagnosticsLines.clipFetch(System.currentTimeMillis(), run, clipId, bytes, ms, prefetch))
+    }
+
     fun liveStats(fields: List<Pair<String, Any>>) {
         log.append(DiagnosticsLines.liveStats(System.currentTimeMillis(), run, fields))
     }

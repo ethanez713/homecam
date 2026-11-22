@@ -63,6 +63,10 @@ import com.homecam.proto.Clip
 import com.homecam.proto.SettingsSnapshot
 import com.homecam.proto.Viewer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
@@ -526,6 +530,11 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                 var downloading by remember(open) { mutableStateOf<String?>(null) }
                 var downloadProgress by remember(open) { mutableStateOf<com.homecam.core.media.DownloadProgress?>(null) }
                 var speed by remember { mutableFloatStateOf(1f) }
+                val transfers = remember(open) { ClipTransfers(scope) }
+                val arrived = remember(open) { java.util.concurrent.ConcurrentHashMap<String, Long>() }
+                val waiting = remember(open) { WaitingClip() }
+                var playSerial by remember(open) { mutableIntStateOf(0) }
+                DisposableEffect(transfers) { onDispose { transfers.cancelPrefetch() } }
 
                 val nearCeiling = clipHistory?.let { list ->
                     settings?.let { s ->
@@ -536,16 +545,20 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                     }
                 } ?: false
 
-                suspend fun fetch(session: ViewerSession, clip: com.homecam.proto.Clip): java.io.File {
+                suspend fun fetch(session: ViewerSession, clip: com.homecam.proto.Clip, prefetch: Boolean): java.io.File {
                     val file = java.io.File(context.cacheDir, "clips/${clip.id}.mp4")
                     val cached = file.isFile && file.length() > 0L &&
                         (clip.sizeBytes <= 0L || file.length() == clip.sizeBytes)
                     if (cached) return file
                     file.delete()
                     val part = java.io.File(file.parentFile, "${file.name}.part")
+                    val started = System.nanoTime()
                     try {
                         session.link.downloadClip(clip.id, part) { received ->
-                            downloadProgress = com.homecam.core.media.DownloadProgress(received, clip.sizeBytes)
+                            arrived[clip.id] = received
+                            if (waiting.id == clip.id) {
+                                downloadProgress = com.homecam.core.media.DownloadProgress(received, clip.sizeBytes)
+                            }
                         }
                         if (clip.sizeBytes > 0L && part.length() != clip.sizeBytes) {
                             throw java.io.IOException(
@@ -553,13 +566,27 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                             )
                         }
                         if (!part.renameTo(file)) throw java.io.IOException("could not store clip ${clip.id}")
+                        graph.viewerDiagnostics.clipFetch(
+                            clip.id,
+                            file.length(),
+                            (System.nanoTime() - started) / 1_000_000L,
+                            prefetch,
+                        )
                         return file
                     } catch (e: Throwable) {
                         part.delete()
                         throw e
                     } finally {
-                        downloadProgress = null
+                        arrived.remove(clip.id)
+                        if (waiting.id == clip.id) downloadProgress = null
                     }
+                }
+
+                fun showProgress(clip: com.homecam.proto.Clip) {
+                    waiting.id = clip.id
+                    downloading = clip.id
+                    val got = arrived[clip.id]
+                    downloadProgress = got?.let { com.homecam.core.media.DownloadProgress(it, clip.sizeBytes) }
                 }
 
                 ClipsScreen(
@@ -575,27 +602,61 @@ fun CameraScreen(node: ViewerNode, camera: CameraEntity, onExit: () -> Unit, ope
                     showBoxes = settings?.boundingBoxOverlay ?: true,
                     loadThumbnail = open?.let { s -> { id -> s.link.thumbnail(id) } },
                     pinnedNearCeiling = nearCeiling,
-                    onPlay = { clip ->
+                    onPlay = play@{ clip ->
                         if (playingId == clip.id) playing = null
-                        edit(scope, open, say) {
-                            downloading = clip.id
-                            runCatching { fetch(it, clip) }.onSuccess { file -> playing = file; playingId = clip.id }
-                            downloading = null
+                        val session = open ?: return@play say("Not connected to the camera. Nothing was changed.")
+                        val serial = ++playSerial
+                        scope.launch {
+                            showProgress(clip)
+                            try {
+                                val file = transfers.forPlay(clip.id) { fetch(session, clip, prefetch = false) }
+                                if (serial == playSerial) {
+                                    playing = file
+                                    playingId = clip.id
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                            } finally {
+                                if (serial == playSerial && waiting.id == clip.id) {
+                                    waiting.id = null
+                                    downloading = null
+                                    downloadProgress = null
+                                }
+                            }
                         }
+                    },
+                    onPrefetch = prefetch@{ clip ->
+                        val session = open ?: return@prefetch
+                        // A seek that has not started playing still reports the old clip's next one.
+                        val waitingFor = waiting.id
+                        if (waitingFor != null && waitingFor != playingId) return@prefetch
+                        transfers.prefetch(clip.id) { fetch(session, clip, prefetch = true) }
                     },
                     onClipUnplayable = { id, fileBytes, expectedBytes, what, extra ->
                         graph.viewerDiagnostics.clipUnplayable(id, fileBytes, expectedBytes, what, extra)
                     },
                     onExport = { chosen ->
-                        edit(scope, open, say) {
-                            chosen.forEach { clip ->
-                                downloading = clip.id
-                                runCatching { fetch(it, clip) }.onSuccess { file ->
-                                    com.homecam.app.viewer.ClipExport.toGallery(context, file, "homecam-${clip.id}.mp4")
+                        edit(scope, open, say) { session ->
+                            try {
+                                chosen.forEach { clip ->
+                                    showProgress(clip)
+                                    try {
+                                        val file = transfers.forExport(clip.id) { fetch(session, clip, prefetch = false) }
+                                        com.homecam.app.viewer.ClipExport.toGallery(context, file, "homecam-${clip.id}.mp4")
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (_: Exception) {
+                                    }
+                                }
+                                say(if (chosen.size == 1) "Saved to the gallery." else "Saved ${chosen.size} clips to the gallery.")
+                            } finally {
+                                if (chosen.any { it.id == waiting.id }) {
+                                    waiting.id = null
+                                    downloading = null
+                                    downloadProgress = null
                                 }
                             }
-                            downloading = null
-                            say(if (chosen.size == 1) "Saved to the gallery." else "Saved ${chosen.size} clips to the gallery.")
                         }
                     },
                     onPin = { clip ->
@@ -770,8 +831,12 @@ private fun edit(
 ) {
     val open = session ?: return say("Not connected to the camera. Nothing was changed.")
     scope.launch {
-        runCatching { block(open) }.onFailure {
-            Log.w(TAG, "camera request failed", it)
+        try {
+            block(open)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "camera request failed", e)
             say("The camera did not answer. Nothing was changed.")
         }
     }
@@ -780,6 +845,97 @@ private fun edit(
 private const val TOAST_MS = 2_800L
 private const val STATUS_REFRESH_MS = 20_000L
 private const val PRIVACY_STATUS_REFRESH_MS = 2_000L
+
+/** The clip whose download the spinner follows. A prefetch leaves it unset until a play or export joins. */
+private class WaitingClip {
+    @Volatile var id: String? = null
+}
+
+private class ClipTransfer(
+    val result: CompletableDeferred<java.io.File>,
+    val job: Job,
+)
+
+/**
+ * One download per clip id. At most one of them is a prefetch: a play of any other clip
+ * cancels it (and its `.part`), and a play of the same clip waits on the download already running.
+ */
+private class ClipTransfers(private val scope: kotlinx.coroutines.CoroutineScope) {
+    private val inFlight = java.util.concurrent.ConcurrentHashMap<String, ClipTransfer>()
+    @Volatile private var prefetchJob: Job? = null
+    @Volatile private var prefetchId: String? = null
+
+    fun cancelPrefetch() {
+        val job = prefetchJob ?: return
+        prefetchJob = null
+        prefetchId = null
+        job.cancel()
+    }
+
+    fun prefetch(clipId: String, download: suspend () -> java.io.File) {
+        val existing = inFlight[clipId]
+        if (existing != null && existing.job.isActive) return
+        if (prefetchId != null && prefetchId != clipId) cancelPrefetch()
+        start(clipId, prefetch = true, download)
+    }
+
+    suspend fun forPlay(clipId: String, download: suspend () -> java.io.File): java.io.File {
+        if (prefetchId != null && prefetchId != clipId) cancelPrefetch()
+        return await(clipId, prefetch = false, download)
+    }
+
+    /** Joins a download already running for this clip and does not cancel a prefetch of another. */
+    suspend fun forExport(clipId: String, download: suspend () -> java.io.File): java.io.File =
+        await(clipId, prefetch = false, download)
+
+    private suspend fun await(
+        clipId: String,
+        prefetch: Boolean,
+        download: suspend () -> java.io.File,
+    ): java.io.File {
+        val existing = inFlight[clipId]
+        if (existing != null && existing.job.isActive) return existing.result.await()
+        return start(clipId, prefetch, download).result.await()
+    }
+
+    private fun start(clipId: String, prefetch: Boolean, download: suspend () -> java.io.File): ClipTransfer {
+        val previous = inFlight[clipId]
+        val result = CompletableDeferred<java.io.File>()
+        val job = scope.async(start = CoroutineStart.LAZY) {
+            try {
+                previous?.job?.join()
+                result.complete(download())
+            } catch (e: CancellationException) {
+                result.cancel(e)
+                throw e
+            } catch (e: Exception) {
+                result.completeExceptionally(e)
+                if (prefetch) Log.w(TAG, "clip prefetch $clipId", e)
+            }
+        }
+        val transfer = ClipTransfer(result, job)
+        inFlight[clipId] = transfer
+        if (prefetch) {
+            prefetchId = clipId
+            prefetchJob = job
+        }
+        job.invokeOnCompletion { cause ->
+            if (!result.isCompleted) {
+                when (cause) {
+                    is CancellationException -> result.cancel(cause)
+                    null -> result.completeExceptionally(IllegalStateException("clip download ended without a file"))
+                    else -> result.completeExceptionally(cause)
+                }
+            }
+            if (inFlight.remove(clipId, transfer) && prefetchJob === job) {
+                prefetchJob = null
+                prefetchId = null
+            }
+        }
+        job.start()
+        return transfer
+    }
+}
 
 /**
  * Off the home network the remote address is the only way to the camera, and the Settings

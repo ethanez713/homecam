@@ -82,6 +82,25 @@ class DiagnosticsLineTest {
     }
 
     @Test
+    fun `a fetched clip records its size, how long it took, and whether it was prefetched`() {
+        assertEquals(
+            """{"ts":5,"run":"ab12cd34","event":"clip_fetch","clip_id":"clip-a","bytes":12,"ms":40,"prefetch":true}""",
+            DiagnosticsLines.clipFetch(
+                ts = 5,
+                run = "ab12cd34",
+                clipId = "clip-a",
+                bytes = 12,
+                ms = 40,
+                prefetch = true,
+            ),
+        )
+        assertEquals(
+            """{"ts":6,"run":"ab12cd34","event":"clip_fetch","clip_id":"clip-b","bytes":99,"ms":0,"prefetch":false}""",
+            DiagnosticsLines.clipFetch(6, "ab12cd34", "clip-b", bytes = 99, ms = 0, prefetch = false),
+        )
+    }
+
+    @Test
     fun `stream drop and reconnect carry only the backoff`() {
         assertEquals(
             """{"ts":5,"run":"ab12cd34","event":"stream_drop","backoff_ms":4000}""",

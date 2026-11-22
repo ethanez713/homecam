@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -113,6 +114,8 @@ fun ClipsScreen(
     downloadProgress: DownloadProgress? = null,
     onClipUnplayable: (id: String, fileBytes: Long, expectedBytes: Long, what: Int, extra: Int) -> Unit =
         { _, _, _, _, _ -> },
+    /** The clip playback will step into, asked for when the one actually playing changes. */
+    onPrefetch: (Clip) -> Unit = {},
     speed: Float = 1f,
     onSpeed: (Float) -> Unit = {},
 ) {
@@ -141,6 +144,13 @@ fun ClipsScreen(
     var chosenClipId by remember(openAtMs) { mutableStateOf<String?>(null) }
 
     val playingClip = timeline.clips.firstOrNull { it.id == playingId }
+    // One ahead of the clip actually playing, and only while playback is wanted.
+    val nextClip = if (wantPlaying) playingClip?.let(timeline::continuationOf) else null
+    val prefetchClip = rememberUpdatedState(onPrefetch)
+    LaunchedEffect(nextClip?.id) {
+        val clip = nextClip ?: return@LaunchedEffect
+        prefetchClip.value(clip)
+    }
 
     /** Moves to an instant and plays from it; in a gap it only moves, and says so. */
     fun goTo(timeMs: Long, play: Boolean = true, preferred: Clip? = null) {
