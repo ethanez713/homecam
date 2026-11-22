@@ -95,8 +95,10 @@ fun ClipVideo(
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
         val wide = aspect > maxWidth.value / maxHeight.value
         Box(
-            if (wide) Modifier.fillMaxWidth().aspectRatio(aspect)
-            else Modifier.fillMaxHeight().aspectRatio(aspect, matchHeightConstraintsFirst = true),
+            // A TextureView draws its transformed picture past its own bounds, and Compose does
+            // not clip an AndroidView, so a zoomed clip would cover the controls around it.
+            (if (wide) Modifier.fillMaxWidth().aspectRatio(aspect)
+            else Modifier.fillMaxHeight().aspectRatio(aspect, matchHeightConstraintsFirst = true)).clipToBounds(),
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
