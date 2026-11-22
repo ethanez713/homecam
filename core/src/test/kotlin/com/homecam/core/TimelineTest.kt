@@ -91,6 +91,19 @@ class TimelineTest {
     }
 
     @Test
+    fun `opening a clip starts at its first detection, or its beginning when it has none`() {
+        val placed = Timeline(
+            timeline.clips,
+            listOf(EventSpan("b", "person", 200_000, 203_000), EventSpan("b", "person", 150_000, 156_000)),
+        )
+
+        assertEquals(150_000L, placed.openingPointOf(placed.clips.first { it.id == "b" }))
+        assertEquals(0L, placed.openingPointOf(placed.clips.first { it.id == "a" }))
+        // A labelled clip with no placed span is marked whole, so it opens at its start.
+        assertEquals(600_000L, placed.openingPointOf(placed.clips.first { it.id == "c" }))
+    }
+
+    @Test
     fun `ruler marks get coarser as the view zooms out and never crowd`() {
         val close = TickSteps.forScale(msPerDp = 2_000f)
         val far = TickSteps.forScale(msPerDp = 200_000f)

@@ -27,6 +27,14 @@ class Timeline(clips: List<Clip>, spans: List<EventSpan> = emptyList()) {
     /** The clip recorded at [timeMs], or null in a gap. */
     fun clipAt(timeMs: Long): Clip? = clips.lastOrNull { it.startedAtMs <= timeMs }?.takeIf { timeMs < it.endMs }
 
+    /**
+     * Where opening [clip] should start: its first detection, or its beginning when nothing
+     * was detected in it. A span that began in an earlier clip is not this clip's detection.
+     */
+    fun openingPointOf(clip: Clip): Long =
+        events.firstOrNull { it.clipId == clip.id && it.startMs >= clip.startedAtMs && it.startMs < clip.endMs }?.startMs
+            ?: clip.startedAtMs
+
     /** The first clip beginning at or after [timeMs]: where playback resumes after a gap. */
     fun firstClipFrom(timeMs: Long): Clip? = clips.firstOrNull { it.startedAtMs >= timeMs }
 

@@ -265,7 +265,7 @@ fun ClipsScreen(
             projectedDays = projectedDays,
             pinnedNearCeiling = pinnedNearCeiling,
             loadThumbnail = loadThumbnail,
-            onOpen = { goTo(it.startedAtMs, preferred = it) },
+            onOpen = { goTo(timeline.openingPointOf(it), preferred = it) },
             onPin = onPin,
             onDelete = onDelete,
             onExport = onExport,
